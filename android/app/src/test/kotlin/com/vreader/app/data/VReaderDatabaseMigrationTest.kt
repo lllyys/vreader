@@ -463,4 +463,236 @@ class VReaderDatabaseMigrationTest {
             context.deleteDatabase(isoDbName)
         }
     }
+
+    /**
+     * Feature #135 WI-3 — the FULL migration chain 1→…→8 through [VReaderDatabase.ALL_MIGRATIONS]: a
+     * v1 file opens as v8 (Room's structural PRAGMA validation passes, so MIGRATION_7_8's DDL — the
+     * new composite UNIQUE index on `bookmarks (bookKey, profileKey)` — matches the generated v8
+     * schema exactly), the seeded book/position survive, and the new unique index is enforced: an
+     * insert-if-absent of a second bookmark at the SAME (bookKey, profileKey) is rejected (IGNOREd),
+     * collapsing to one row.
+     */
+    @Test
+    fun migrate1To8_throughAllMigrations_addsBookmarkUniqueIndex_andEnforcesIt() {
+        seedVersion1Database()
+
+        val db = Room.databaseBuilder(context, VReaderDatabase::class.java, dbName)
+            .addMigrations(*VReaderDatabase.ALL_MIGRATIONS)
+            .build()
+        try {
+            assertNotNull("book survived 1→8", runBlocking { db.bookDao().find(key) })
+            assertNotNull("position survived 1→8", runBlocking { db.readingPositionDao().find(key) })
+
+            runBlocking {
+                val dao = db.annotationDao()
+                val b1 = BookmarkEntity(
+                    bookmarkId = "b1", bookKey = key, profileKey = "$key:pos1",
+                    title = "Chapter 1", locatorJSON = "{}", createdAt = 1L, updatedAt = 1L,
+                )
+                // A second bookmark at the SAME (bookKey, profileKey) but a different id → rejected
+                // by the new unique index (insert-if-absent returns -1), collapsing to one row.
+                val b2 = b1.copy(bookmarkId = "b2", title = "Chapter 1 (again)", updatedAt = 2L)
+                assertTrue("first insert-if-absent applied", dao.insertBookmarkIfAbsent(b1) != -1L)
+                assertEquals("second insert at same (bookKey, profileKey) rejected", -1L, dao.insertBookmarkIfAbsent(b2))
+                assertEquals("unique index collapsed to one row", 1, dao.bookmarksForBook(key).size)
+                assertEquals("the surviving row is the first", "b1", dao.bookmarksForBook(key).single().bookmarkId)
+            }
+        } finally {
+            db.close()
+        }
+    }
+
+    /**
+     * Feature #135 WI-3 — MIGRATION_7_8 in ISOLATION against an AUTHENTIC v7 database that already
+     * holds DUPLICATE bookmarks at the same (bookKey, profileKey) (rows created before the unique
+     * index existed). The migration must DEDUPE the duplicate losers BEFORE creating the unique index
+     * (else CREATE UNIQUE INDEX would fail on the pre-existing duplicate), keeping a DETERMINISTIC
+     * winner (highest updatedAt, then highest createdAt, then lowest bookmarkId). Asserts: (a) the
+     * winner survives + the losers are deleted, (b) a NON-duplicate bookmark at a different profileKey
+     * is untouched, (c) other tables' data (the seeded book) is preserved, (d) the unique index now
+     * rejects a subsequent duplicate insert.
+     */
+    @Test
+    fun migrate7To8_inIsolation_dedupesDuplicateBookmarks_thenEnforcesUniqueIndex() {
+        val isoDbName = "iso-7-to-8.db"
+        context.deleteDatabase(isoDbName)
+        try {
+            // Build the v7 `books` + `bookmarks` shape directly (v7 bookmarks has ONLY the non-unique
+            // bookKey index — the state before this migration adds the composite unique index).
+            val v7Callback = object : SupportSQLiteOpenHelper.Callback(7) {
+                override fun onCreate(db: SupportSQLiteDatabase) {
+                    db.execSQL(
+                        "CREATE TABLE IF NOT EXISTS `books` (`fingerprintKey` TEXT NOT NULL, " +
+                            "`title` TEXT NOT NULL, `originalFormat` TEXT NOT NULL, `contentSHA256` TEXT NOT NULL, " +
+                            "`fileByteCount` INTEGER NOT NULL, `localFilePath` TEXT, `sourceUri` TEXT, " +
+                            "`addedAt` INTEGER NOT NULL, `lastOpenedAt` INTEGER, `author` TEXT, " +
+                            "PRIMARY KEY(`fingerprintKey`))",
+                    )
+                    db.execSQL(
+                        "CREATE TABLE IF NOT EXISTS `bookmarks` (`bookmarkId` TEXT NOT NULL, " +
+                            "`bookKey` TEXT NOT NULL, `profileKey` TEXT NOT NULL, `title` TEXT, " +
+                            "`locatorJSON` TEXT NOT NULL, `createdAt` INTEGER NOT NULL, " +
+                            "`updatedAt` INTEGER NOT NULL, PRIMARY KEY(`bookmarkId`), " +
+                            "FOREIGN KEY(`bookKey`) REFERENCES `books`(`fingerprintKey`) " +
+                            "ON UPDATE NO ACTION ON DELETE CASCADE )",
+                    )
+                    db.execSQL("CREATE INDEX IF NOT EXISTS `index_bookmarks_bookKey` ON `bookmarks` (`bookKey`)")
+                }
+                override fun onUpgrade(db: SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+            }
+            FrameworkSQLiteOpenHelperFactory().create(
+                SupportSQLiteOpenHelper.Configuration.builder(context).name(isoDbName).callback(v7Callback).build(),
+            ).writableDatabase.use { db ->
+                db.execSQL(
+                    "INSERT INTO books (fingerprintKey, title, originalFormat, contentSHA256, fileByteCount, " +
+                        "localFilePath, sourceUri, addedAt, lastOpenedAt, author) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                    arrayOf<Any?>("bk", "Book", "epub", "a".repeat(64), 100L, "/p", null, 1L, null, "Author"),
+                )
+                // THREE bookmarks at the SAME (bookKey='bk', profileKey='bk:posA') — duplicates that a
+                // pre-index create path could produce. The winner is the highest (updatedAt, createdAt),
+                // tie-broken by the LOWEST bookmarkId. Here 'dup-c' has updatedAt=30 → winner.
+                db.execSQL(
+                    "INSERT INTO bookmarks (bookmarkId, bookKey, profileKey, title, locatorJSON, createdAt, updatedAt) " +
+                        "VALUES ('dup-a','bk','bk:posA','A', '{}', 5, 10)",
+                )
+                db.execSQL(
+                    "INSERT INTO bookmarks (bookmarkId, bookKey, profileKey, title, locatorJSON, createdAt, updatedAt) " +
+                        "VALUES ('dup-b','bk','bk:posA','B', '{}', 8, 20)",
+                )
+                db.execSQL(
+                    "INSERT INTO bookmarks (bookmarkId, bookKey, profileKey, title, locatorJSON, createdAt, updatedAt) " +
+                        "VALUES ('dup-c','bk','bk:posA','C', '{}', 3, 30)",
+                )
+                // A distinct (different profileKey) bookmark that must be left untouched.
+                db.execSQL(
+                    "INSERT INTO bookmarks (bookmarkId, bookKey, profileKey, title, locatorJSON, createdAt, updatedAt) " +
+                        "VALUES ('solo','bk','bk:posB','Solo', '{}', 1, 1)",
+                )
+            }
+
+            // Apply ONLY MIGRATION_7_8 through a raw helper whose onUpgrade runs the real migration.
+            val migrateCallback = object : SupportSQLiteOpenHelper.Callback(8) {
+                override fun onCreate(db: SupportSQLiteDatabase) = Unit  // never — the file already exists at v7
+                override fun onUpgrade(db: SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) {
+                    assertEquals(7, oldVersion)
+                    assertEquals(8, newVersion)
+                    VReaderDatabase.MIGRATION_7_8.migrate(db)
+                }
+            }
+            FrameworkSQLiteOpenHelperFactory().create(
+                SupportSQLiteOpenHelper.Configuration.builder(context).name(isoDbName).callback(migrateCallback).build(),
+            ).writableDatabase.use { db ->
+                // (a) the deterministic winner ('dup-c', highest updatedAt) survives; the losers are gone.
+                db.query("SELECT bookmarkId FROM bookmarks WHERE profileKey = 'bk:posA'").use { c ->
+                    assertTrue("exactly one duplicate survived", c.moveToFirst())
+                    assertEquals("the deterministic winner survived", "dup-c", c.getString(0))
+                    assertTrue("no other duplicate row remains", !c.moveToNext())
+                }
+                // (b) the distinct non-duplicate bookmark is untouched.
+                db.query("SELECT bookmarkId FROM bookmarks WHERE profileKey = 'bk:posB'").use { c ->
+                    assertTrue(c.moveToFirst())
+                    assertEquals("solo", c.getString(0))
+                }
+                // (c) other tables' data preserved (the seeded book still exists).
+                db.query("SELECT title FROM books WHERE fingerprintKey = 'bk'").use { c ->
+                    assertTrue(c.moveToFirst())
+                    assertEquals("Book", c.getString(0))
+                }
+                // (d) the new unique index rejects a subsequent duplicate insert.
+                var threw = false
+                try {
+                    db.execSQL(
+                        "INSERT INTO bookmarks (bookmarkId, bookKey, profileKey, title, locatorJSON, createdAt, updatedAt) " +
+                            "VALUES ('new-dup','bk','bk:posA','New', '{}', 99, 99)",
+                    )
+                } catch (e: android.database.sqlite.SQLiteConstraintException) {
+                    threw = true
+                }
+                assertTrue("the new unique index rejects a duplicate (bookKey, profileKey) insert", threw)
+            }
+        } finally {
+            context.deleteDatabase(isoDbName)
+        }
+    }
+
+    /**
+     * Feature #135 WI-3 — MIGRATION_7_8 in ISOLATION on a CLEAN v7 database (no duplicates): the
+     * migration succeeds (the dedupe DELETE is a harmless no-op) and the unique index is created +
+     * enforced. Guards against a dedupe SQL that accidentally deletes non-duplicate rows.
+     */
+    @Test
+    fun migrate7To8_inIsolation_noDuplicates_succeeds_andCreatesUniqueIndex() {
+        val isoDbName = "iso-7-to-8-clean.db"
+        context.deleteDatabase(isoDbName)
+        try {
+            val v7Callback = object : SupportSQLiteOpenHelper.Callback(7) {
+                override fun onCreate(db: SupportSQLiteDatabase) {
+                    db.execSQL(
+                        "CREATE TABLE IF NOT EXISTS `books` (`fingerprintKey` TEXT NOT NULL, " +
+                            "`title` TEXT NOT NULL, `originalFormat` TEXT NOT NULL, `contentSHA256` TEXT NOT NULL, " +
+                            "`fileByteCount` INTEGER NOT NULL, `localFilePath` TEXT, `sourceUri` TEXT, " +
+                            "`addedAt` INTEGER NOT NULL, `lastOpenedAt` INTEGER, `author` TEXT, " +
+                            "PRIMARY KEY(`fingerprintKey`))",
+                    )
+                    db.execSQL(
+                        "CREATE TABLE IF NOT EXISTS `bookmarks` (`bookmarkId` TEXT NOT NULL, " +
+                            "`bookKey` TEXT NOT NULL, `profileKey` TEXT NOT NULL, `title` TEXT, " +
+                            "`locatorJSON` TEXT NOT NULL, `createdAt` INTEGER NOT NULL, " +
+                            "`updatedAt` INTEGER NOT NULL, PRIMARY KEY(`bookmarkId`), " +
+                            "FOREIGN KEY(`bookKey`) REFERENCES `books`(`fingerprintKey`) " +
+                            "ON UPDATE NO ACTION ON DELETE CASCADE )",
+                    )
+                    db.execSQL("CREATE INDEX IF NOT EXISTS `index_bookmarks_bookKey` ON `bookmarks` (`bookKey`)")
+                }
+                override fun onUpgrade(db: SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+            }
+            FrameworkSQLiteOpenHelperFactory().create(
+                SupportSQLiteOpenHelper.Configuration.builder(context).name(isoDbName).callback(v7Callback).build(),
+            ).writableDatabase.use { db ->
+                db.execSQL(
+                    "INSERT INTO books (fingerprintKey, title, originalFormat, contentSHA256, fileByteCount, " +
+                        "localFilePath, sourceUri, addedAt, lastOpenedAt, author) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                    arrayOf<Any?>("bk", "Book", "epub", "a".repeat(64), 100L, "/p", null, 1L, null, "Author"),
+                )
+                // Two DISTINCT bookmarks (different profileKeys) — no duplicates.
+                db.execSQL(
+                    "INSERT INTO bookmarks (bookmarkId, bookKey, profileKey, title, locatorJSON, createdAt, updatedAt) " +
+                        "VALUES ('one','bk','bk:posA','One', '{}', 1, 1)",
+                )
+                db.execSQL(
+                    "INSERT INTO bookmarks (bookmarkId, bookKey, profileKey, title, locatorJSON, createdAt, updatedAt) " +
+                        "VALUES ('two','bk','bk:posB','Two', '{}', 2, 2)",
+                )
+            }
+
+            val migrateCallback = object : SupportSQLiteOpenHelper.Callback(8) {
+                override fun onCreate(db: SupportSQLiteDatabase) = Unit
+                override fun onUpgrade(db: SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) {
+                    VReaderDatabase.MIGRATION_7_8.migrate(db)
+                }
+            }
+            FrameworkSQLiteOpenHelperFactory().create(
+                SupportSQLiteOpenHelper.Configuration.builder(context).name(isoDbName).callback(migrateCallback).build(),
+            ).writableDatabase.use { db ->
+                // Both distinct rows survive (the dedupe deleted nothing).
+                db.query("SELECT COUNT(*) FROM bookmarks").use { c ->
+                    assertTrue(c.moveToFirst())
+                    assertEquals("both distinct bookmarks survive a clean migration", 2, c.getInt(0))
+                }
+                // The unique index exists + is enforced.
+                var threw = false
+                try {
+                    db.execSQL(
+                        "INSERT INTO bookmarks (bookmarkId, bookKey, profileKey, title, locatorJSON, createdAt, updatedAt) " +
+                            "VALUES ('dup','bk','bk:posA','Dup', '{}', 9, 9)",
+                    )
+                } catch (e: android.database.sqlite.SQLiteConstraintException) {
+                    threw = true
+                }
+                assertTrue("the unique index rejects a duplicate after a clean migration", threw)
+            }
+        } finally {
+            context.deleteDatabase(isoDbName)
+        }
+    }
 }

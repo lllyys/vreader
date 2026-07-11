@@ -1,11 +1,13 @@
 // Purpose: Room database + schema-versioned migration scaffold — feature #106 WI-3.
-// Version 7 is the current schema; v1 was the initial books+positions baseline and
+// Version 8 is the current schema; v1 was the initial books+positions baseline and
 // MIGRATION_1_2 is the worked example of the additive-migration pattern (adds
 // books.lastOpenedAt). Subsequent additive migrations: 2→3 daily_reading (#122),
 // 3→4 annotations (#123), 4→5 collections (#127), 5→6 books.author (#128 search),
 // 6→7 the FTS search index (search_sections + search_sections_fts + search_index_state
-// + search_sections_staging, all #128 WI-4). The migration round-trip test
-// (VReaderDatabaseMigrationTest) guards them. Future schema changes append a
+// + search_sections_staging, all #128 WI-4), 7→8 the composite UNIQUE (bookKey, profileKey)
+// index on `bookmarks` — preceded by an in-migration dedupe of pre-existing duplicate rows so
+// the unique index can't fail on a legacy duplicate (feature #135 WI-3). The migration round-trip
+// test (VReaderDatabaseMigrationTest) guards them. Future schema changes append a
 // Migration(n, n+1) to ALL_MIGRATIONS and bump `version`.
 package com.vreader.app.data
 
@@ -24,7 +26,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         SearchSectionEntity::class, SearchSectionFtsEntity::class,
         SearchIndexStateEntity::class, SearchStagingEntity::class,
     ],
-    version = 7,
+    version = 8,
     exportSchema = true,
 )
 abstract class VReaderDatabase : RoomDatabase() {
@@ -180,9 +182,50 @@ abstract class VReaderDatabase : RoomDatabase() {
             }
         }
 
+        /** v7 → v8: feature #135 WI-3 — make re-bookmarking the same position idempotent by adding a
+         *  composite UNIQUE index on `bookmarks (bookKey, profileKey)` (the atomic-toggle enforcer,
+         *  mirroring the highlights `(profileKey, anchorKey)` dedupe precedent).
+         *
+         *  A pre-#135 create path (`upsertBookmark`, UUID-keyed) could have produced DUPLICATE rows at
+         *  the same `(bookKey, profileKey)`; `CREATE UNIQUE INDEX` would FAIL on such a duplicate. So
+         *  the migration first DEDUPES — deleting every duplicate LOSER, keeping a DETERMINISTIC winner
+         *  per `(bookKey, profileKey)`: the row with the greatest `updatedAt`, tie-broken by the
+         *  greatest `createdAt`, then the LOWEST `bookmarkId` (a total, stable order). This is a
+         *  targeted dedupe — a non-duplicate row (unique `(bookKey, profileKey)`) is never deleted, and
+         *  no other table is touched. THEN the unique index is created, matching Room's generated name
+         *  + columns (`index_bookmarks_bookKey_profileKey` on `(bookKey, profileKey)`) exactly, so
+         *  Room's structural PRAGMA validation passes. DDL is idempotent (`IF NOT EXISTS`). */
+        val MIGRATION_7_8: Migration = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // 1) Dedupe: delete every row that is NOT the deterministic winner within its
+                //    (bookKey, profileKey) group. The winner is the row whose (updatedAt, createdAt,
+                //    -rowid-preference-on-bookmarkId) is greatest — expressed as: a row is a loser iff
+                //    another row in the same group ranks strictly higher by (updatedAt DESC,
+                //    createdAt DESC, bookmarkId ASC).
+                db.execSQL(
+                    "DELETE FROM `bookmarks` WHERE `bookmarkId` IN (" +
+                        "SELECT b.`bookmarkId` FROM `bookmarks` b JOIN `bookmarks` w " +
+                        "ON b.`bookKey` = w.`bookKey` AND b.`profileKey` = w.`profileKey` " +
+                        "AND b.`bookmarkId` <> w.`bookmarkId` " +
+                        "WHERE (w.`updatedAt` > b.`updatedAt`) " +
+                        "OR (w.`updatedAt` = b.`updatedAt` AND w.`createdAt` > b.`createdAt`) " +
+                        "OR (w.`updatedAt` = b.`updatedAt` AND w.`createdAt` = b.`createdAt` " +
+                        "AND w.`bookmarkId` < b.`bookmarkId`))",
+                )
+                // 2) Now that each (bookKey, profileKey) is unique, create the unique index.
+                db.execSQL(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS `index_bookmarks_bookKey_profileKey` " +
+                        "ON `bookmarks` (`bookKey`, `profileKey`)",
+                )
+            }
+        }
+
         /** All registered migrations, oldest first. Append future Migration(n,n+1) here. */
         val ALL_MIGRATIONS: Array<Migration> =
-            arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
+            arrayOf(
+                MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5,
+                MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8,
+            )
 
         /** The production on-disk database (app-private storage). */
         fun build(context: Context): VReaderDatabase =

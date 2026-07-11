@@ -145,8 +145,14 @@ data class AnnotationNoteEntity(
 )
 
 /**
- * A bookmark — feature #123 (schema only; the create/list UI is item F, which owns the reader
- * chrome entry). Mirrors the iOS `Bookmark` @Model. `title` is the optional user/chapter label.
+ * A bookmark — feature #123 (schema) + #135 (create/toggle/list). Mirrors the iOS `Bookmark` @Model.
+ * `title` is the optional user/chapter label. The composite UNIQUE `(bookKey, profileKey)` index
+ * (feature #135 WI-3) makes re-bookmarking the SAME position idempotent — the atomic toggle's
+ * enforcer (`AnnotationDao.toggleBookmark` reuses `insertBookmarkIfAbsent` on this index, mirroring
+ * the highlights `(profileKey, anchorKey)` dedupe precedent). `profileKey =
+ * "$bookKey:${sha256(locator.canonicalJson())}"` already encodes the book; `bookKey` leads the index
+ * so per-book presence/delete lookups (`isBookmarked`/`deleteBookmarkByProfile`) hit the index and
+ * bug #356-style corrupt keys can't collide across books.
  */
 @Entity(
     tableName = "bookmarks",
@@ -158,7 +164,7 @@ data class AnnotationNoteEntity(
             onDelete = ForeignKey.CASCADE,
         ),
     ],
-    indices = [Index("bookKey")],
+    indices = [Index("bookKey"), Index(value = ["bookKey", "profileKey"], unique = true)],
 )
 data class BookmarkEntity(
     @PrimaryKey val bookmarkId: String,

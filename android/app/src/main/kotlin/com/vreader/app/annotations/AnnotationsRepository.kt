@@ -13,6 +13,10 @@ import vreader.contracts.Locator
 import vreader.contracts.backup.BackupAnnotationsEnvelope
 import vreader.contracts.backup.BackupJson
 
+/** The outcome of an atomic bookmark toggle (feature #135 WI-3): a create-or-remove decided by the
+ *  presence of a bookmark at the same `(bookKey, profileKey)` — the top-bar toggle's semantics. */
+enum class BookmarkToggleResult { Added, Removed }
+
 class AnnotationsRepository(
     private val dao: AnnotationDao,
     private val now: () -> Long = { System.currentTimeMillis() },
@@ -93,6 +97,31 @@ class AnnotationsRepository(
     }
 
     suspend fun removeBookmark(id: String) = dao.deleteBookmark(id)
+
+    /**
+     * Atomic bookmark toggle at `locator`'s position (feature #135 WI-3 — the top-bar toggle's
+     * create/remove). Builds the entity via [BookmarkRecord.toEntity] (which derives the `profileKey`)
+     * and delegates to the DAO's `@Transaction` toggle on the unique `(bookKey, profileKey)` index: no
+     * bookmark there yet → `Added`; one already there → `Removed`. A toggle intentionally ALTERNATES
+     * state — two serialized calls Add then Remove (they do not converge). The unique index guarantees
+     * at most ONE row per position, so a concurrent repeat CREATE never produces a duplicate; whether
+     * a rapid double-tap should leave a bookmark is a UI tap-coalescing concern (WI-5), not this seam.
+     */
+    suspend fun toggleBookmark(bookKey: String, title: String?, locator: Locator): BookmarkToggleResult {
+        requireSameBook(bookKey, locator)
+        val t = now()
+        val record = BookmarkRecord(
+            id = newAnnotationId(), bookKey = bookKey, title = title,
+            locator = locator, createdAt = t, updatedAt = t,
+        )
+        return dao.toggleBookmark(record.toEntity())
+    }
+
+    /** Is the given position bookmarked? (the top-bar toggle's filled/empty state). */
+    suspend fun isBookmarked(bookKey: String, locator: Locator): Boolean {
+        requireSameBook(bookKey, locator)
+        return dao.isBookmarked(bookKey, profileKeyFor(bookKey, locator)) > 0
+    }
 
     suspend fun highlightCount(bookKey: String): Int = dao.highlightCount(bookKey)
 
