@@ -166,10 +166,11 @@ class Azw3BookmarkNavTest {
         scope.launch { replacement.run(restore = null, pendingGoTo = carried) }
         val loaded = awaitLoaded(replacement)
         withContext(Dispatchers.Main) { dying.destroy() }
-        // The replacement must actually reach book-ready — only then does its book-ready hook re-issue the
-        // carried bookmark jump (asserting takePendingGoTo()==null on a never-loaded document would be
-        // vacuous, since the target is cleared BEFORE the reissue launches).
-        assertTrue("the replacement document reached book-ready (the reissue path ran)", loaded)
+        // The replacement must actually reach book-ready — that is the branch that re-issues the carried
+        // bookmark jump. Asserting takePendingGoTo()==null on a NEVER-loaded document would be vacuous (the
+        // target would just still be held), so the load itself is the precondition for the cleared-target
+        // assertion below to mean anything.
+        assertTrue("the replacement document reached book-ready (where the carried jump is re-issued)", loaded)
         // After book-ready re-issued the carried bookmark jump, the replacement's held target is cleared
         // (exactly once — a second render-death would not loop it).
         assertEquals(null, withContext(Dispatchers.Main) { replacement.takePendingGoTo() })

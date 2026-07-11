@@ -119,14 +119,13 @@ class BookmarkBackupRestoreJumpTest {
             assertNull(repo.findBook(book.fingerprintKey))
             assertTrue("bookmarks wiped before restore", annotations.allBookmarks().isEmpty())
 
-            // List → pick OUR backup deterministically (the one we just wrote is `latest`; a reused live
-            // server may hold older archives, so never "first with books>=1") → selectively restore.
+            // List → pick OUR backup deterministically. We wrote it LAST, and `listBackups()` marks its
+            // newest (first-parsed) entry `latest`, so `latest && books>=1` IS ours — no first-with-books
+            // fallback (that could select an unrelated older archive on a reused live server).
             val list = service.listBackups("srv")
             assertTrue("listBackups ok: $list", list is BackupListResult.Ok)
-            val backups = (list as BackupListResult.Ok).backups
-            val summary = backups.firstOrNull { it.latest && it.books >= 1 }
-                ?: backups.firstOrNull { it.books >= 1 }
-            assertNotNull("the backup we just wrote (latest) exists", summary)
+            val summary = (list as BackupListResult.Ok).backups.firstOrNull { it.latest && it.books >= 1 }
+            assertNotNull("the backup we just wrote (the latest with our book) exists", summary)
             restoreExpectingSuccess(service, summary!!.id, setOf(book.fingerprintKey))
 
             // (1) restored under the ORIGINAL UUID with its canonical position intact.
