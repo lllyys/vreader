@@ -1,8 +1,10 @@
 ---
 title: Module — automation and tooling
 updated: 2026-07-10
-status: verified
+status: stale
 ---
+
+**Stale.** verification evidence drifted; re-run the compile/verify pass.
 
 # Module — automation and tooling
 

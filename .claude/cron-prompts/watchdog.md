@@ -59,6 +59,23 @@ WATCHDOG: keep every session-only cron alive past the 7-day auto-expire AND swee
    Do NOT kill a healthy idle Gradle daemon or a booted emulator (resident by
    design — `sweep-ghosts.sh` already excludes them).
 
+8. **Canon staleness sweep (rule 56).** If a `canon/` bureau workspace exists,
+   re-hash the verified dossiers' evidence against the live code and demote any
+   page whose CODE evidence drifted (tracker churn is advisory only, never a
+   demotion):
+
+   ```bash
+   [ -f canon/_verify.json ] && scripts/canon-staleness.sh --apply
+   ```
+
+   `CANON-STALENESS RESULT: STALE <n>` means `<n>` verified pages were demoted
+   to `stale` because the code they document changed since the last compile —
+   that is expected drift, not an error; it queues those pages for the next
+   `bureau:compile`/verify pass. `CLEAN` (possibly with an advisory count) means
+   no code drift. Never demote `canonical` (human-owned) — the script already
+   refuses. This is detection + demotion only; do NOT re-verify or rewrite
+   dossiers from the watchdog (that is a deliberate compile pass, not a sweep).
+
 ## Part 3 — Outcome
 
 8. Outcome:

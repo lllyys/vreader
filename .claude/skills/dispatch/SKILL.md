@@ -113,6 +113,16 @@ the interest of brevity.
    (probe: "Skill exists but is not enabled in this context") — artifact
    committed on the branch, ≤3 rounds then blocked. Long logs go to
    `<worktree>/.reports/` and travel as PATHS in the HANDOFF.
+6. **Canon orientation** (rule 56 — read-routing, not read-forcing): run
+   `scripts/canon-owner.sh <the lane's writes: prefixes>` and add each
+   returned dossier path to the brief's inputs as READ-ONLY orientation —
+   "read this dossier for cross-module context and known edge cases before
+   editing; it is `verified`/`proposed` (not human-approved `canonical`), so
+   reconfirm anything load-bearing against the live code."
+   A lane NEVER edits canon — it is an orchestrator-owned surface like the
+   trackers. A lane that finds a documented claim wrong or stale says so in the HANDOFF
+   `notes`, and the orchestrator routes that to the next capture → compile
+   pass — it does not edit the dossier from the lane.
 
 Spawn a full wave in ONE message (both Agent calls together at width 2).
 
