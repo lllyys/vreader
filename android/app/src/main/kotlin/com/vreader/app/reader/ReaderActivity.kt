@@ -1,9 +1,21 @@
 // Purpose: EPUB reader host — feature #106 WI-9 (#1745). Hosts Readium's
 // EpubNavigatorFragment in scroll mode (Spike-B-verified), opening the stored EPUB
 // via the WI-5 BookOpener and saving/restoring the reading position through the
-// WI-6 ReadiumLocatorBridge + ResumeResolver → Room. Minimal chrome (back + title)
-// — the foundation-bar subset of dev-docs/designs/.../vreader-reader.jsx; the rich
-// reader controls (TOC/AI/highlights/settings) are Phase-3 features.
+// WI-6 ReadiumLocatorBridge + ResumeResolver → Room.
+//
+// feature #132 WI-7-EPUB: the full reader nav chrome. The EPUB host is the outlier (a Readium
+// EpubNavigatorFragment View under the chrome, not a Compose body) and the ONLY TOC-supplying host, so it
+// cannot reuse the Compose-native ReaderChromeScaffold. Instead ReaderActivity owns a persistent
+// MutableStateFlow<ReaderChromeModel> (title + flattened TOC via ReadiumTocProvider + currentTocIndex +
+// the Notes snapshot), fed as the async open completes and on every position change (tocIndexFor maps the
+// live Readium locator to the nearest TOC entry). Three ComposeViews over the fragment's FrameLayout — a
+// top band, a bottom band, and an open-only full-screen sheet layer (EpubReaderChrome.kt) — collect the
+// model. The top/bottom bands cover only the chrome regions so the fragment underneath keeps scroll /
+// selection / link input (touch-through); the sheet layer renders nothing until a sheet opens. Contents
+// onJump → navigator.go(entry.epubReadiumLocator):Boolean (dismiss on success, stay-open on false, no
+// invented error surface). Notes → the review sheet with jump-to-annotation null (EPUB review-only until
+// #135). The #129 Display settings, the selection popover, highlight decorations, position save, and the
+// publication close are all preserved.
 package com.vreader.app.reader
 
 import android.content.ClipData
@@ -17,16 +29,16 @@ import android.view.Menu
 import android.view.MenuItem
 import android.view.View
 import android.widget.FrameLayout
-import android.widget.LinearLayout
-import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -36,6 +48,7 @@ import androidx.lifecycle.withStarted
 import com.vreader.app.VReaderApp
 import com.vreader.app.annotations.AnnotationColor
 import com.vreader.app.annotations.AnnotationsRepository
+import com.vreader.app.annotations.AnnotationsSnapshot
 import com.vreader.app.annotations.EpubAnnotationMapper
 import com.vreader.app.annotations.PopoverMode
 import com.vreader.app.annotations.SelectionPopover
@@ -43,6 +56,11 @@ import com.vreader.app.annotations.SelectionPopoverActions
 import com.vreader.app.annotations.SelectionPopoverViewModel
 import com.vreader.app.data.Book
 import com.vreader.app.data.LibraryRepository
+import com.vreader.app.reader.chrome.ReaderChromeState
+import com.vreader.app.reader.chrome.ReaderSheet
+import com.vreader.app.reader.nav.ReadiumTocProvider
+import com.vreader.app.reader.settings.ReaderTheme
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
@@ -69,7 +87,21 @@ class ReaderActivity : AppCompatActivity() {
     private var navigator: EpubNavigatorFragment? = null
     private var publication: Publication? = null   // host-owned; closed in onDestroy
     private var book: Book? = null
-    private lateinit var titleView: TextView
+
+    // feature #132 WI-7-EPUB — the persistent chrome model the top/bottom bands + sheet layer collect,
+    // populated as the async open completes and updated on every position change. The active Display
+    // theme (also read by the chrome bands' colors) is mirrored so the ComposeViews can render immediately.
+    private val chromeModel = MutableStateFlow(ReaderChromeModel())
+    private val chromeTheme = mutableStateOf(ReaderTheme.Paper)
+    // The hoisted top/bottom-visibility + open-sheet state (a Compose snapshot state, so the ComposeViews
+    // recompose on change). Kept in-memory for the reader's lifetime (rotation always starts fresh — see
+    // onCreate's super.onCreate(null)).
+    private val chromeState = mutableStateOf(ReaderChromeState())
+    // feature #129 — whether the Display settings sheet is open (opened from the bottom band's Aa slot).
+    private val showDisplaySheet = mutableStateOf(false)
+    // feature #132 WI-7-EPUB — the live reading fraction (0..1) for the bottom band's progress scrubber,
+    // read from the navigator's currentLocator totalProgression (EPUB scroll mode).
+    private val chromeProgress = mutableStateOf(0f)
 
     // feature #123 — in-reader highlighting
     private var highlightController: ReaderHighlightController? = null
@@ -90,11 +122,18 @@ class ReaderActivity : AppCompatActivity() {
         if (key == null) { finish(); return }
         setContentView(buildChrome())
 
+        // feature #132 WI-7-EPUB — the chrome band colors follow the user's stored Display theme (open-time
+        // value + live updates), mirroring how observeDisplaySettings feeds the navigator.
+        lifecycleScope.launch {
+            container.readerSettingsStore.settings.collect { chromeTheme.value = it.theme }
+        }
+
         lifecycleScope.launch {
             val loaded = repository.findBook(key)
             if (loaded?.localFilePath == null) { finish(); return@launch }
             book = loaded
-            titleView.text = loaded.title
+            // Seed the chrome model title immediately (TOC + annotations arrive once the publication opens).
+            chromeModel.value = chromeModel.value.copy(title = loaded.title)
 
             val pub = try {
                 BookOpener(this@ReaderActivity).open(File(loaded.localFilePath!!))
@@ -135,10 +174,45 @@ class ReaderActivity : AppCompatActivity() {
             val controller = ReaderHighlightController(nav)
             highlightController = controller
             repository.markOpened(key, System.currentTimeMillis())
+            // feature #132 WI-7-EPUB — build the chrome model once the publication is open: the flattened
+            // TOC (each entry retaining its native Readium locator for the jump), the Notes snapshot, and
+            // the initial highlighted-chapter index for the current reading position.
+            populateChromeModel(pub, loaded, nav)
             observePosition(nav, loaded)
             observeDisplaySettings(nav)
             observeHighlights(loaded, controller)
+            observeAnnotationsSnapshot(loaded)
             controller.observeActivations { id, rect -> onHighlightTapped(id, rect) }
+        }
+    }
+
+    /** feature #132 WI-7-EPUB — populate the persistent chrome model after open: title + flattened TOC
+     *  (ReadiumTocProvider) + the Notes snapshot + the initial currentTocIndex. Failures are tolerated (a
+     *  book with no/broken TOC still renders the chrome with an empty Contents control). */
+    private suspend fun populateChromeModel(pub: Publication, current: Book, nav: EpubNavigatorFragment) {
+        val entries = runCatching { ReadiumTocProvider(pub, current).toc() }.getOrDefault(emptyList())
+        val snapshot = runCatching { annotations.annotationsForBook(current.fingerprintKey) }
+            .getOrDefault(AnnotationsSnapshot(emptyList(), emptyList()))
+        val locator = nav.currentLocator.value
+        val index = tocIndexFor(locator.href.toString(), locator.locations.progression, tocPositions(entries))
+        chromeModel.value = chromeModel.value.copy(
+            title = current.title,
+            tocEntries = entries,
+            annotations = snapshot,
+            currentTocIndex = index,
+        )
+    }
+
+    /** feature #132 WI-7-EPUB — reload the Notes snapshot whenever this book's stored highlights change (a
+     *  fresh highlight/edit/remove), so a newly added annotation appears in the review sheet without a
+     *  reopen. Notes are review-only for EPUB (no jump-to-annotation) until #135. */
+    private fun observeAnnotationsSnapshot(current: Book) {
+        lifecycleScope.launch {
+            annotations.highlights(current.fingerprintKey).collect {
+                val snapshot = runCatching { annotations.annotationsForBook(current.fingerprintKey) }
+                    .getOrDefault(AnnotationsSnapshot(emptyList(), emptyList()))
+                chromeModel.value = chromeModel.value.copy(annotations = snapshot)
+            }
         }
     }
 
@@ -306,13 +380,25 @@ class ReaderActivity : AppCompatActivity() {
         }
     }
 
-    /** Save the current Readium position as a VReaderLocator envelope (debounced steady-state). */
+    /** Save the current Readium position as a VReaderLocator envelope (debounced steady-state) AND keep the
+     *  chrome model's highlighted-chapter index in sync as the reader scrolls (prompt, un-debounced — the
+     *  Contents-sheet highlight should track the live position, and tocIndexFor is a cheap pure map). */
     private fun observePosition(nav: EpubNavigatorFragment, current: Book) {
         lifecycleScope.launch {
             nav.currentLocator
                 .drop(1)            // skip the initial emission
                 .debounce(1_000)
                 .collect { locator -> persist(locator, current) }
+        }
+        lifecycleScope.launch {
+            nav.currentLocator.collect { locator ->
+                val model = chromeModel.value
+                val index = tocIndexFor(locator.href.toString(), locator.locations.progression, tocPositions(model.tocEntries))
+                if (index != model.currentTocIndex) {
+                    chromeModel.value = chromeModel.value.copy(currentTocIndex = index)
+                }
+                chromeProgress.value = (locator.locations.totalProgression ?: 0.0).toFloat().coerceIn(0f, 1f)
+            }
         }
     }
 
@@ -328,47 +414,124 @@ class ReaderActivity : AppCompatActivity() {
         repository.savePosition(envelope, System.currentTimeMillis())
     }
 
-    /** Minimal reader chrome — a back affordance + the book title over the navigator. */
+    /** feature #132 WI-7-EPUB — the full reader nav chrome over the Readium fragment. Because the reader
+     *  body is a View (EpubNavigatorFragment), NOT a composable, the chrome cannot use the Compose-native
+     *  ReaderChromeScaffold. Instead a single root FrameLayout stacks, bottom-to-top:
+     *    1. the fragment container — MATCH_PARENT (the reading area fills the WHOLE screen, under the bands);
+     *    2. the selection-popover overlay — MATCH_PARENT (unchanged; renders nothing unless a selection);
+     *    3. the sheet layer — MATCH_PARENT but EMPTY until a sheet opens (so it's touch-through: the
+     *       fragment keeps scroll/selection/link input whenever no sheet is up), then a full-screen dismiss
+     *       overlay + the Contents/Notes ModalBottomSheet;
+     *    4. the top band — WRAP_CONTENT, gravity TOP (covers only the top chrome strip);
+     *    5. the bottom band — WRAP_CONTENT, gravity BOTTOM (covers only the bottom chrome strip).
+     *  The two bands sit ON TOP of the fragment but occupy only their own height, so the reading area
+     *  between them stays the fragment's — touch-through by construction. */
     private fun buildChrome(): View {
-        val ink = 0xFF1D1A14.toInt()
-        val bg = 0xFFF7F4EE.toInt()
-        val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(bg) }
-
-        val bar = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(8), dp(10), dp(16), dp(10))
-            setBackgroundColor(bg)
-        }
-        val back = TextView(this).apply {
-            text = "‹"
-            textSize = 28f
-            setTextColor(ink)
-            setPadding(dp(12), 0, dp(12), 0)
-            setOnClickListener { finish() }
-        }
-        titleView = TextView(this).apply {
-            textSize = 16f
-            setTextColor(ink)
-            maxLines = 1
-            setPadding(dp(8), 0, 0, 0)
-        }
-        bar.addView(back)
-        bar.addView(titleView)
+        val root = FrameLayout(this).apply { setBackgroundColor(chromeTheme.value.background.toArgb()) }
 
         val frame = FrameLayout(this).apply { id = View.generateViewId() }
         containerId = frame.id
 
-        // the navigator fragment + the floating selection-popover overlay share a stack.
         val popoverOverlay = ComposeView(this).apply { setContent { PopoverOverlay() } }
-        val readerStack = FrameLayout(this).apply {
-            addView(frame, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
-            addView(popoverOverlay, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+        val sheetLayer = ComposeView(this).apply {
+            setContent {
+                EpubReaderSheets(
+                    model = chromeModel,
+                    theme = chromeTheme.value,
+                    chromeState = chromeState,
+                    onJumpToc = ::jumpToTocEntry,
+                    onShareAnnotations = { shareAnnotations(chromeModel.value.annotations) },
+                )
+            }
+        }
+        val topBand = ComposeView(this).apply {
+            setContent { EpubTopBand(model = chromeModel, theme = chromeTheme.value, onBack = { finish() }) }
+        }
+        val bottomBand = ComposeView(this).apply {
+            setContent {
+                DisplaySettingsHost {
+                    EpubBottomBand(
+                        model = chromeModel,
+                        theme = chromeTheme.value,
+                        chromeState = chromeState,
+                        progress = chromeProgress.value,
+                        onScrub = ::scrubTo,
+                        onOpenDisplay = { showDisplaySheet.value = true },
+                    )
+                }
+            }
         }
 
-        root.addView(bar, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
-        root.addView(readerStack, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
+        val match = FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)
+        root.addView(frame, FrameLayout.LayoutParams(match))
+        root.addView(popoverOverlay, FrameLayout.LayoutParams(match))
+        root.addView(sheetLayer, FrameLayout.LayoutParams(match))
+        root.addView(
+            topBand,
+            FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT).apply { gravity = Gravity.TOP },
+        )
+        root.addView(
+            bottomBand,
+            FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT).apply { gravity = Gravity.BOTTOM },
+        )
         return root
+    }
+
+    /** The Contents TOC jump — feed the tapped entry's RETAINED native Readium locator straight to
+     *  `navigator.go` (zero reconstruction). Returns Readium's Boolean success so the Contents sheet
+     *  dismisses on success and stays open on a false/stale jump (rule 51 §nav-error-presentation, no
+     *  invented error surface). An out-of-range index or a missing native locator → false (stay open). */
+    private fun jumpToTocEntry(index: Int): Boolean {
+        val nav = navigator ?: return false
+        val entry = chromeModel.value.tocEntries.getOrNull(index) ?: return false
+        val native = entry.epubReadiumLocator ?: return false
+        return runCatching { nav.go(native) }.getOrDefault(false)
+    }
+
+    /** The bottom band's progress scrubber → seek. Maps the 0..1 fraction to a Readium locator on the
+     *  current href and navigates there. A tolerated no-op when the navigator/publication isn't ready. */
+    private fun scrubTo(fraction: Float) {
+        val nav = navigator ?: return
+        val current = nav.currentLocator.value
+        val target = current.copyWithLocations(
+            progression = fraction.toDouble().coerceIn(0.0, 1.0),
+            totalProgression = fraction.toDouble().coerceIn(0.0, 1.0),
+        )
+        runCatching { nav.go(target) }
+    }
+
+    /** feature #132 WI-7-EPUB — the Notes review sheet's sheet-level Share (the design's
+     *  `AnnotationsSheet trailing={<Share/>}`): share ALL reviewed annotations as one plain-text blob via
+     *  ACTION_SEND. Reuses the shared [annotationsShareText] formatter (highlights then standalone notes);
+     *  a no-op when nothing is saved. */
+    private fun shareAnnotations(snapshot: AnnotationsSnapshot) {
+        val text = annotationsShareText(snapshot)
+        if (text.isBlank()) return
+        val send = Intent(Intent.ACTION_SEND).apply { type = "text/plain"; putExtra(Intent.EXTRA_TEXT, text) }
+        startActivity(Intent.createChooser(send, null))
+    }
+
+    /** Host the #129 Display settings sheet inside the bottom band's Compose tree so the Aa slot can open
+     *  it. The sheet renders over the band; its setters persist on the process scope (surviving dismissal). */
+    @androidx.compose.runtime.Composable
+    private fun DisplaySettingsHost(content: @androidx.compose.runtime.Composable () -> Unit) {
+        content()
+        val show by showDisplaySheet
+        if (show) {
+            val settings = container.readerSettingsStore.settings.collectAsStateWithLifecycle(initialValue = null).value
+            if (settings != null) {
+                val store = container.readerSettingsStore
+                com.vreader.app.reader.settings.ReaderSettingsSheet(
+                    settings = settings,
+                    onTheme = { v -> val o = store.nextSeq(); container.appScope.launch { store.setTheme(v, o) } },
+                    onFontFamily = { v -> val o = store.nextSeq(); container.appScope.launch { store.setFontFamily(v, o) } },
+                    onFontSize = { v -> val o = store.nextSeq(); container.appScope.launch { store.setFontSize(v, o) } },
+                    onLineSpacing = { v -> val o = store.nextSeq(); container.appScope.launch { store.setLineSpacing(v, o) } },
+                    onMargin = { v -> val o = store.nextSeq(); container.appScope.launch { store.setMargin(v, o) } },
+                    onDismiss = { showDisplaySheet.value = false },
+                )
+            }
+        }
     }
 
     /** The floating selection popover, positioned near the selection's anchor with a viewport clamp
@@ -420,11 +583,33 @@ class ReaderActivity : AppCompatActivity() {
         }
     }
 
-    private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
-
     /** Test hook: the current reading href, or null until the navigator has rendered. */
     @androidx.annotation.VisibleForTesting
     fun currentHref(): String? = navigator?.currentLocator?.value?.href?.toString()
+
+    // feature #132 WI-7-EPUB test hooks — assert the chrome model + jump behavior against the live host
+    // without driving Compose gestures (the live Compose render + tap ride WI-9 acceptance).
+    /** The current chrome model (title/TOC/index/annotations) the bands collect. */
+    @androidx.annotation.VisibleForTesting
+    fun chromeModelSnapshot(): ReaderChromeModel = chromeModel.value
+
+    /** The currently open reader sheet (None/Toc/Notes) — proves open/dismiss + touch-through posture. */
+    @androidx.annotation.VisibleForTesting
+    fun openSheet(): ReaderChromeState = chromeState.value
+
+    /** Open the Contents sheet programmatically (the live Compose tap on the toolbar rides WI-9). */
+    @androidx.annotation.VisibleForTesting
+    fun openContentsForTest() { chromeState.value = chromeState.value.copy(sheet = ReaderSheet.Toc) }
+
+    /** Open the Notes sheet programmatically. */
+    @androidx.annotation.VisibleForTesting
+    fun openNotesForTest() { chromeState.value = chromeState.value.copy(sheet = ReaderSheet.Notes) }
+
+    /** Perform a TOC jump by index through the SAME seam the Contents sheet uses; returns Readium's
+     *  Boolean (dismiss-on-success is the sheet's contract). Lets a connected test assert the native jump
+     *  changed `currentHref` on true, and — with an out-of-range index — that a false leaves the sheet open. */
+    @androidx.annotation.VisibleForTesting
+    fun jumpToTocEntryForTest(index: Int): Boolean = jumpToTocEntry(index)
 
     /** Test hook (feature #129 WI-5): the background ARGB the live navigator has *accepted/computed*
      *  for its EpubSettings (the applied theme background), or null before the navigator/settings exist.
