@@ -15,7 +15,6 @@
 package com.vreader.app.search
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
@@ -161,8 +160,14 @@ fun InBookSearchSheetContent(
             InBookSearchContent.Indexing -> InBookIndexingHint(theme)
             InBookSearchContent.NoResults -> InBookNoResults(theme, query)
             InBookSearchContent.Idle -> RecentsBody(theme, state.recents, onPickRecent)
-            is InBookSearchContent.Error -> Unit
+            // Loading (transient, between debounced query settle and the results/no-results resolution),
+            // Error (a rare backend failure), and Unsupported (the host hides the Search entry entirely for
+            // these) render NO distinct body: the design's SearchSheet depicts no Loading/Error surface, and
+            // the sibling library `SearchScreen` likewise suppresses rather than invent one (rule 51 — no
+            // self-designed state). The field stays live so the user can keep typing; a new query supersedes
+            // the transient/failed state.
             InBookSearchContent.Loading -> Unit
+            is InBookSearchContent.Error -> Unit
             InBookSearchContent.Unsupported -> Unit
         }
     }
@@ -193,69 +198,62 @@ private fun SearchField(
         runCatching { focusRequester.requestFocus() }
     }
 
+    // The design's single rounded pill: search glyph · input · clear · Cancel, all inside one container
+    // (vreader-search.jsx lines 55-79) — no invented accent border.
     Row(
         Modifier
             .fillMaxWidth()
-            .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 8.dp),
+            .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 8.dp)
+            .clip(shape)
+            .background(fieldFill)
+            .padding(horizontal = 14.dp, vertical = 10.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Row(
-            Modifier
+        Icon(Icons.Filled.Search, contentDescription = null, tint = sub, modifier = Modifier.size(18.dp))
+        BasicTextField(
+            value = query,
+            onValueChange = onQueryChange,
+            modifier = Modifier
                 .weight(1f)
-                .height(42.dp)
-                .clip(shape)
-                .background(fieldFill)
-                .then(if (hasQuery) Modifier.border(1.5.dp, theme.accent, shape) else Modifier)
-                .padding(horizontal = 13.dp),
-            horizontalArrangement = Arrangement.spacedBy(9.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(Icons.Filled.Search, contentDescription = null, tint = sub, modifier = Modifier.size(18.dp))
-            BasicTextField(
-                value = query,
-                onValueChange = onQueryChange,
+                .focusRequester(focusRequester)
+                .focusable()
+                .testTag("inbook-search-field")
+                .semantics { contentDescription = "Search this book" },
+            singleLine = true,
+            textStyle = TextStyle(color = ink, fontFamily = VReaderFonts.Sans, fontSize = 15.sp),
+            cursorBrush = SolidColor(theme.accent),
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+            decorationBox = { inner ->
+                if (!hasQuery) {
+                    Text(
+                        "Search $bookTitle",
+                        color = sub,
+                        fontFamily = VReaderFonts.Sans,
+                        fontSize = 15.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                inner()
+            },
+        )
+        if (hasQuery) {
+            Icon(
+                Icons.Filled.Close,
+                contentDescription = "Clear search",
+                tint = sub,
                 modifier = Modifier
-                    .weight(1f)
-                    .focusRequester(focusRequester)
-                    .focusable()
-                    .testTag("inbook-search-field")
-                    .semantics { contentDescription = "Search this book" },
-                singleLine = true,
-                textStyle = TextStyle(color = ink, fontFamily = VReaderFonts.Sans, fontSize = 15.sp),
-                cursorBrush = SolidColor(theme.accent),
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                decorationBox = { inner ->
-                    if (!hasQuery) {
-                        Text(
-                            "Search $bookTitle",
-                            color = sub,
-                            fontFamily = VReaderFonts.Sans,
-                            fontSize = 15.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                    inner()
-                },
+                    .size(16.dp)
+                    .clickable { onQueryChange("") }
+                    .testTag("inbook-search-clear"),
             )
-            if (hasQuery) {
-                Icon(
-                    Icons.Filled.Close,
-                    contentDescription = "Clear search",
-                    tint = sub,
-                    modifier = Modifier
-                        .size(16.dp)
-                        .clickable { onQueryChange("") }
-                        .testTag("inbook-search-clear"),
-                )
-            }
         }
         Text(
             "Cancel",
             modifier = Modifier
                 .clickable(onClick = onDismiss)
-                .padding(vertical = 6.dp)
+                .padding(start = 6.dp)
                 .testTag("inbook-search-cancel")
                 .semantics { contentDescription = "Cancel search" },
             color = theme.accent,
@@ -285,6 +283,10 @@ private fun ResultsBody(
     val listState = rememberLazyListState()
     val lastGroupIndex = groups.lastIndex
 
+    val matchCount = remember(groups) { groups.sumOf { it.hits.size } }
+    // A group's hits are wrapped in the design's tinted rounded container.
+    val containerFill = theme.ink.copy(alpha = if (theme.isDark) 0.03f else 0.02f)
+
     // Append-on-scroll: fire onLoadMore once each time the tail group becomes the last-visible item AND more
     // pages are available. Keyed on (moreAvailable, lastGroupIndex) so a new page resets the trigger;
     // `distinctUntilChanged` collapses the burst of layout emissions into one fire per tail; `filter { it }`
@@ -292,10 +294,8 @@ private fun ResultsBody(
     LaunchedEffect(results.moreAvailable, lastGroupIndex, listState) {
         if (!results.moreAvailable || lastGroupIndex < 0) return@LaunchedEffect
         snapshotFlow {
-            val lastKey = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.key
-            // The tail is reached once the last group's header (or any of its hits) is the last laid-out item.
-            lastKey is String &&
-                (lastKey == "header-$lastGroupIndex" || lastKey.startsWith("hit-$lastGroupIndex-"))
+            // The tail is reached once the last group's container is the last laid-out item.
+            listState.layoutInfo.visibleItemsInfo.lastOrNull()?.key == "group-$lastGroupIndex"
         }
             .distinctUntilChanged()
             .filter { it }
@@ -309,22 +309,36 @@ private fun ResultsBody(
             .heightIn(max = 560.dp)
             .padding(horizontal = 12.dp, vertical = 8.dp)
             .testTag("inbook-results"),
-        verticalArrangement = Arrangement.spacedBy(2.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
+        // The design's overall summary line above the groups.
+        item(key = "summary") {
+            InBookResultsSummary(theme = theme, matchCount = matchCount, chapterCount = groups.size)
+        }
         groups.forEachIndexed { gi, group ->
-            item(key = "header-$gi") {
-                InBookGroupHeader(theme = theme, group = group, groupIndex = gi)
-            }
-            group.hits.forEachIndexed { hi, hit ->
-                item(key = "hit-$gi-$hi") {
-                    InBookHitRow(
-                        theme = theme,
-                        hit = hit,
-                        groupIndex = gi,
-                        hitIndex = hi,
-                        // Dismiss-on-success: dismiss ONLY when the jump reports Succeeded.
-                        onClick = { if (onJump(hit) == JumpResult.Succeeded) onDismiss() },
-                    )
+            // One LazyColumn item per group (header + its tinted-container of hit rows), so the append-on-
+            // scroll trigger can key on the tail group container `group-$lastGroupIndex`.
+            item(key = "group-$gi") {
+                Column(Modifier.fillMaxWidth()) {
+                    InBookGroupHeader(theme = theme, group = group, groupIndex = gi)
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(containerFill),
+                    ) {
+                        group.hits.forEachIndexed { hi, hit ->
+                            InBookHitRow(
+                                theme = theme,
+                                hit = hit,
+                                groupIndex = gi,
+                                hitIndex = hi,
+                                showTopSeparator = hi > 0,
+                                // Dismiss-on-success: dismiss ONLY when the jump reports Succeeded.
+                                onClick = { if (onJump(hit) == JumpResult.Succeeded) onDismiss() },
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -354,7 +368,13 @@ private fun RecentsBody(theme: ReaderTheme, recents: List<String>, onPickRecent:
             fontWeight = FontWeight.SemiBold,
         )
         recents.forEachIndexed { index, text ->
-            InBookRecentRow(theme = theme, text = text, index = index, onPick = onPickRecent)
+            InBookRecentRow(
+                theme = theme,
+                text = text,
+                index = index,
+                showBottomSeparator = index < recents.lastIndex,
+                onPick = onPickRecent,
+            )
         }
     }
 }

@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -45,6 +46,28 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vreader.app.reader.settings.ReaderTheme
 import com.vreader.app.ui.theme.VReaderFonts
+
+/**
+ * The design's overall results summary line above the groups: "N matches in M chapters" (the design's
+ * `{results.length} matches in {…} chapters`). Rendered in the muted sub color. testTag
+ * `inbook-results-summary`.
+ */
+@Composable
+fun InBookResultsSummary(theme: ReaderTheme, matchCount: Int, chapterCount: Int) {
+    val sub = theme.ink.copy(alpha = 0.55f)
+    val matches = if (matchCount == 1) "1 match" else "$matchCount matches"
+    val chapters = if (chapterCount == 1) "1 chapter" else "$chapterCount chapters"
+    Text(
+        "$matches in $chapters",
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 4.dp, vertical = 6.dp)
+            .testTag("inbook-results-summary"),
+        color = sub,
+        fontFamily = VReaderFonts.Sans,
+        fontSize = 12.sp,
+    )
+}
 
 /**
  * A group header for [group] at [groupIndex]: the serif chapter title (the design's group name; a null
@@ -90,8 +113,10 @@ fun InBookGroupHeader(theme: ReaderTheme, group: InBookGroup, groupIndex: Int) {
 /**
  * One hit row for [hit] at ([groupIndex], [hitIndex]). Renders the snippet with the matched sub-spans BOLD
  * (the design's `SnippetText` **bold** term, projected from [InBookHit.matchRanges] — inclusive
- * `IntRange`s — instead of `**` markers) in the theme accent, plus a trailing chevron. Tapping calls
- * [onClick]. testTag `inbook-result-$groupIndex-$hitIndex`; the row is a ≥48dp tap target.
+ * `IntRange`s — instead of `**` markers) in the theme accent, plus a trailing chevron. When [showTopSeparator]
+ * the design's 0.5px hairline is drawn above the row (rows after the first within a group's tinted
+ * container — the design's `borderTop: i===0 ? 'none' : 0.5px`). Tapping calls [onClick]. testTag
+ * `inbook-result-$groupIndex-$hitIndex`; the row is a ≥48dp tap target.
  */
 @Composable
 fun InBookHitRow(
@@ -99,55 +124,71 @@ fun InBookHitRow(
     hit: InBookHit,
     groupIndex: Int,
     hitIndex: Int,
+    showTopSeparator: Boolean,
     onClick: () -> Unit,
 ) {
     val ink = theme.ink
     val sub = ink.copy(alpha = 0.55f)
     val annotated = boldedSnippet(hit.snippet, hit.matchRanges, theme.accent)
 
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
-            .clickable { onClick() }
-            .heightIn(min = 48.dp)
-            .padding(horizontal = 12.dp, vertical = 12.dp)
-            .testTag("inbook-result-$groupIndex-$hitIndex")
-            .semantics { contentDescription = "Search result: ${hit.snippet}" },
-        verticalAlignment = Alignment.Top,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        Text(
-            annotated,
-            modifier = Modifier.weight(1f),
-            color = ink,
-            fontFamily = VReaderFonts.Serif,
-            fontSize = 13.5.sp,
-            maxLines = 3,
-            overflow = TextOverflow.Ellipsis,
-        )
-        Icon(
-            Icons.AutoMirrored.Filled.KeyboardArrowRight,
-            contentDescription = null,
-            tint = sub,
-            modifier = Modifier.size(16.dp),
-        )
+    Column(Modifier.fillMaxWidth()) {
+        if (showTopSeparator) {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(0.5.dp)
+                    .background(ink.copy(alpha = 0.08f)),
+            )
+        }
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clickable { onClick() }
+                .heightIn(min = 48.dp)
+                .padding(horizontal = 12.dp, vertical = 12.dp)
+                .testTag("inbook-result-$groupIndex-$hitIndex")
+                .semantics { contentDescription = "Search result: ${hit.snippet}" },
+            verticalAlignment = Alignment.Top,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text(
+                annotated,
+                modifier = Modifier.weight(1f),
+                color = ink,
+                fontFamily = VReaderFonts.Serif,
+                fontSize = 13.5.sp,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Icon(
+                Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = sub,
+                modifier = Modifier.size(16.dp),
+            )
+        }
     }
 }
 
 /**
  * The snippet as an [AnnotatedString] with each range in [matchRanges] (inclusive UTF-16 `IntRange`s, per
- * `SnippetBuilder`) rendered bold + [accent]-colored. Ranges are clamped to the snippet bounds and
- * out-of-order/overlapping ranges are tolerated (a defensive belt — the matcher emits non-overlapping
- * start-ordered ranges, but a corrupt range never crashes or mis-slices a surrogate).
+ * `SnippetBuilder`) rendered bold + [accent]-colored. Defensive against corrupt input: ranges are clamped
+ * to the snippet bounds (no `substring` OOB / no `r.last + 1` overflow), out-of-order/overlapping ranges are
+ * tolerated (the matcher emits non-overlapping start-ordered ranges), and every span boundary is SNAPPED
+ * off a UTF-16 surrogate-pair interior so a highlight can never split a supplementary code point (CJK-B /
+ * emoji) into malformed halves.
  */
 internal fun boldedSnippet(snippet: String, matchRanges: List<IntRange>, accent: Color): AnnotatedString {
     if (matchRanges.isEmpty()) return AnnotatedString(snippet)
-    // Clamp + sort so the append-in-order walk never goes backwards; overlaps are tolerated below.
+    val len = snippet.length
+    // Clamp each range to a valid half-open [start, endExclusive) inside the snippet, snap both boundaries
+    // off any surrogate interior, then sort by start so the append-in-order walk never goes backwards.
     val clamped = matchRanges
         .mapNotNull { r ->
-            val start = r.first.coerceIn(0, snippet.length)
-            val endExclusive = (r.last + 1).coerceIn(0, snippet.length)
+            val start = snippet.snapBoundary(r.first.coerceIn(0, len))
+            // r.last is inclusive; the exclusive end is r.last + 1, guarded against Int overflow.
+            val rawEnd = if (r.last >= len) len else (r.last + 1).coerceIn(0, len)
+            val endExclusive = snippet.snapBoundary(rawEnd)
             if (endExclusive > start) start until endExclusive else null
         }
         .sortedBy { it.first }
@@ -164,47 +205,72 @@ internal fun boldedSnippet(snippet: String, matchRanges: List<IntRange>, accent:
             }
             cursor = end
         }
-        if (cursor < snippet.length) append(snippet.substring(cursor))
+        if (cursor < len) append(snippet.substring(cursor))
     }
+}
+
+/** Snaps [index] (already in `0..length`) off a UTF-16 surrogate-pair interior: if it lands between a high
+ *  and its low surrogate, move it back to the pair's start so a slice never splits a supplementary code
+ *  point. Boundaries at 0 / length or on a BMP char are returned unchanged. */
+private fun String.snapBoundary(index: Int): Int {
+    if (index <= 0 || index >= length) return index
+    return if (this[index - 1].isHighSurrogate() && this[index].isLowSurrogate()) index - 1 else index
 }
 
 /**
  * One recents row for [text] at [index] (the design's `SearchEmptyState` Recent list): a search glyph + the
- * recent query + a "Tap to repeat" affordance hint. Tapping calls [onPick] with [text] (fills the query).
- * testTag `inbook-recent-$index`; a ≥48dp tap target.
+ * recent query + a "Tap to repeat" affordance hint, with the design's 0.5px hairline below every row but the
+ * last ([showBottomSeparator], the design's `borderBottom: i < recent.length-1 ? 0.5px : 'none'`). Tapping
+ * calls [onPick] with [text] (fills the query). testTag `inbook-recent-$index`; a ≥48dp tap target.
  */
 @Composable
-fun InBookRecentRow(theme: ReaderTheme, text: String, index: Int, onPick: (String) -> Unit) {
+fun InBookRecentRow(
+    theme: ReaderTheme,
+    text: String,
+    index: Int,
+    showBottomSeparator: Boolean,
+    onPick: (String) -> Unit,
+) {
     val ink = theme.ink
     val sub = ink.copy(alpha = 0.55f)
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
-            .clickable { onPick(text) }
-            .heightIn(min = 48.dp)
-            .padding(horizontal = 4.dp, vertical = 10.dp)
-            .testTag("inbook-recent-$index")
-            .semantics { contentDescription = "Recent search: $text, tap to repeat" },
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        Icon(Icons.Filled.Search, contentDescription = null, tint = sub, modifier = Modifier.size(15.dp))
-        Text(
-            text,
-            modifier = Modifier.weight(1f),
-            color = ink,
-            fontFamily = VReaderFonts.Sans,
-            fontSize = 14.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-        Text(
-            "Tap to repeat",
-            color = sub,
-            fontFamily = VReaderFonts.Sans,
-            fontSize = 11.sp,
-        )
+    Column(Modifier.fillMaxWidth()) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(8.dp))
+                .clickable { onPick(text) }
+                .heightIn(min = 48.dp)
+                .padding(horizontal = 4.dp, vertical = 10.dp)
+                .testTag("inbook-recent-$index")
+                .semantics { contentDescription = "Recent search: $text, tap to repeat" },
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Icon(Icons.Filled.Search, contentDescription = null, tint = sub, modifier = Modifier.size(15.dp))
+            Text(
+                text,
+                modifier = Modifier.weight(1f),
+                color = ink,
+                fontFamily = VReaderFonts.Sans,
+                fontSize = 14.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                "Tap to repeat",
+                color = sub,
+                fontFamily = VReaderFonts.Sans,
+                fontSize = 11.sp,
+            )
+        }
+        if (showBottomSeparator) {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(0.5.dp)
+                    .background(ink.copy(alpha = 0.08f)),
+            )
+        }
     }
 }
 

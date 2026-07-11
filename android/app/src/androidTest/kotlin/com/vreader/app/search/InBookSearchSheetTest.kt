@@ -142,6 +142,8 @@ class InBookSearchSheetTest {
         // Per-group counts: "1 match" and "2 matches".
         compose.onNodeWithText("1 match", useUnmergedTree = true).assertExists()
         compose.onNodeWithText("2 matches", useUnmergedTree = true).assertExists()
+        // The design's overall summary line above the groups.
+        compose.onNodeWithText("3 matches in 2 chapters", useUnmergedTree = true).assertExists()
     }
 
     @Test fun snippetText_isRendered() {
