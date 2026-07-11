@@ -25,8 +25,10 @@ import java.io.File
  * only long-press/selection is), so they ride the connected gate cheaply. The PDF slice additionally drives
  * the top-bar toggle CLICK and confirms the create seam wrote a bookmark row through the repository (the PDF
  * host's onToggleBookmark → annotationsRepository.toggleBookmark at the current-page canonical locator). The
- * list-tap/jump-on-page behaviors are covered by the JVM host-helper suite ([pdfBookmarkPageTarget]) + ride
- * WI-9 acceptance.
+ * jump decision is the pure [pdfBookmarkPageTarget] the host's onJumpBookmark delegates to entirely (in-range
+ * page → Succeeded, out-of-range → Failed/sheet-stays-open — rule 51); the host exposes no test-jump seam and
+ * onJumpBookmark is an inline setContent lambda, so we exercise that same function here (the row-tap UI jump
+ * rides WI-9 acceptance).
  *
  * Real-books-first: the TXT slice uses the bundled `sample.txt`; the PDF slice uses the synthetic
  * `sample-3page.pdf` (feature #115 fixture) — NO real PDF exists in test-books (the documented "no real
@@ -104,21 +106,26 @@ class TxtPdfBookmarkTest {
             }
             compose.onNodeWithTag("chrome-bookmark-toggle").performClick()
 
-            // onToggleBookmark writes on the app scope (async) → poll the repository for the created row at
-            // the current-page canonical. The Bookmarks list is a projection of exactly these rows.
+            // onToggleBookmark writes on the app scope (async) → poll the repository (deadline-bounded, breaks
+            // as soon as the row lands) for the created row at the current-page canonical. The Bookmarks list
+            // is a projection of exactly these rows.
             var bookmarked = false
-            repeat(40) {
+            val deadline = System.currentTimeMillis() + 8_000
+            while (System.currentTimeMillis() < deadline) {
                 bookmarked = runBlocking {
                     app().container.annotationsRepository.isBookmarked(book.fingerprintKey, currentCanonical)
                 }
-                if (bookmarked) return@repeat
+                if (bookmarked) break
                 Thread.sleep(200)
             }
             assertTrue("the top-bar toggle created a bookmark row at the current page", bookmarked)
 
-            // The created row is jumpable ON its page: pdfBookmarkPageTarget returns page 0 (in range), while
-            // an out-of-range page → null (→ JumpResult.Failed, the sheet stays open — rule 51). Assert both
-            // ends of the host's jump decision on the same live document's page count.
+            // The host's onJumpBookmark (PdfReaderActivity) delegates its entire jump decision to
+            // [pdfBookmarkPageTarget]: an in-range page → scroll + JumpResult.Succeeded, an out-of-range page →
+            // JumpResult.Failed (the sheet stays open — rule 51). PdfReaderActivity exposes NO @VisibleForTesting
+            // jump seam and onJumpBookmark is an inline lambda inside setContent (unreachable test-only without a
+            // production change), so exercise that SAME decision function directly on this 3-page fixture: the
+            // created bookmark's page (0) is a valid target, a page past the end is not.
             assertTrue("the created bookmark's page (0) is a valid in-range jump target",
                 pdfBookmarkPageTarget(0, pageCount = 3) == 0)
             assertTrue("a page past the end is out of range → the jump fails (sheet stays open)",
