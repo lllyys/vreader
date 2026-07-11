@@ -3,7 +3,8 @@
 // (NFKC → full case fold → diacritic strip → CJK per-char segmentation) so composed/decomposed
 // accents, ligatures, full-width Latin, half-width kana, Hangul/Jamo, and full-case-fold pairs
 // (ß↔ss, final sigma, Cherokee) actually match. Sanitizes FTS4 operator characters so a user query
-// can never error the MATCH or change its boolean meaning.
+// can never error the MATCH or change its boolean meaning. Feature #133 WI-2 adds the ADDITIVE
+// `structuredQuery` projection for in-book occurrence matching (round-2 Critical-2).
 //
 // Key decisions:
 // - Implicit AND across terms (space-joined); a `*` prefix on the FINAL Latin term only (token-prefix
@@ -12,6 +13,10 @@
 //   sequence in order, not just the individual ideographs in any position.
 // - Returns the normalized match `tokens` so SnippetBuilder can highlight token-aware (a valid match
 //   frequently has NO literal raw-query substring after case/width/diacritic folding).
+// - The token GROUPING (CJK-run / keyword / final-prefix bareword) is factored into a single typed
+//   intermediate (`buildGroupedParts`) so `ftsQuery` (FTS string) and `structuredQuery` (typed
+//   StructuredQuery for the RawOffsetMatcher, #133 WI-3) are two projections of the SAME grouping —
+//   they can never diverge. `ftsQuery`/`BuiltQuery`/`tokens` are byte-for-byte unchanged by WI-2.
 package com.vreader.app.search
 
 /** The built FTS4 query string + the normalized match tokens (for token-aware snippet highlighting). */
@@ -48,16 +53,75 @@ object SearchQueryBuilder {
     }
 
     /**
-     * Groups a run of adjacent single-CJK-char tokens into ONE quoted phrase; emits each non-CJK
-     * token as a bareword. A `*` prefix is appended to the LAST emitted bareword token only.
+     * The public STRUCTURE-preserving projection for in-book occurrence matching (feature #133 WI-2,
+     * round-2 Critical-2). Returns the SAME grouping [ftsQuery] uses (via [buildGroupedParts]) as
+     * TYPED [QueryUnit]s — a CJK run → one ordered [QueryUnit.Phrase], the final Latin bareword →
+     * [QueryUnit.PrefixTerm], every other bareword (including quoted FTS keywords) →
+     * [QueryUnit.Term]. Blank / operator-only input → null (mirrors [ftsQuery]).
+     *
+     * ADDITIVE: [ftsQuery]/[BuiltQuery]/tokens are untouched; the flat `tokens` cannot express
+     * phrase/prefix/AND structure, which is why this exists.
+     */
+    fun structuredQuery(raw: String): StructuredQuery? {
+        if (raw.isBlank()) return null
+        val normalized = SearchTextNormalizer.normalize(raw)
+        val segmented = SearchTextNormalizer.segmentCJK(normalized)
+        val rawTokens = segmented
+            .split(WHITESPACE)
+            .map { sanitizeToken(it) }
+            .filter { it.isNotEmpty() }
+        if (rawTokens.isEmpty()) return null
+
+        val grouped = buildGroupedParts(rawTokens)
+        if (grouped.isEmpty()) return null
+        val lastBarewordIdx = grouped.indexOfLast { it is GroupedPart.Bareword }
+        val units = grouped.mapIndexed { i, part ->
+            when (part) {
+                is GroupedPart.Cjk -> QueryUnit.Phrase(part.chars)
+                is GroupedPart.Keyword -> QueryUnit.Term(part.token)
+                is GroupedPart.Bareword ->
+                    if (i == lastBarewordIdx) QueryUnit.PrefixTerm(part.token) else QueryUnit.Term(part.token)
+            }
+        }
+        return StructuredQuery(units)
+    }
+
+    /**
+     * Maps the shared token grouping to FTS4 parts: a CJK run → ONE quoted phrase, an FTS keyword →
+     * a quoted literal, any other bareword → itself. A `*` prefix is appended to the LAST emitted
+     * bareword only (never a quoted CJK phrase OR a quoted keyword — a prefix on a phrase/keyword is
+     * meaningless and the quoted term must stay exact). Behaviorally identical to the pre-#133 inline
+     * grouping — the projection is byte-for-byte the same FTS string.
      */
     private fun buildFtsParts(tokens: List<String>): List<String> {
-        val parts = mutableListOf<String>()
+        val grouped = buildGroupedParts(tokens)
+        val parts = grouped.map { part ->
+            when (part) {
+                is GroupedPart.Cjk -> "\"" + part.chars.joinToString(" ") + "\""
+                is GroupedPart.Keyword -> "\"" + part.token + "\""
+                is GroupedPart.Bareword -> part.token
+            }
+        }.toMutableList()
+        // Prefix-star the final bareword term only (never a quoted CJK phrase OR a quoted keyword).
+        val lastIdx = parts.indexOfLast { !it.startsWith("\"") }
+        if (lastIdx >= 0) parts[lastIdx] = parts[lastIdx] + "*"
+        return parts
+    }
+
+    /**
+     * The SHARED grouping consumed by both [ftsQuery] (via [buildFtsParts]) and [structuredQuery].
+     * Groups a run of adjacent single-CJK-char tokens into ONE [GroupedPart.Cjk]; classifies each
+     * non-CJK token as a [GroupedPart.Keyword] (an FTS4 boolean keyword — must stay a quoted literal,
+     * fix #3) or a [GroupedPart.Bareword]. The "which bareword is final" decision (prefix-star / a
+     * PrefixTerm) is made by each projection over this ordered list, so both apply it identically.
+     */
+    private fun buildGroupedParts(tokens: List<String>): List<GroupedPart> {
+        val parts = mutableListOf<GroupedPart>()
         var cjkRun = mutableListOf<String>()
 
         fun flushCjkRun() {
             if (cjkRun.isNotEmpty()) {
-                parts.add("\"" + cjkRun.joinToString(" ") + "\"")
+                parts.add(GroupedPart.Cjk(cjkRun.toList()))
                 cjkRun = mutableListOf()
             }
         }
@@ -67,18 +131,12 @@ object SearchQueryBuilder {
                 isCjkToken(t) -> cjkRun.add(t)
                 // A bareword equal to an FTS4 boolean keyword (and/or/not/near) is CASE-INSENSITIVE in
                 // FTS4, so the case-fold to lowercase does NOT neutralize it — it would still act as an
-                // operator. Quote it so it matches the LITERAL word instead (fix #3 — FTS keyword
-                // injection). A quoted term never gets the trailing `*` (see lastIdx below).
-                isFtsKeyword(t) -> { flushCjkRun(); parts.add("\"" + t + "\"") }
-                else -> { flushCjkRun(); parts.add(t) }
+                // operator. It must stay a quoted literal (fix #3 — FTS keyword injection).
+                isFtsKeyword(t) -> { flushCjkRun(); parts.add(GroupedPart.Keyword(t)) }
+                else -> { flushCjkRun(); parts.add(GroupedPart.Bareword(t)) }
             }
         }
         flushCjkRun()
-
-        // Prefix-star the final bareword term only (never a quoted CJK phrase OR a quoted keyword — a
-        // prefix on a phrase/keyword is meaningless and the quoted term must stay exact).
-        val lastIdx = parts.indexOfLast { !it.startsWith("\"") }
-        if (lastIdx >= 0) parts[lastIdx] = parts[lastIdx] + "*"
         return parts
     }
 
@@ -104,6 +162,21 @@ object SearchQueryBuilder {
      */
     private fun sanitizeToken(token: String): String =
         token.filter { it !in FTS_SPECIAL_CHARS }
+}
+
+/**
+ * The shared grouping intermediate: one grouping, two projections (FTS string / [StructuredQuery]).
+ * Kept private to this file — it is an internal detail of [SearchQueryBuilder], not a public shape.
+ */
+private sealed interface GroupedPart {
+    /** A contiguous CJK per-code-point run (ordered). */
+    data class Cjk(val chars: List<String>) : GroupedPart
+
+    /** An FTS4 boolean-operator keyword bareword — must stay a quoted literal (fix #3). */
+    data class Keyword(val token: String) : GroupedPart
+
+    /** A plain bareword — the FINAL one becomes the prefix term / prefix-star. */
+    data class Bareword(val token: String) : GroupedPart
 }
 
 private val WHITESPACE = Regex("\\s+")
