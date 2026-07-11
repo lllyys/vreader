@@ -37,6 +37,10 @@ class CollectionRepository(
     fun observeCollectionIdsForBook(bookKey: String): Flow<List<String>> =
         dao.observeCollectionIdsForBook(bookKey)
 
+    /** The ordered collection NAMES a book belongs to (feature #134 WI-1 — the Book Details tag chips). */
+    fun observeCollectionNamesForBook(bookKey: String): Flow<List<String>> =
+        dao.collectionNamesForBook(bookKey)
+
     /** Create a collection; rejects empty / duplicate (case-insensitive) names; truncates to 100 chars. */
     suspend fun createCollection(rawName: String): Result<Collection> {
         val name = normalize(rawName) ?: return fail(CollectionError.EmptyName)
