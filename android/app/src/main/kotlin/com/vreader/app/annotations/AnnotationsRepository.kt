@@ -13,6 +13,10 @@ import vreader.contracts.Locator
 import vreader.contracts.backup.BackupAnnotationsEnvelope
 import vreader.contracts.backup.BackupJson
 
+/** The outcome of an atomic bookmark toggle (feature #135 WI-3): a create-or-remove decided by the
+ *  presence of a bookmark at the same `(bookKey, profileKey)` — the top-bar toggle's semantics. */
+enum class BookmarkToggleResult { Added, Removed }
+
 class AnnotationsRepository(
     private val dao: AnnotationDao,
     private val now: () -> Long = { System.currentTimeMillis() },
