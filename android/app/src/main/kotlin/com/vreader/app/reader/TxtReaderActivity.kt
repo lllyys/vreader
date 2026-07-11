@@ -318,12 +318,25 @@ class TxtReaderActivity : ComponentActivity() {
                                 .getOrDefault(AnnotationsSnapshot(emptyList(), emptyList()))
                         }
 
+                        // feature #134 WI-5 — the More menu's Book-details model (mapped from the loaded
+                        // book + its live collection names via BookDetailsMapper). TXT/MD supplies no page
+                        // count (pageCount=null). Rebuilds when the book's collection membership changes.
+                        val collectionNames by container.collectionRepository
+                            .observeCollectionNamesForBook(bookKey)
+                            .collectAsStateWithLifecycle(initialValue = emptyList())
+                        val bookDetails = remember(s.book, collectionNames) {
+                            com.vreader.app.reader.details.BookDetailsMapper.map(s.book, collectionNames, pageCount = null)
+                        }
+
                         TxtReaderChrome(
                             theme = displaySettings.theme,
                             title = s.title,
                             chromeState = chromeState,
                             annotations = annotationsSnapshot,
                             onBack = ::finish,
+                            bookDetails = bookDetails,
+                            onShareBook = { com.vreader.app.reader.share.shareBook(this@TxtReaderActivity, s.book) },
+                            onCopyFingerprint = { copyFingerprint(it) },
                             // TXT/MD jump: scroll to the annotation's UTF-16 offset via the existing chunk
                             // scroll seam (the same path used by resume + scrubber).
                             onJumpToAnnotation = { item ->
@@ -653,6 +666,13 @@ class TxtReaderActivity : ComponentActivity() {
         vm.dismiss()
     }
 
+    /** feature #134 WI-5 — copy the FULL canonical fingerprint to the OS clipboard (the Book Details
+     *  copy-fingerprint mini-action). Rely on the OS copy confirmation — no invented toast (rule 51). */
+    private fun copyFingerprint(fingerprintFull: String) {
+        val clip = getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+        clip.setPrimaryClip(android.content.ClipData.newPlainText("fingerprint", fingerprintFull))
+    }
+
     // ---- feature #132 WI-6: the review sheet's sheet-level Share (ACTION_SEND) ----
 
     /** Share ALL reviewed annotations (the review sheet's trailing Share) as one plain-text blob — the
@@ -698,6 +718,10 @@ internal fun TxtReaderChrome(
     onShareAnnotations: () -> Unit,
     bottomBar: @Composable (Pair<(() -> Unit)?, (() -> Unit)?>) -> Unit,
     body: @Composable () -> Unit,
+    // feature #134 WI-5 — the More menu's Book-details model + Share/copy actions (null model → no More).
+    bookDetails: com.vreader.app.reader.details.BookDetailsUiModel? = null,
+    onShareBook: () -> Unit = {},
+    onCopyFingerprint: (String) -> Unit = {},
 ) {
     Column(Modifier.fillMaxSize().background(theme.background).systemBarsPadding()) {
         ReaderChromeScaffold(
@@ -711,9 +735,13 @@ internal fun TxtReaderChrome(
             onJumpToc = { false },              // unreachable: Contents is hidden with an empty TOC
             onJumpToAnnotation = onJumpToAnnotation,
             onShareAnnotations = onShareAnnotations,
-            // Search/More/bookmark top-bar slots stay null (#133/#134/#135 — no dead controls).
+            // Search/bookmark top-bar slots stay null (#133/#135 — no dead controls). feature #134 WI-5:
+            // the More button + Book Details / Share are wired through the scaffold's More menu below.
             bottomChrome = { onOpenContents, onOpenNotes -> bottomBar(onOpenContents to onOpenNotes) },
             body = body,
+            bookDetails = bookDetails,
+            onShareBook = onShareBook,
+            onCopyFingerprint = onCopyFingerprint,
         )
     }
 }

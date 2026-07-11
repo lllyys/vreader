@@ -46,6 +46,17 @@ class ReaderChromeStateSaverTest {
         assertEquals(state, roundTrip(state))
     }
 
+    @Test fun roundTrips_visibleDetails() {
+        // feature #134 WI-5 — the Book Details route survives process death like Toc/Notes.
+        val state = ReaderChromeState(chromeVisible = true, sheet = ReaderSheet.Details)
+        assertEquals(state, roundTrip(state))
+    }
+
+    @Test fun detailsToken_restoresToDetails() {
+        val restored = ReaderChromeStateSaver.restore("true|details")
+        assertEquals(ReaderSheet.Details, restored!!.sheet)
+    }
+
     @Test fun garbageToken_restoresToNoneHidden() {
         val fallback = ReaderChromeState(chromeVisible = false, sheet = ReaderSheet.None)
         assertEquals(fallback, ReaderChromeStateSaver.restore("total-garbage"))

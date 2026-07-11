@@ -157,6 +157,14 @@ class PdfReaderActivity : ComponentActivity() {
                                 .getOrDefault(AnnotationsSnapshot(emptyList(), emptyList()))
                         }
                         val jumpScope = rememberCoroutineScope()
+                        // feature #134 WI-5 — the More menu's Book-details model (mapped from the book + its
+                        // live collection names + the real PDF page count → the Pages row).
+                        val collectionNames by container.collectionRepository
+                            .observeCollectionNamesForBook(bookKey)
+                            .collectAsStateWithLifecycle(initialValue = emptyList())
+                        val bookDetails = androidx.compose.runtime.remember(s.book, collectionNames, s.document.pageCount) {
+                            com.vreader.app.reader.details.BookDetailsMapper.map(s.book, collectionNames, pageCount = s.document.pageCount)
+                        }
                         PdfReaderChrome(
                             theme = settings.theme,
                             title = s.title,
@@ -170,6 +178,9 @@ class PdfReaderActivity : ComponentActivity() {
                             },
                             onShareAnnotations = { shareAnnotations(annotationsSnapshot) },
                             body = { PdfReaderBody(s.document, listState, backdrop) },
+                            bookDetails = bookDetails,
+                            onShareBook = { com.vreader.app.reader.share.shareBook(this@PdfReaderActivity, s.book) },
+                            onCopyFingerprint = { copyFingerprint(it) },
                         )
                     }
                 }
@@ -185,6 +196,13 @@ class PdfReaderActivity : ComponentActivity() {
     override fun onDestroy() {
         super.onDestroy()
         saveRequests.close()
+    }
+
+    /** feature #134 WI-5 — copy the FULL canonical fingerprint to the OS clipboard (the Book Details
+     *  copy-fingerprint mini-action). Rely on the OS copy confirmation — no invented toast (rule 51). */
+    private fun copyFingerprint(fingerprintFull: String) {
+        val clip = getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+        clip.setPrimaryClip(android.content.ClipData.newPlainText("fingerprint", fingerprintFull))
     }
 
     /** feature #132 WI-7-hosts — share ALL reviewed annotations as one plain-text blob (the review sheet's

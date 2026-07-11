@@ -145,6 +145,10 @@ internal fun PdfReaderChrome(
     onJumpToAnnotation: (AnnotationItem) -> Unit,
     onShareAnnotations: () -> Unit,
     body: @Composable () -> Unit,
+    // feature #134 WI-5 — the More menu's Book-details model + Share/copy actions (null model → no More).
+    bookDetails: com.vreader.app.reader.details.BookDetailsUiModel? = null,
+    onShareBook: () -> Unit = {},
+    onCopyFingerprint: (String) -> Unit = {},
 ) {
     Column(Modifier.fillMaxSize().background(theme.background).systemBarsPadding()) {
         ReaderChromeScaffold(
@@ -158,12 +162,16 @@ internal fun PdfReaderChrome(
             onJumpToc = { false },              // unreachable: Contents is hidden with an empty TOC
             onJumpToAnnotation = onJumpToAnnotation,
             onShareAnnotations = onShareAnnotations,
-            // Search/More/bookmark top-bar slots stay null (#133/#134/#135 — no dead controls).
+            // Search/bookmark top-bar slots stay null (#133/#135 — no dead controls). feature #134 WI-5:
+            // the More button + Book Details / Share are wired through the scaffold's More menu below.
             bottomChrome = { _, onOpenNotes ->
                 // PDF has no Contents (empty TOC) + no Display control → Notes only.
                 PdfNotesBottomChrome(theme = theme, onOpenNotes = onOpenNotes)
             },
             body = body,
+            bookDetails = bookDetails,
+            onShareBook = onShareBook,
+            onCopyFingerprint = onCopyFingerprint,
         )
     }
 }
