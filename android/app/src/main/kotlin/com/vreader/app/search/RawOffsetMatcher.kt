@@ -158,19 +158,40 @@ object RawOffsetMatcher {
      *   are token continuation, NOT separators, so a diacritic stays INSIDE its word's raw span (the
      *   raw span must include the mark even though the fold strips it — a length-changing fold must not
      *   shift the span).
+     * - A COMPATIBILITY character whose NFKC fold is entirely letters/digits is ALSO token continuation
+     *   (Gate-4 round-3 finding): FTS tokenizes the NORMALIZED text, so raw `x²y` normalizes to `x2y`
+     *   and is ONE unicode61 token. Classifying `²` (U+00B2, raw category No — not letter/digit) as a
+     *   separator here would split the word and miss the anchor. So a raw code point counts as a token
+     *   char if its NFKC fold is non-empty and all letters/digits — the boundary predicate mirrors the
+     *   normalized token stream while the returned span stays RAW.
      * - A CJK ideograph is a separator for the WORD path (CJK is matched by the phrase path), so a
      *   Latin word adjacent to a CJK run is still bounded correctly.
      */
     private fun isSeparator(codePoint: Int): Boolean {
         if (SearchTextNormalizer.isCjk(codePoint)) return true
         if (Character.isLetterOrDigit(codePoint)) return false
-        return when (Character.getType(codePoint)) {
+        when (Character.getType(codePoint)) {
             Character.NON_SPACING_MARK.toInt(),      // Mn — combining diacritics (e.g. U+0301)
             Character.COMBINING_SPACING_MARK.toInt(), // Mc
             Character.ENCLOSING_MARK.toInt(),         // Me
-            -> false
-            else -> true
+            -> return false
         }
+        // A compatibility char that NFKC-folds to token chars only (e.g. superscript ² → "2", ½ → "1⁄2"
+        // is NOT — it contains U+2044) is token continuation, mirroring the normalized unicode61 stream.
+        return !normalizesToTokenChars(codePoint)
+    }
+
+    /** Whether [codePoint]'s NFKC fold is non-empty and made up ENTIRELY of letters/digits. */
+    private fun normalizesToTokenChars(codePoint: Int): Boolean {
+        val folded = SearchTextNormalizer.normalize(String(Character.toChars(codePoint)))
+        if (folded.isEmpty()) return false
+        var i = 0
+        while (i < folded.length) {
+            val cp = folded.codePointAt(i)
+            if (!Character.isLetterOrDigit(cp)) return false
+            i += Character.charCount(cp)
+        }
+        return true
     }
 
     /** The code point ENDING immediately before raw index [index] (surrogate-pair aware). */

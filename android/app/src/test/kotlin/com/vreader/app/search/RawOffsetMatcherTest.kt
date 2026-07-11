@@ -120,6 +120,25 @@ class RawOffsetMatcherTest {
         occ.forEach { assertEquals("cat", text.substring(it.startUtf16, it.endUtf16)) }
     }
 
+    // ---- compatibility char inside a word (NFKC-folds to a token char) stays in the word ----
+
+    @Test fun compatibilityChar_nfkcFoldsToDigit_staysInsideWord() {
+        // Raw "x²y" (² = U+00B2 superscript two, raw category No) normalizes to "x2y", which FTS sees as
+        // ONE unicode61 token. The matcher must keep it as one word so a query "x2y" finds the anchor —
+        // and the returned span stays RAW ("x²y", 3 UTF-16 units), not the folded "x2y".
+        val superTwo = "²"                    // U+00B2
+        val word = "x${superTwo}y"                  // raw 3 UTF-16 units
+        val text = "a $word here"                   // word at raw index 2, ends at 5
+        val q = sq("x2y")   // PrefixTerm("x2y")
+        val occ = allOccurrences(text, q, pageSize = 100)
+        assertEquals(1, occ.size)
+        val s = occ[0]
+        assertEquals(2, s.startUtf16)
+        assertEquals(5, s.endUtf16)
+        assertEquals(word, text.substring(s.startUtf16, s.endUtf16))   // RAW span, includes the ²
+        assertSpanFoldsTo(text, s, "x2y")
+    }
+
     // ---- ß → ss : a length-changing fold does NOT shift the raw span ----
 
     @Test fun eszettFoldsToSs_rawSpanStaysRaw() {
