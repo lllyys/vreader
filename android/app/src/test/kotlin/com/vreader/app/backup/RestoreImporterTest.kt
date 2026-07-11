@@ -50,7 +50,12 @@ class RestoreImporterTest {
     private val now = Instant.parse("2026-06-20T12:00:00Z")
 
     /** A real book blob + its derived manifest entry (the fingerprint = hash of the blob bytes). */
-    private fun entryFor(content: String, title: String = "Restored", addedAt: Long = 1000L): BackupLibraryEntry {
+    private fun entryFor(
+        content: String,
+        title: String = "Restored",
+        addedAt: Long = 1000L,
+        author: String? = null,
+    ): BackupLibraryEntry {
         val bytes = content.toByteArray()
         val fp = DocumentFingerprint.hashing(ByteArrayInputStream(bytes))
         val key = "epub:${fp.sha256}:${fp.fileByteCount}"
@@ -58,7 +63,7 @@ class RestoreImporterTest {
         blobs[blobPath] = bytes
         return BackupLibraryEntry(
             fingerprintKey = key, format = "epub", sha256 = fp.sha256, byteCount = fp.fileByteCount,
-            originalExtension = "epub", title = title, addedAt = Instant.ofEpochMilli(addedAt),
+            originalExtension = "epub", title = title, author = author, addedAt = Instant.ofEpochMilli(addedAt),
             lastOpenedAt = Instant.ofEpochMilli(9000L), blobPath = blobPath,
         )
     }
@@ -101,20 +106,65 @@ class RestoreImporterTest {
     @Test fun restore_importsBook_restoresMetadataAndPosition() = runTest {
         // Whole-second epoch values: the manifest round-trips dates as ISO8601 second-precision
         // (the cross-platform contract), so sub-second millis would truncate.
-        val e = entryFor("EPUB-CONTENT-A", title = "红楼梦", addedAt = 2000L)
+        val e = entryFor("EPUB-CONTENT-A", title = "红楼梦", addedAt = 2000L, author = "曹雪芹")
         val out = restorer().restore(archive(listOf(e), listOf(position(e))))
 
         assertEquals(listOf(e.fingerprintKey), out.restored)
         assertTrue(out.failed.isEmpty())
         assertEquals(1, out.positionsRestored)
-        // Manifest metadata restored (NOT BookImporter's synthetic title / addedAt=999).
+        // Manifest metadata restored via the single applyRestoredMetadata seam — title/addedAt/
+        // lastOpenedAt/author ALL applied (NOT BookImporter's synthetic title / addedAt=999 / null author).
         val book = repo.findBook(e.fingerprintKey)!!
         assertEquals("红楼梦", book.title)
         assertEquals(2000L, book.addedAt)
         assertEquals(9000L, book.lastOpenedAt)
+        assertEquals("曹雪芹", book.author)
         // Position restored as a wrapped legacy locator.
         val pos = repo.loadPosition(e.fingerprintKey)!!
         assertEquals(0.4, pos.legacyLocator!!.progression!!, 1e-9)
+    }
+
+    @Test fun restore_legacyBackupWithoutAuthor_leavesAuthorNull() = runTest {
+        // A pre-#128 backup carries no author in the manifest — COALESCE(null, author) leaves the
+        // freshly-imported (author-null) row's author null; the book still restores.
+        val e = entryFor("EPUB-CONTENT-LEGACY", title = "No Author", author = null)
+        val out = restorer().restore(archive(listOf(e)))
+
+        assertEquals(listOf(e.fingerprintKey), out.restored)
+        val book = repo.findBook(e.fingerprintKey)!!
+        assertNull(book.author)
+        // Title/dates are still applied by the single seam even when author is null.
+        assertEquals("No Author", book.title)
+        assertEquals(9000L, book.lastOpenedAt)
+    }
+
+    @Test fun restore_manifestAuthorRestored_thenCoordinatorBackfill_isNoop() = runTest {
+        // Ordering A: restore (manifest author wins) THEN a coordinator backfill runs — the backfill
+        // only sets author WHERE it IS NULL, so a manifest-restored author is never overwritten.
+        val e = entryFor("EPUB-CONTENT-ORDER-A", author = "Manifest Author")
+        restorer().restore(archive(listOf(e)))
+        assertEquals("Manifest Author", repo.findBook(e.fingerprintKey)!!.author)
+
+        // Coordinator backfill later — must NOT clobber the manifest author.
+        db.bookDao().backfillAuthorIfNull(e.fingerprintKey, "Backfilled Author")
+        assertEquals("Manifest Author", repo.findBook(e.fingerprintKey)!!.author)
+    }
+
+    @Test fun restore_coordinatorBackfill_thenNullManifestRestore_preservesBackfill() = runTest {
+        // Ordering B: a coordinator backfilled an author onto the imported row BEFORE the restore's
+        // metadata apply runs with a NULL manifest author. COALESCE(null, author) must PRESERVE the
+        // backfilled value (the WI-1 seam's whole purpose). Simulate by importing first, backfilling,
+        // then restoring an author-null manifest entry for the same bytes.
+        val e = entryFor("EPUB-CONTENT-ORDER-B", author = null)
+        // First restore materializes the row (author null).
+        restorer().restore(archive(listOf(e)))
+        // Coordinator backfills an author.
+        db.bookDao().backfillAuthorIfNull(e.fingerprintKey, "Backfilled Author")
+        assertEquals("Backfilled Author", repo.findBook(e.fingerprintKey)!!.author)
+
+        // A second restore with a NULL manifest author must PRESERVE the backfilled author.
+        restorer().restore(archive(listOf(e)))
+        assertEquals("Backfilled Author", repo.findBook(e.fingerprintKey)!!.author)
     }
 
     @Test fun restore_isIdempotent() = runTest {

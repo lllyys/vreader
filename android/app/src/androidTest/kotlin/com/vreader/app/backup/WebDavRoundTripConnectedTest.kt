@@ -122,4 +122,74 @@ class WebDavRoundTripConnectedTest {
             prefsFile.delete()
         }
     }
+
+    /**
+     * feature #128 WI-2 — author (+ title/dates) survives a live backup → wipe → restore. Seeds a
+     * book WITH an author (backfilled onto the imported row, mirroring the coordinator flow — the SAF
+     * import always writes author null), backs it up over the real WebDAV server, wipes locally, then
+     * selectively restores and asserts the author, title and dates all come back. Proves the manifest
+     * emits the author AND the single applyRestoredMetadata seam re-applies it on device.
+     */
+    @Test
+    fun authorSurvivesRoundTrip_overLiveWebDav() = runBlocking {
+        val args = InstrumentationRegistry.getArguments()
+        val baseUrl = args.getString("webdavBaseUrl")
+        assumeNotNull("set -e webdavBaseUrl to run (via scripts/run-webdav-roundtrip.sh)", baseUrl)
+        val user = args.getString("webdavUser") ?: "vreader"
+        val pass = args.getString("webdavPass") ?: "vreader"
+
+        val ctx = InstrumentationRegistry.getInstrumentation().targetContext
+        val db = Room.inMemoryDatabaseBuilder(ctx, VReaderDatabase::class.java).build()
+        val repo = LibraryRepository(db.bookDao(), db.readingPositionDao())
+        val booksDir = File(ctx.cacheDir, "wi2-books-${UUID.randomUUID()}").apply { mkdirs() }
+        val importer = BookImporter(booksDir, repo, Dispatchers.IO)
+        val prefsFile = File(ctx.filesDir, "wi2-${UUID.randomUUID()}.preferences_pb")
+        val store = WebDavServerStore(
+            PreferenceDataStoreFactory.create { prefsFile },
+            KeystoreSecretCipher("vreader.test.webdav"),
+        )
+        try {
+            store.upsert("srv", "rclone", baseUrl!!, user, pass, wifiOnly = false)
+            val service = WebDavBackupService(
+                store, repo, importer, BackupCollector(repo), "ConnectedTest", "0.7.7",
+                transportFactory = { b, u, p -> WebDavClient(b, u, p) },
+                ioDispatcher = Dispatchers.IO,
+            )
+
+            val test = service.testConnection(ServerDraft("rclone", baseUrl, user, pass, false))
+            assertTrue("connection ok: $test", test is TestResult.Ok)
+
+            // Import a unique book, then backfill an author (the coordinator flow) so the row carries one.
+            val content = "EPUB-AUTHOR-${UUID.randomUUID()}"
+            val book = importer.importStream("content://t", "Authored.epub", ByteArrayInputStream(content.toByteArray()))
+            db.bookDao().backfillAuthorIfNull(book.fingerprintKey, "Herman Melville")
+            assertEquals("Herman Melville", repo.findBook(book.fingerprintKey)?.author)
+            val addedAt = repo.findBook(book.fingerprintKey)!!.addedAt
+
+            // Back up to the live server.
+            service.startBackup("srv").toList()
+
+            // Wipe locally.
+            repo.deleteBook(book.fingerprintKey)
+            assertNull(repo.findBook(book.fingerprintKey))
+
+            // Restore (selective) → author + title + dates come back.
+            val list = service.listBackups("srv")
+            assertTrue("listBackups ok: $list", list is BackupListResult.Ok)
+            val summary = (list as BackupListResult.Ok).backups.firstOrNull { it.books >= 1 }
+            assertNotNull("a backup with our book exists", summary)
+            val result = service.restore(summary!!.id, setOf(book.fingerprintKey)).toList()
+                .last() as RestoreProgress.Result
+            assertEquals(RestoreOutcome.success, result.outcome)
+            val restored = repo.findBook(book.fingerprintKey)
+            assertNotNull("book restored", restored)
+            assertEquals("author survived the round-trip", "Herman Melville", restored!!.author)
+            assertEquals("title survived the round-trip", book.title, restored.title)
+            assertEquals("addedAt survived the round-trip", addedAt, restored.addedAt)
+        } finally {
+            db.close()
+            booksDir.deleteRecursively()
+            prefsFile.delete()
+        }
+    }
 }
