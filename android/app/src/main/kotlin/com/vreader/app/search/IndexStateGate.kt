@@ -8,18 +8,23 @@
 // - EPUB BYPASSES the gate entirely. Readium searches the live publication (WI-5); an EPUB book is not in
 //   the FTS index, so its state-row presence/absence is IRRELEVANT — EPUB is always Ready and can never
 //   enter Indexing. This is the plan's core two-track invariant (EPUB→engine, TXT/MD→FTS).
-// - The "still working" predicate MIRRORS SearchIndexCoordinator.isEligible/needsIndexing (do NOT re-derive
-//   it differently): a MISSING row, a row at an OLD indexerVersion, or any status that is NOT one of the two
-//   SETTLED terminals (`indexed`, `skipped_unsupported`) is still-working. A `failed` row is a special still-
-//   working case that surfaces as the retryable Failed state (rather than the generic Indexing) so the caller
-//   can offer retry. An unexpected/typo status (`indexing`, `faild`, …) is treated as still-working → Indexing
-//   (mirrors the DAO's defensive `NOT IN ('indexed','skipped_unsupported')` completeness predicate).
+// - The staleness predicate MIRRORS SearchIndexCoordinator.isEligible EXACTLY (do NOT re-derive it
+//   differently): a book is (re-)indexed — and therefore WILL settle → Indexing — iff its row is MISSING or
+//   at an OLD indexerVersion. AT THE CURRENT VERSION the coordinator retries ONLY a `failed` row; a
+//   current-version `indexed`/`skipped_unsupported` row is settled. Consequences:
+//     · current-version `failed` → Failed (retryable — the coordinator re-attempts it).
+//     · current-version `indexed` → Ready (≥1 occurrence) or NoResults (0 occurrences, definitive).
+//     · current-version `skipped_unsupported` → Unsupported (hide the Search entry).
+//     · current-version UNEXPECTED status (`indexing`, `faild`, a typo) → Failed, NOT Indexing. The
+//       coordinator does NOT retry a current-version non-`failed` status, so such a row NEVER settles;
+//       reporting Indexing would spin the UI forever. Failed is the recoverable terminal the user retries
+//       from. (A STALE-version row of ANY status IS re-indexed → Indexing, since the version check dominates.)
 // - A held query RE-RUNS on settle: observeIndexState is a Flow, so when the coordinator settles the book
 //   (Indexing→indexed) the gate re-emits and the ViewModel re-executes the FTS query — a query typed during
 //   Indexing yields results (or the definitive NoResults) once the index completes, with no manual re-type.
 //
-// @coordinates-with search/SearchIndexCoordinator.kt (the authoritative status vocabulary + version + the
-//   isEligible/needsIndexing staleness logic mirrored here), search/InBookSearchRepository.kt (WI-6 — the FTS
+// @coordinates-with search/SearchIndexCoordinator.kt (the authoritative status vocabulary + INDEXER_VERSION
+//   + the isEligible staleness logic mirrored here), search/InBookSearchRepository.kt (WI-6 — the FTS
 //   results path this gate front-runs for TXT/MD), data/SearchDao.kt (observeIndexState, read-only).
 package com.vreader.app.search
 
@@ -95,9 +100,10 @@ class IndexStateGate(private val dispatcher: CoroutineDispatcher) {
         hasOccurrence: suspend () -> Boolean,
         indexStateFlow: Flow<SearchIndexStateEntity?>,
     ): Flow<InBookIndexState> {
-        // EPUB bypasses the FTS gate entirely (Readium searches live) — one Ready, no FTS subscription.
+        // Non-FTS formats bypass the gate entirely (EPUB searches Readium live; PDF/AZW3 have no in-book
+        // search) — one mapped state, NO subscription to the FTS index-state flow, no occurrence check.
         if (!usesFtsIndex(format)) {
-            return flowOf(mapNonFts(format))
+            return flowOf(evaluate(format, row = null, hasOccurrence = false))
         }
         return indexStateFlow
             .map { row -> evaluateSuspending(format, row, hasOccurrence) }
@@ -105,19 +111,23 @@ class IndexStateGate(private val dispatcher: CoroutineDispatcher) {
             .flowOn(dispatcher)
     }
 
+    /**
+     * The observed mapping: consults [hasOccurrence] LAZILY and ONLY when the ladder needs it (a settled-
+     * `indexed` TXT/MD row), so a missing/stale/failed/skipped/unexpected row never triggers an occurrence
+     * query. Delegates the non-occurrence ladder to [classify]; the ONE occurrence-dependent case
+     * (`indexed`) is resolved here, keeping a single source of truth for the decision order.
+     */
     private suspend fun evaluateSuspending(
         format: BookFormat,
         row: SearchIndexStateEntity?,
         hasOccurrence: suspend () -> Boolean,
-    ): InBookIndexState = when {
-        !usesFtsIndex(format) -> mapNonFts(format)
-        row == null -> InBookIndexState.Indexing                     // missing → still working
-        row.status == STATUS_FAILED -> InBookIndexState.Failed       // failed (any version) → retryable
-        needsReindex(row) -> InBookIndexState.Indexing               // stale version / unexpected status
-        row.status == STATUS_SKIPPED_UNSUPPORTED -> InBookIndexState.Unsupported
-        row.status == STATUS_INDEXED ->
+    ): InBookIndexState = when (classify(format, row)) {
+        Classification.NeedsOccurrenceCheck ->
             if (hasOccurrence()) InBookIndexState.Ready else InBookIndexState.NoResults
-        else -> InBookIndexState.Indexing                            // defensive (unreachable after needsReindex)
+        Classification.Ready -> InBookIndexState.Ready
+        Classification.Indexing -> InBookIndexState.Indexing
+        Classification.Unsupported -> InBookIndexState.Unsupported
+        Classification.Failed -> InBookIndexState.Failed
     }
 
     companion object {
@@ -127,45 +137,55 @@ class IndexStateGate(private val dispatcher: CoroutineDispatcher) {
         private const val STATUS_SKIPPED_UNSUPPORTED = "skipped_unsupported"
         private const val STATUS_FAILED = "failed"
 
-        /** The two SETTLED terminals at the current version — the completeness set (Gate-2 round-3 HIGH). */
-        private val SETTLED_STATUSES = setOf(STATUS_INDEXED, STATUS_SKIPPED_UNSUPPORTED)
-
         /** Only TXT/MD live in the FTS index; EPUB uses Readium; PDF/AZW3 have no in-book search. */
         private fun usesFtsIndex(format: BookFormat): Boolean =
             format == BookFormat.txt || format == BookFormat.md
 
-        /**
-         * A settled `indexed`/`skipped_unsupported` row at an OLD indexerVersion, or ANY non-settled status
-         * (an in-progress/typo/unknown row), still needs (re-)indexing — mirrors
-         * [SearchIndexCoordinator.isEligible]. NOTE: a `failed` row is caught by the caller BEFORE this (it
-         * surfaces as Failed, not Indexing), so this predicate treats it as still-working too, consistently.
-         */
-        private fun needsReindex(row: SearchIndexStateEntity): Boolean =
-            row.indexerVersion != SearchIndexCoordinator.INDEXER_VERSION ||
-                row.status !in SETTLED_STATUSES
+        /** Intermediate classification decoupling the row→state ladder from the occurrence check, so the
+         *  observed (lazy suspend) and pure (eager boolean) entry points share ONE decision order. */
+        private enum class Classification { Ready, Indexing, Unsupported, Failed, NeedsOccurrenceCheck }
 
-        /** The non-FTS mapping: EPUB always Ready (Readium live); PDF/AZW3 Unsupported (no in-book search). */
-        private fun mapNonFts(format: BookFormat): InBookIndexState =
-            if (format == BookFormat.epub) InBookIndexState.Ready else InBookIndexState.Unsupported
+        /**
+         * The decision LADDER (occurrence-independent), a faithful mirror of
+         * [SearchIndexCoordinator.isEligible]:
+         *  - non-FTS: EPUB → Ready (Readium searches live — bypass); PDF/AZW3 → Unsupported.
+         *  - missing row → Indexing (the coordinator WILL index it → it will settle).
+         *  - STALE indexerVersion (any status) → Indexing (the coordinator WILL re-index → it will settle).
+         *  - current-version `failed` → Failed (the coordinator RETRIES it; also a recoverable terminal).
+         *  - current-version `skipped_unsupported` → Unsupported (settled — hide the Search entry).
+         *  - current-version `indexed` → [NeedsOccurrenceCheck] (Ready iff ≥1 occurrence, else NoResults).
+         *  - current-version UNEXPECTED status (`indexing`, typo, …) → Failed, NOT Indexing. CRITICAL
+         *    (Gate-4 High): the coordinator's `isEligible` does NOT retry a current-version non-`failed`
+         *    status, so such a row NEVER settles — mapping it to Indexing would spin the UI forever waiting
+         *    for an emission that can't come. Failed is the recoverable terminal the user can retry from.
+         */
+        private fun classify(format: BookFormat, row: SearchIndexStateEntity?): Classification = when {
+            !usesFtsIndex(format) ->
+                if (format == BookFormat.epub) Classification.Ready else Classification.Unsupported
+            row == null -> Classification.Indexing
+            row.indexerVersion != SearchIndexCoordinator.INDEXER_VERSION -> Classification.Indexing
+            row.status == STATUS_FAILED -> Classification.Failed
+            row.status == STATUS_SKIPPED_UNSUPPORTED -> Classification.Unsupported
+            row.status == STATUS_INDEXED -> Classification.NeedsOccurrenceCheck
+            else -> Classification.Failed   // current-version unexpected status → recoverable terminal, never Indexing
+        }
 
         /**
          * Pure, synchronous mapping (no Flow, no suspension) for direct testing + non-observed call sites:
-         * (format, row, hasOccurrence-boolean) → [InBookIndexState]. Same decision ladder as
+         * (format, row, hasOccurrence-boolean) → [InBookIndexState]. Same [classify] ladder as
          * [IndexStateGate.observe]. [hasOccurrence] is only consulted for a settled-`indexed` TXT/MD book.
          */
         fun evaluate(
             format: BookFormat,
             row: SearchIndexStateEntity?,
             hasOccurrence: Boolean,
-        ): InBookIndexState = when {
-            !usesFtsIndex(format) -> mapNonFts(format)
-            row == null -> InBookIndexState.Indexing
-            row.status == STATUS_FAILED -> InBookIndexState.Failed
-            needsReindex(row) -> InBookIndexState.Indexing
-            row.status == STATUS_SKIPPED_UNSUPPORTED -> InBookIndexState.Unsupported
-            row.status == STATUS_INDEXED ->
+        ): InBookIndexState = when (classify(format, row)) {
+            Classification.NeedsOccurrenceCheck ->
                 if (hasOccurrence) InBookIndexState.Ready else InBookIndexState.NoResults
-            else -> InBookIndexState.Indexing
+            Classification.Ready -> InBookIndexState.Ready
+            Classification.Indexing -> InBookIndexState.Indexing
+            Classification.Unsupported -> InBookIndexState.Unsupported
+            Classification.Failed -> InBookIndexState.Failed
         }
     }
 }
