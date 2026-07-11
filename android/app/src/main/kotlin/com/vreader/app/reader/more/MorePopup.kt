@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
@@ -86,7 +87,9 @@ fun MorePopup(
                     .semantics { contentDescription = "Dismiss menu" },
             )
 
-            // The popover card, offset from the top-trailing corner to sit under the "..." button.
+            // The popover card, offset from the top-trailing corner to sit under the "..." button. The
+            // width is the design's 268dp but clamped ≤ available width (`widthIn(max)` + `fillMaxWidth`
+            // capped by the parent 14dp end padding) so it never clips on a narrow screen.
             Surface(
                 shape = RoundedCornerShape(POPUP_RADIUS),
                 color = surfaceColor(theme),
@@ -95,10 +98,15 @@ fun MorePopup(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
                     .padding(top = 8.dp, end = 14.dp)
-                    .width(POPUP_WIDTH)
+                    .widthIn(max = POPUP_WIDTH)
                     .testTag("more-popup-card"),
             ) {
-                Column(Modifier.padding(vertical = 6.dp)) {
+                // The design's fixed 268dp column; the Surface's widthIn(max) clamps it on a narrow window.
+                Column(
+                    Modifier
+                        .width(POPUP_WIDTH)
+                        .padding(vertical = 6.dp),
+                ) {
                     rows.forEach { row -> MoreRowItem(theme, row) }
                 }
             }
