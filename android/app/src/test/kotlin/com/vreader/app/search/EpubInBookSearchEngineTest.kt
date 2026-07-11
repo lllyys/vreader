@@ -3,6 +3,7 @@ package com.vreader.app.search
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
@@ -29,10 +30,14 @@ import org.robolectric.RobolectricTestRunner
  *   -> snippet (+ before/after context), and the RAW `readiumLocator` is retained verbatim on the hit.
  * - Hits are grouped by `Locator.title` (chapter), preserving first-seen order.
  * - An empty first page -> `NoResults`.
- * - Iterator exhaustion (`Exhausted`) -> the page carries `moreAvailable = false`.
- * - A page with more content available -> `moreAvailable = true`.
- * - A `SearchError` from the iterator -> the `Error` outcome (surfaced, not swallowed).
+ * - Iterator exhaustion (`Exhausted`) -> the page carries `moreAvailable = false` + a null cursor + a closed iterator.
+ * - A page with more content available -> `moreAvailable = true` + a live cursor whose `nextPage` resumes.
+ * - Overflow completeness: a Readium page larger than `pageSize` NEVER drops locators — the excess is
+ *   carried in the cursor and retrieved by `nextPage` (the round-3 completeness contract).
+ * - A `SearchError` from the iterator -> the `Error` outcome (surfaced, not swallowed) + a closed iterator.
+ * - Nullable `Locator.text` fields map to empty strings.
  * - A CJK query string is passed through to the source UNCHANGED (no re-normalization by the engine).
+ * - `pageSize <= 0` is rejected at construction.
  *
  * Robolectric-run because building a REAL Readium `Locator` constructs a `Url` (backed by
  * `android.net.Uri`), which the plain JVM harness does not provide — the engine itself is pure JVM.
@@ -86,9 +91,9 @@ class EpubInBookSearchEngineTest {
 
     private fun loc(
         chapterTitle: String?,
-        highlight: String,
-        before: String = "",
-        after: String = "",
+        highlight: String?,
+        before: String? = "",
+        after: String? = "",
         path: String = "chapter1.xhtml",
     ): ReadiumLocator = ReadiumLocator(
         href = href(path),
@@ -192,7 +197,7 @@ class EpubInBookSearchEngineTest {
     }
 
     @Test
-    fun exhaustedAfterOnePage_marksMoreAvailableFalse() = runTest {
+    fun exhaustedAfterOnePage_marksMoreAvailableFalse_nullCursor_closedIterator() = runTest {
         val l1 = loc(chapterTitle = "C", highlight = "cat")
         val source = FakeSource(
             searchable = true,
@@ -202,27 +207,67 @@ class EpubInBookSearchEngineTest {
 
         val page = (engine.searchFirstPage("cat") as EpubSearchOutcome.Results).page
         assertFalse(page.moreAvailable)
+        assertNull("a terminal page carries no cursor", page.cursor)
+        assertTrue("the iterator is closed on exhaustion", source.lastIterator!!.closed)
     }
 
     @Test
-    fun morePagesAvailable_marksMoreAvailableTrue() = runTest {
+    fun morePagesAvailable_marksMoreAvailableTrue_liveCursor_resumesNextPage() = runTest {
         val l1 = loc(chapterTitle = "C", highlight = "cat")
         val l2 = loc(chapterTitle = "D", highlight = "cat")
         // Two content locators queued, pageSize=1 -> the fill stops after the first hit while the
-        // iterator still has more, so moreAvailable is true and only one hit is collected.
+        // iterator still has more, so moreAvailable is true, one hit collected, and a live cursor.
         val source = FakeSource(
             searchable = true,
-            pages = listOf(Canned.Page(listOf(l1)), Canned.Page(listOf(l2))),
+            pages = listOf(Canned.Page(listOf(l1)), Canned.Page(listOf(l2)), Canned.Exhausted),
         )
         val engine = EpubInBookSearchEngine(source, pageSize = 1)
 
         val page = (engine.searchFirstPage("cat") as EpubSearchOutcome.Results).page
         assertEquals(1, page.groups.sumOf { it.hits.size })
         assertTrue(page.moreAvailable)
+        assertNotNull("a non-terminal page carries a live cursor", page.cursor)
+        assertFalse("the iterator stays open while more is available", source.lastIterator!!.closed)
+
+        // Resume: the SECOND hit (l2) comes back on the next page, not lost. With pageSize=1 the fill
+        // stops at budget WITHOUT confirming exhaustion, so moreAvailable is (honestly) still true and a
+        // cursor is handed back — one more nextPage confirms exhaustion and closes the iterator.
+        val page2 = (engine.nextPage(page.cursor!!) as EpubSearchOutcome.Results).page
+        assertEquals(1, page2.groups.sumOf { it.hits.size })
+        assertSame(l2, page2.groups[0].hits[0].readiumLocator)
+        assertTrue(page2.moreAvailable)
+        assertNotNull(page2.cursor)
+
+        // The final page confirms exhaustion: no more hits -> NoResults, iterator closed.
+        val outcome3 = engine.nextPage(page2.cursor!!)
+        assertTrue("a fully-drained cursor yields NoResults", outcome3 is EpubSearchOutcome.NoResults)
+        assertTrue("the iterator is closed once exhausted", source.lastIterator!!.closed)
     }
 
     @Test
-    fun searchError_yieldsErrorOutcome_notSwallowed() = runTest {
+    fun overflowLocators_notDropped_carriedInCursor_completeAcrossPages() = runTest {
+        // ONE Readium page with 5 locators, pageSize=2 -> page1 has 2 hits + 3 carried in the cursor.
+        val all = (1..5).map { loc(chapterTitle = "C", highlight = "cat$it") }
+        val source = FakeSource(
+            searchable = true,
+            pages = listOf(Canned.Page(all), Canned.Exhausted),
+        )
+        val engine = EpubInBookSearchEngine(source, pageSize = 2)
+
+        val collected = ArrayList<ReadiumLocator>()
+        var outcome = engine.searchFirstPage("cat")
+        while (outcome is EpubSearchOutcome.Results) {
+            val page = outcome.page
+            page.groups.forEach { g -> g.hits.forEach { collected.add(it.readiumLocator) } }
+            outcome = if (page.moreAvailable) engine.nextPage(page.cursor!!) else break
+        }
+
+        // The union across pages equals ALL 5 locators, in order, with no gap and no duplicate.
+        assertEquals(all, collected)
+    }
+
+    @Test
+    fun searchError_yieldsErrorOutcome_notSwallowed_closesIterator() = runTest {
         val err = EpubSearchError("engine boom")
         val source = FakeSource(searchable = true, pages = listOf(Canned.Failure(err)))
         val engine = EpubInBookSearchEngine(source)
@@ -230,10 +275,11 @@ class EpubInBookSearchEngineTest {
         val outcome = engine.searchFirstPage("cat")
         assertTrue(outcome is EpubSearchOutcome.Error)
         assertSame(err, (outcome as EpubSearchOutcome.Error).error)
+        assertTrue("the iterator is closed on error", source.lastIterator!!.closed)
     }
 
     @Test
-    fun errorMidPaging_afterSomeHits_stillSurfacesError() = runTest {
+    fun errorMidPaging_afterSomeHits_stillSurfacesError_closesIterator() = runTest {
         val l1 = loc(chapterTitle = "C", highlight = "cat")
         val err = EpubSearchError("boom later")
         // First page has hits, but the SAME first-page fill needs a second next() (it did not
@@ -247,6 +293,30 @@ class EpubInBookSearchEngineTest {
         val outcome = engine.searchFirstPage("cat")
         assertTrue("an error after partial hits must surface", outcome is EpubSearchOutcome.Error)
         assertSame(err, (outcome as EpubSearchOutcome.Error).error)
+        assertTrue("the iterator is closed on a mid-fill error", source.lastIterator!!.closed)
+    }
+
+    @Test
+    fun nullLocatorTextFields_mapToEmptyStrings() = runTest {
+        val l1 = loc(chapterTitle = "C", highlight = null, before = null, after = null)
+        val source = FakeSource(searchable = true, pages = listOf(Canned.Page(listOf(l1)), Canned.Exhausted))
+        val engine = EpubInBookSearchEngine(source)
+
+        val page = (engine.searchFirstPage("cat") as EpubSearchOutcome.Results).page
+        val hit = page.groups[0].hits[0]
+        assertEquals("", hit.snippet)
+        assertEquals("", hit.before)
+        assertEquals("", hit.after)
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun zeroPageSize_rejectedAtConstruction() {
+        EpubInBookSearchEngine(FakeSource(searchable = true), pageSize = 0)
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun negativePageSize_rejectedAtConstruction() {
+        EpubInBookSearchEngine(FakeSource(searchable = true), pageSize = -1)
     }
 
     @Test

@@ -12,27 +12,28 @@
 // constructor; unit tests fake ONLY the seam and hand back REAL Readium `Locator` value types.
 //
 // Key decisions:
-// - This is ENGINE-ONLY: no ViewModel, no repository dispatch, no UI — WI-6's `InBookSearchRepository`
-//   is the format-dispatching boundary that calls this for the EPUB format and adapts the engine's output
-//   into the shared `InBookSearchModels` DTOs. The EPUB-track result types ([EpubInBookHit] / [EpubGroup]
-//   / [EpubSearchPage] / [EpubSearchOutcome]) live in THIS file to keep the engine self-contained and its
-//   write-set to a single file; WI-6 owns the shared-DTO adaptation.
-// - `isSearchable()` is the FIRST gate: a not-searchable publication yields [EpubSearchOutcome.Unsupported]
-//   and the engine NEVER opens an iterator / calls `search` — no crash, no wasted work.
-// - The first page fills up to `pageSize` hits by pulling successive `SearchIterator.next()` pages;
-//   `moreAvailable` is true iff the iterator was NOT exhausted while filling (more can be paged in later).
-//   An empty first page (or immediate exhaustion) with zero hits -> [EpubSearchOutcome.NoResults].
-// - A `SearchError` from any `next()` -> [EpubSearchOutcome.Error] (SURFACED, never swallowed) — even if
-//   some hits were already collected in this fill, the error wins so the UI can show a failure state.
-// - Grouping is by `Locator.title` (the chapter label), preserving FIRST-SEEN title order; a null title
-//   groups under a single null-key group (honest — the navigator still jumps by the raw locator).
-// - The query string is passed to Readium VERBATIM — the engine does NOT re-normalize (Readium's ICU
+// - ENGINE-ONLY (no ViewModel / repository dispatch / UI). WI-6's `InBookSearchRepository` is the
+//   format-dispatching boundary that calls this for EPUB and adapts the output into the shared
+//   `InBookSearchModels` DTOs. The EPUB-track result types ([EpubInBookHit] / [EpubGroup] /
+//   [EpubSearchPage] / [EpubSearchOutcome]) live in THIS file so the engine is self-contained (one-file
+//   write-set); WI-6 owns the shared-DTO adaptation.
+// - `isSearchable` is the FIRST gate: not searchable -> [EpubSearchOutcome.Unsupported], NEVER opening an
+//   iterator / calling `search` (no crash, no wasted work).
+// - Paging is COMPLETE (round-3 completeness contract — the EPUB analog of the FTS intra-chunk cursor): a
+//   page fills up to `pageSize` hits and NEVER discards budget-overflow locators. When more remains the
+//   page carries an [EpubSearchCursor] (the LIVE iterator + un-placed locators); the caller (WI-6) resumes
+//   via [EpubInBookSearchEngine.nextPage]. The iterator is closed ONLY on a terminal page (exhaustion /
+//   error / zero hits); while `moreAvailable` it stays open behind the cursor.
+// - A `SearchError` from any `next()` -> [EpubSearchOutcome.Error] (SURFACED, never swallowed; iterator
+//   closed) — the error wins even if some hits were already collected. Zero hits -> [NoResults].
+// - Grouping is by `Locator.title` (chapter label), FIRST-SEEN order; a null title -> a single null-key
+//   group (honest — the navigator still jumps by the raw locator).
+// - The query is passed to Readium VERBATIM (no engine-side normalization — Readium's ICU
 //   `StringSearchService` owns EPUB folding), so a CJK query reaches `search` unchanged.
 //
 // @coordinates-with reader/ReadiumLocatorReconstructor.kt (the same final-Publication seam pattern),
-//   search/EpubTextExtractor.kt (the `@ExperimentalReadiumApi` + `publication.content` service the same
-//   bundled `StringSearchService` is backed by), search/InBookSearchRepository.kt (WI-6 — the caller that
-//   adapts [EpubSearchPage] into the shared in-book DTOs).
+//   search/EpubTextExtractor.kt (the `@ExperimentalReadiumApi` + `publication.content` service the bundled
+//   `StringSearchService` is backed by), search/InBookSearchRepository.kt (WI-6 — the caller).
 package com.vreader.app.search
 
 import org.readium.r2.shared.ExperimentalReadiumApi
@@ -66,12 +67,25 @@ data class EpubGroup(
 )
 
 /**
- * One page of EPUB in-book results: [groups] (grouped by chapter, first-seen order) and [moreAvailable]
- * (true iff the Readium iterator was not exhausted while filling this page — more can be paged in later).
+ * A resume handle for EPUB paging: the LIVE Readium iterator [source] + any [leftover] locators that
+ * overflowed the previous page's budget, so nothing is discarded (round-3 completeness). WI-6 keeps it
+ * alive across `loadMore()` and passes it to [EpubInBookSearchEngine.nextPage]; a non-null cursor is
+ * always resumable (a terminal page closes the iterator and hands back a null cursor).
+ */
+class EpubSearchCursor internal constructor(
+    internal val source: SearchIteratorSource,
+    internal val leftover: List<ReadiumLocator>,
+)
+
+/**
+ * One page of EPUB in-book results: [groups] (by chapter, first-seen order), [moreAvailable], and the
+ * [cursor] to resume from — non-null iff [moreAvailable]. When [moreAvailable] is false the cursor is null
+ * and the iterator is already closed.
  */
 data class EpubSearchPage(
     val groups: List<EpubGroup>,
     val moreAvailable: Boolean,
+    val cursor: EpubSearchCursor?,
 )
 
 /** The outcome of an EPUB in-book search request (the engine's terminal states). */
@@ -79,13 +93,13 @@ sealed interface EpubSearchOutcome {
     /** The publication is not searchable (`isSearchable() == false`) — no search was attempted. */
     data object Unsupported : EpubSearchOutcome
 
-    /** The search ran but produced zero hits. */
+    /** The search ran but produced zero hits (iterator already closed). */
     data object NoResults : EpubSearchOutcome
 
     /** The search produced [page]. */
     data class Results(val page: EpubSearchPage) : EpubSearchOutcome
 
-    /** The Readium iterator surfaced an [error] (not swallowed). */
+    /** The Readium iterator surfaced an [error] (not swallowed; iterator already closed). */
     data class Error(val error: EpubSearchError) : EpubSearchOutcome
 }
 
@@ -183,6 +197,10 @@ class EpubInBookSearchEngine internal constructor(
     private val pageSize: Int = DEFAULT_PAGE_SIZE,
 ) {
 
+    init {
+        require(pageSize > 0) { "pageSize must be > 0, was $pageSize" }
+    }
+
     /** Production constructor: wraps the real Readium [publication]. */
     @OptIn(ExperimentalReadiumApi::class)
     constructor(publication: Publication, pageSize: Int = DEFAULT_PAGE_SIZE) :
@@ -191,46 +209,78 @@ class EpubInBookSearchEngine internal constructor(
     /**
      * Run [query] and produce the first page outcome:
      *  - not searchable -> [EpubSearchOutcome.Unsupported] (no iterator opened),
-     *  - a `SearchError` while paging -> [EpubSearchOutcome.Error] (surfaced),
-     *  - zero hits -> [EpubSearchOutcome.NoResults],
-     *  - otherwise -> [EpubSearchOutcome.Results] with the grouped page.
+     *  - a `SearchError` while paging -> [EpubSearchOutcome.Error] (surfaced; iterator closed),
+     *  - zero hits -> [EpubSearchOutcome.NoResults] (iterator closed),
+     *  - otherwise -> [EpubSearchOutcome.Results]; if more remains, the page carries a live [EpubSearchCursor].
      *
      * The [query] is passed to Readium verbatim (no engine-side normalization).
      */
     suspend fun searchFirstPage(query: String): EpubSearchOutcome {
         if (!source.isSearchable()) return EpubSearchOutcome.Unsupported
-
         val iterator = source.openIterator(query)
+        return fillPage(iterator, leftover = emptyList())
+    }
+
+    /**
+     * Resume paging from a live [cursor] (its iterator + any leftover locators from the prior page's
+     * overflow), producing the next page. Same terminal semantics as [searchFirstPage] except a fully
+     * consumed cursor with zero further hits yields [EpubSearchOutcome.NoResults] (no more results).
+     */
+    suspend fun nextPage(cursor: EpubSearchCursor): EpubSearchOutcome =
+        fillPage(cursor.source, cursor.leftover)
+
+    /**
+     * Fill one page (up to [pageSize] hits) from [iterator], consuming [leftover] Readium locators FIRST
+     * (overflow carried from the previous page — never discarded), then pulling successive iterator pages.
+     * On a terminal state (exhaustion, error, or zero hits) the iterator is closed and the returned page's
+     * cursor is null; otherwise the iterator stays OPEN and the page carries a resumable cursor holding it
+     * plus any locators that overflowed this page's budget.
+     */
+    private suspend fun fillPage(
+        iterator: SearchIteratorSource,
+        leftover: List<ReadiumLocator>,
+    ): EpubSearchOutcome {
         val hits = ArrayList<EpubInBookHit>(pageSize)
-        var moreAvailable = false
+        // A mutable queue of locators still to place: the carried-over overflow drains first.
+        val pending = ArrayDeque(leftover)
+        var exhausted = false
+
         try {
-            // Fill up to pageSize hits, pulling successive iterator pages. An error at any point wins.
             while (hits.size < pageSize) {
+                // Place any pending locators (overflow / a just-fetched page) before fetching more.
+                while (pending.isNotEmpty() && hits.size < pageSize) {
+                    hits.add(pending.removeFirst().toHit())
+                }
+                if (hits.size >= pageSize) break
                 when (val result = iterator.nextPage()) {
-                    is SearchPageResult.Failed -> return EpubSearchOutcome.Error(result.error)
-                    SearchPageResult.Exhausted -> {
-                        // No more content — the iterator is drained; nothing more to page in.
-                        moreAvailable = false
-                        break
+                    is SearchPageResult.Failed -> {
+                        iterator.close()
+                        return EpubSearchOutcome.Error(result.error)
                     }
-                    is SearchPageResult.Locators -> {
-                        for (locator in result.locators) {
-                            hits.add(locator.toHit())
-                            if (hits.size >= pageSize) {
-                                // Budget reached mid-Readium-page: more results remain to be paged.
-                                moreAvailable = true
-                                break
-                            }
-                        }
-                    }
+                    SearchPageResult.Exhausted -> { exhausted = true; break }
+                    is SearchPageResult.Locators -> pending.addAll(result.locators)
                 }
             }
-        } finally {
+        } catch (t: Throwable) {
             iterator.close()
+            throw t
         }
 
-        if (hits.isEmpty()) return EpubSearchOutcome.NoResults
-        return EpubSearchOutcome.Results(EpubSearchPage(groupByChapter(hits), moreAvailable))
+        if (hits.isEmpty()) {
+            iterator.close()
+            return EpubSearchOutcome.NoResults
+        }
+        // More remains iff the iterator was not exhausted (either overflow is queued in `pending`, or the
+        // iterator still has unfetched pages). Only a confirmed exhaustion with nothing pending is terminal.
+        val moreAvailable = !(exhausted && pending.isEmpty())
+        return if (moreAvailable) {
+            EpubSearchOutcome.Results(
+                EpubSearchPage(groupByChapter(hits), moreAvailable = true, cursor = EpubSearchCursor(iterator, pending.toList())),
+            )
+        } else {
+            iterator.close()
+            EpubSearchOutcome.Results(EpubSearchPage(groupByChapter(hits), moreAvailable = false, cursor = null))
+        }
     }
 
     /** Group hits by `Locator.title`, preserving first-seen title order. */
