@@ -77,7 +77,10 @@ fun shareBook(context: Context, book: Book) {
     }
 }
 
-/** The per-format share MIME (§share-hardening); unknown falls back to a generic binary type. */
+/**
+ * The per-format share MIME (§share-hardening). Exhaustive over the closed [BookFormat] enum, so there
+ * is no "unknown" case at runtime; adding a new format is a compile error here until it gets a MIME.
+ */
 fun mimeFor(format: BookFormat): String = when (format) {
     BookFormat.epub -> "application/epub+zip"
     BookFormat.pdf -> "application/pdf"
