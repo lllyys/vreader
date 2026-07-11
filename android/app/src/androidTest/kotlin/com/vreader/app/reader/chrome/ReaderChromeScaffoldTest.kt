@@ -9,6 +9,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
@@ -16,9 +17,11 @@ import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.click
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.vreader.app.annotations.AnnotationsSnapshot
+import com.vreader.app.reader.details.BookDetailsUiModel
 import com.vreader.app.reader.nav.TocEntry
 import com.vreader.app.reader.settings.ReaderTheme
 import vreader.contracts.Locator
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -99,5 +102,107 @@ class ReaderChromeScaffoldTest {
         val state = mutableStateOf(ReaderChromeState(chromeVisible = true, sheet = ReaderSheet.None))
         compose.setContent { scaffold(state, emptyList()) }
         compose.onAllNodesWithText("Contents", useUnmergedTree = true).assertCountEquals(0)
+    }
+
+    // --- feature #134 WI-5: the top-bar More button + Book Details route ---
+
+    private fun detailsModel() = BookDetailsUiModel(
+        title = "The Book",
+        author = "An Author",
+        tags = emptyList(),
+        formatLabel = "TXT",
+        sizeLabel = "1 KB",
+        pagesLabel = null,
+        fingerprintDisplay = "txt:aaaa…bbbb",
+        fingerprintFull = "txt:${"a".repeat(64)}:1024",
+        locationLabel = "Books/txt_a1b2",
+    )
+
+    @Composable
+    private fun moreScaffold(
+        state: MutableState<ReaderChromeState>,
+        bookDetails: BookDetailsUiModel?,
+        onShareBook: () -> Unit = {},
+        onCopyFingerprint: (String) -> Unit = {},
+    ) {
+        ReaderChromeScaffold(
+            theme = ReaderTheme.Paper,
+            title = "The Book",
+            chromeState = state,
+            onBack = {},
+            tocEntries = emptyList(),
+            currentTocIndex = 0,
+            annotations = emptySnapshot,
+            onJumpToc = { true },
+            onJumpToAnnotation = null,
+            onShareAnnotations = {},
+            bookDetails = bookDetails,
+            onShareBook = onShareBook,
+            onCopyFingerprint = onCopyFingerprint,
+            bottomChrome = { onOpenContents, onOpenNotes ->
+                ReaderBottomChrome(
+                    ReaderTheme.Paper, progress = 0f, displayPage = 1, totalPages = 10,
+                    onScrub = {}, onOpenDisplay = {}, onOpenContents = onOpenContents, onOpenNotes = onOpenNotes,
+                )
+            },
+            body = { Box(Modifier.fillMaxSize().testTag("reader-body")) },
+        )
+    }
+
+    @Test fun moreButtonShown_whenBookDetailsSupplied() {
+        val state = mutableStateOf(ReaderChromeState(chromeVisible = true, sheet = ReaderSheet.None))
+        compose.setContent { moreScaffold(state, detailsModel()) }
+        compose.onNodeWithTag("chrome-more", useUnmergedTree = true).assertExists()
+    }
+
+    @Test fun tappingMore_showsPopupWithDetailsAndShareOnly() {
+        val state = mutableStateOf(ReaderChromeState(chromeVisible = true, sheet = ReaderSheet.None))
+        compose.setContent { moreScaffold(state, detailsModel()) }
+        compose.onNodeWithTag("chrome-more", useUnmergedTree = true).performClick()
+        compose.onNodeWithTag("more-popup", useUnmergedTree = true).assertExists()
+        compose.onNodeWithTag("more-row-details", useUnmergedTree = true).assertExists()
+        compose.onNodeWithTag("more-row-share", useUnmergedTree = true).assertExists()
+        // No dead TTS / Auto-turn / Bilingual / Export rows.
+        compose.onAllNodesWithTag("more-row-tts", useUnmergedTree = true).assertCountEquals(0)
+        compose.onAllNodesWithTag("more-row-auto_turn", useUnmergedTree = true).assertCountEquals(0)
+        compose.onAllNodesWithTag("more-row-bilingual", useUnmergedTree = true).assertCountEquals(0)
+        compose.onAllNodesWithTag("more-row-export", useUnmergedTree = true).assertCountEquals(0)
+    }
+
+    @Test fun tappingDetailsRow_opensBookDetailsSheet() {
+        val state = mutableStateOf(ReaderChromeState(chromeVisible = true, sheet = ReaderSheet.None))
+        compose.setContent { moreScaffold(state, detailsModel()) }
+        compose.onNodeWithTag("chrome-more", useUnmergedTree = true).performClick()
+        compose.onNodeWithTag("more-row-details", useUnmergedTree = true).performClick()
+        assertEquals(ReaderSheet.Details, state.value.sheet)
+    }
+
+    @Test fun tappingShareRow_firesOnShareBook() {
+        val state = mutableStateOf(ReaderChromeState(chromeVisible = true, sheet = ReaderSheet.None))
+        var shared = false
+        compose.setContent { moreScaffold(state, detailsModel(), onShareBook = { shared = true }) }
+        compose.onNodeWithTag("chrome-more", useUnmergedTree = true).performClick()
+        compose.onNodeWithTag("more-row-share", useUnmergedTree = true).performClick()
+        assertTrue(shared)
+    }
+
+    @Test fun detailsRoute_rendersBookDetailsSheet() {
+        val state = mutableStateOf(ReaderChromeState(chromeVisible = true, sheet = ReaderSheet.Details))
+        compose.setContent { moreScaffold(state, detailsModel()) }
+        compose.onNodeWithTag("book-details-sheet-content", useUnmergedTree = true).assertExists()
+    }
+
+    @Test fun moreButtonHidden_whenNoBookDetails() {
+        // No data source → no More button (the #129 no-dead-control rule).
+        val state = mutableStateOf(ReaderChromeState(chromeVisible = true, sheet = ReaderSheet.None))
+        compose.setContent { moreScaffold(state, bookDetails = null) }
+        compose.onAllNodesWithTag("chrome-more", useUnmergedTree = true).assertCountEquals(0)
+    }
+
+    @Test fun detailsRoute_withNullBookDetails_showsNothing() {
+        // Defensive: a Details route with no model (should not happen, but must not crash / NPE).
+        val state = mutableStateOf(ReaderChromeState(chromeVisible = true, sheet = ReaderSheet.Details))
+        compose.setContent { moreScaffold(state, bookDetails = null) }
+        compose.onAllNodesWithTag("book-details-sheet-content", useUnmergedTree = true).assertCountEquals(0)
     }
 }

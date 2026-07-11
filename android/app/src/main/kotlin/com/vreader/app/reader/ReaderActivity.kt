@@ -102,6 +102,9 @@ class ReaderActivity : AppCompatActivity() {
     // feature #132 WI-7-EPUB — the live reading fraction (0..1) for the bottom band's progress scrubber,
     // read from the navigator's currentLocator totalProgression (EPUB scroll mode).
     private val chromeProgress = mutableStateOf(0f)
+    // feature #134 WI-5 — the More menu's Book-details model (null until the book loads AND its collection
+    // names are read → the More button is omitted until then; no dead control). Rebuilt on collection change.
+    private val chromeBookDetails = mutableStateOf<com.vreader.app.reader.details.BookDetailsUiModel?>(null)
 
     // feature #123 — in-reader highlighting
     private var highlightController: ReaderHighlightController? = null
@@ -182,6 +185,7 @@ class ReaderActivity : AppCompatActivity() {
             observeDisplaySettings(nav)
             observeHighlights(loaded, controller)
             observeAnnotationsSnapshot(loaded)
+            observeBookDetails(loaded)
             controller.observeActivations { id, rect -> onHighlightTapped(id, rect) }
         }
     }
@@ -214,6 +218,33 @@ class ReaderActivity : AppCompatActivity() {
                 chromeModel.value = chromeModel.value.copy(annotations = snapshot)
             }
         }
+    }
+
+    /** feature #134 WI-5 — build + keep the More menu's Book-details model in sync with this book's live
+     *  collection names (EPUB supplies no page count → the Pages row is omitted). The mapped model appears
+     *  on the [chromeBookDetails] state the top band/sheet layer read, so the More button appears once the
+     *  book + its collections are known (null until then — no dead control). */
+    private fun observeBookDetails(current: Book) {
+        lifecycleScope.launch {
+            container.collectionRepository.observeCollectionNamesForBook(current.fingerprintKey).collect { names ->
+                chromeBookDetails.value =
+                    com.vreader.app.reader.details.BookDetailsMapper.map(current, names, pageCount = null)
+            }
+        }
+    }
+
+    /** feature #134 WI-5 — copy the FULL canonical fingerprint to the OS clipboard (the Book Details
+     *  copy-fingerprint mini-action). Rely on the OS copy confirmation — no invented toast (rule 51). */
+    private fun copyFingerprint(fingerprintFull: String) {
+        val clip = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        clip.setPrimaryClip(ClipData.newPlainText("fingerprint", fingerprintFull))
+    }
+
+    /** feature #134 WI-5 — the More menu's Share book action: launch the WI-2 book-file share chooser for
+     *  the current book (a missing/out-of-scope file or no receiver is a silent no-op — WI-2 handles it). */
+    private fun shareBookFile() {
+        val current = book ?: return
+        com.vreader.app.reader.share.shareBook(this, current)
     }
 
     /** A tap on an existing highlight decoration → open the popover in EDIT mode (Note/Copy/Share/Remove). */
@@ -441,11 +472,26 @@ class ReaderActivity : AppCompatActivity() {
                     chromeState = chromeState,
                     onJumpToc = ::jumpToTocEntry,
                     onShareAnnotations = { shareAnnotations(chromeModel.value.annotations) },
+                    // feature #134 WI-5 — the Book Details route + its Share / copy-fingerprint actions.
+                    bookDetails = chromeBookDetails.value,
+                    onShareBook = ::shareBookFile,
+                    onCopyFingerprint = ::copyFingerprint,
                 )
             }
         }
         val topBand = ComposeView(this).apply {
-            setContent { EpubTopBand(model = chromeModel, theme = chromeTheme.value, onBack = { finish() }) }
+            setContent {
+                // feature #134 WI-5 — the top-bar More button (shown once chromeBookDetails is populated)
+                // toggles the More popup; Details writes ReaderSheet.Details, Share launches the book share.
+                EpubTopBand(
+                    model = chromeModel,
+                    theme = chromeTheme.value,
+                    onBack = { finish() },
+                    chromeState = chromeState,
+                    bookDetails = chromeBookDetails.value,
+                    onShareBook = ::shareBookFile,
+                )
+            }
         }
         val bottomBand = ComposeView(this).apply {
             setContent {

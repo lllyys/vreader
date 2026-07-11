@@ -126,6 +126,14 @@ class Azw3ReaderActivity : ComponentActivity() {
                         value = runCatching { container.annotationsRepository.annotationsForBook(bookKey) }
                             .getOrDefault(AnnotationsSnapshot(emptyList(), emptyList()))
                     }
+                    // feature #134 WI-5 — the More menu's Book-details model (mapped from the book + its
+                    // live collection names). AZW3 supplies no page count (pageCount=null).
+                    val collectionNames by container.collectionRepository
+                        .observeCollectionNamesForBook(bookKey)
+                        .collectAsStateWithLifecycle(initialValue = emptyList())
+                    val bookDetails = remember(o.book, collectionNames) {
+                        com.vreader.app.reader.details.BookDetailsMapper.map(o.book, collectionNames, pageCount = null)
+                    }
                     Azw3ReaderChrome(
                         theme = displayTheme.theme,
                         title = o.book.title,
@@ -133,6 +141,9 @@ class Azw3ReaderActivity : ComponentActivity() {
                         annotations = annotationsSnapshot,
                         onBack = ::finish,
                         onShareAnnotations = { shareAnnotations(annotationsSnapshot) },
+                        bookDetails = bookDetails,
+                        onShareBook = { com.vreader.app.reader.share.shareBook(this@Azw3ReaderActivity, o.book) },
+                        onCopyFingerprint = { copyFingerprint(it) },
                         body = {
                             Azw3ReaderHost(
                                 book = o.book,
@@ -174,6 +185,13 @@ class Azw3ReaderActivity : ComponentActivity() {
     override fun onDestroy() {
         super.onDestroy()
         saveRequests.close()
+    }
+
+    /** feature #134 WI-5 — copy the FULL canonical fingerprint to the OS clipboard (the Book Details
+     *  copy-fingerprint mini-action). Rely on the OS copy confirmation — no invented toast (rule 51). */
+    private fun copyFingerprint(fingerprintFull: String) {
+        val clip = getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+        clip.setPrimaryClip(android.content.ClipData.newPlainText("fingerprint", fingerprintFull))
     }
 
     /** feature #132 WI-7-hosts — share ALL reviewed annotations as one plain-text blob (the review sheet's
@@ -306,6 +324,10 @@ internal fun Azw3ReaderChrome(
     onBack: () -> Unit,
     onShareAnnotations: () -> Unit,
     body: @Composable () -> Unit,
+    // feature #134 WI-5 — the More menu's Book-details model + Share/copy actions (null model → no More).
+    bookDetails: com.vreader.app.reader.details.BookDetailsUiModel? = null,
+    onShareBook: () -> Unit = {},
+    onCopyFingerprint: (String) -> Unit = {},
 ) {
     Column(Modifier.fillMaxSize().background(theme.background).systemBarsPadding()) {
         ReaderChromeScaffold(
@@ -320,12 +342,16 @@ internal fun Azw3ReaderChrome(
             // AZW3 tap-to-jump is NULL — review-only capability gate (no goTo until #135); cards non-clickable.
             onJumpToAnnotation = null,
             onShareAnnotations = onShareAnnotations,
-            // Search/More/bookmark top-bar slots stay null (#133/#134/#135 — no dead controls).
+            // Search/bookmark top-bar slots stay null (#133/#135 — no dead controls). feature #134 WI-5:
+            // the More button + Book Details / Share are wired through the scaffold's More menu below.
             bottomChrome = { _, onOpenNotes ->
                 // AZW3 has no Contents (empty TOC) + no Display control → Notes only.
                 Azw3NotesBottomChrome(theme = theme, onOpenNotes = onOpenNotes)
             },
             body = body,
+            bookDetails = bookDetails,
+            onShareBook = onShareBook,
+            onCopyFingerprint = onCopyFingerprint,
         )
     }
 }
