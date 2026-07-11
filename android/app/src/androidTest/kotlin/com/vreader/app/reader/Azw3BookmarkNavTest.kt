@@ -7,6 +7,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import androidx.webkit.WebViewAssetLoader
 import com.vreader.app.annotations.AnnotationsRepository
 import com.vreader.app.annotations.BookmarkToggleResult
+import com.vreader.app.data.BookEntity
 import com.vreader.app.data.VReaderDatabase
 import com.vreader.app.reader.foliate.Azw3DocState
 import com.vreader.app.reader.foliate.Azw3Document
@@ -67,6 +68,24 @@ class Azw3BookmarkNavTest {
             val annotations = AnnotationsRepository(db.annotationDao())
             val bookKey = Locator("a".repeat(64), 2048, "azw3").fingerprintKey
             val at = Locator("a".repeat(64), 2048, "azw3", progression = 0.4)
+
+            // Seed the PARENT book row so the `bookmarks.bookKey -> books.fingerprintKey` FK is satisfied
+            // (in-memory Room enforces FKs; without this the first toggle's insert aborts with a
+            // SQLiteConstraintException before any of the create/remove assertions below can run). The
+            // BookEntity carries the SAME synthetic identity triple the `at` locator's fingerprintKey encodes.
+            db.bookDao().upsert(
+                BookEntity(
+                    fingerprintKey = bookKey,
+                    title = "Synthetic AZW3",
+                    originalFormat = "azw3",
+                    contentSHA256 = "a".repeat(64),
+                    fileByteCount = 2048L,
+                    localFilePath = null,
+                    sourceUri = null,
+                    addedAt = 1L,
+                    lastOpenedAt = null,
+                ),
+            )
 
             assertTrue("nothing bookmarked at the position yet", !annotations.isBookmarked(bookKey, at))
 
