@@ -189,6 +189,42 @@ class BookmarkPresentationTest {
         assertEquals("C700", row.chapter)
     }
 
+    @Test fun epub_hrefFallbackPicksGreatestProgressionNotListOrder() {
+        // Same-href entries OUT of list order + a non-monotonic TOC (forces the href fallback). The
+        // fallback must pick the entry with the GREATEST progression <= target, not the last in list
+        // order. (Also includes a distinct href to keep the TOC non-monotonic and multi-chapter.)
+        val toc = index(
+            TocEntry("Preface", 0, "0",
+                Locator(sha, 1234L, "epub", href = "front.xhtml", progression = 0.0), null),
+            TocEntry("Section A (0.40)", 0, "10",
+                Locator(sha, 1234L, "epub", href = "ch.xhtml", progression = 0.40), null),
+            TocEntry("Section B (0.10)", 0, "5",
+                Locator(sha, 1234L, "epub", href = "ch.xhtml", progression = 0.10), null),
+        )
+        val row = BookmarkPresentation.bookmarkRow(
+            record(BookFormat.epub, href = "ch.xhtml", progression = 0.50),
+            BookFormat.epub, toc, null, dateRenderer,
+        )
+        // A=0.40 is the nearest at/above; B=0.10 is farther even though it appears LAST in the list.
+        assertEquals("Section A (0.40)", row.chapter)
+        assertEquals("10", row.pageLabel)
+    }
+
+    @Test fun epub_hrefFallbackSkipsNullProgressionEntry() {
+        // A same-href entry with a null progression is unplaceable -> skipped, never fabricated.
+        val toc = index(
+            TocEntry("Placeable (0.20)", 0, "8",
+                Locator(sha, 1234L, "epub", href = "ch.xhtml", progression = 0.20), null),
+            TocEntry("Unplaceable (null)", 0, "9",
+                Locator(sha, 1234L, "epub", href = "ch.xhtml", progression = null), null),
+        )
+        val row = BookmarkPresentation.bookmarkRow(
+            record(BookFormat.epub, href = "ch.xhtml", progression = 0.50),
+            BookFormat.epub, toc, null, dateRenderer,
+        )
+        assertEquals("Placeable (0.20)", row.chapter)
+    }
+
     @Test fun epub_targetWithoutTotalProgressionAndUnknownHrefYieldsNullChapter() {
         // The target has neither totalProgression nor a matching href -> no fabricated chapter.
         val toc = index(

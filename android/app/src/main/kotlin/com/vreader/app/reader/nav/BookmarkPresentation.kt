@@ -97,27 +97,37 @@ class BookmarkTocIndex private constructor(
     }
 
     /**
-     * The last TOC entry whose `href` matches the target's and whose in-chapter `progression` is at or
-     * before the target's — the chapter the bookmark lives in. Null when no entry shares the href.
+     * The same-`href` TOC entry whose in-chapter `progression` is the GREATEST at or before the target's
+     * — the chapter the bookmark lives in — chosen by `progression`, NOT by list order (a same-href TOC
+     * can be out of order). An entry with a null `progression` is treated as unplaceable and skipped
+     * (conservative: never select a chapter whose position can't be compared). Null when no same-href
+     * entry qualifies.
      */
     private fun hrefFallback(target: Locator): TocEntry? {
         val href = target.href ?: return null
         val targetProg = target.progression ?: 0.0
         var best: TocEntry? = null
+        var bestProg = Double.NEGATIVE_INFINITY
         for (entry in entries) {
             val loc = entry.canonicalLocator
             if (loc.href != href) continue
-            if ((loc.progression ?: 0.0) <= targetProg) best = entry
+            val prog = loc.progression ?: continue // unplaceable -> skip, don't fabricate
+            if (prog <= targetProg && prog >= bestProg) {
+                best = entry
+                bestProg = prog
+            }
         }
         return best
     }
 
     companion object {
         /**
-         * Build the index from a reading-ordered TOC, validating the fast-path invariant in a SINGLE
-         * O(n) pass. The caller owns the TOC's immutability (it is loaded once and not mutated), so the
-         * list is retained by reference rather than defensively copied — a copy would double the O(n)
-         * build cost for a huge book to no benefit given the ownership contract.
+         * Build the index from a reading-ordered TOC, validating the fast-path invariant in a single
+         * pass (up to O(n) — it exits early at the first entry that breaks the invariant, so the
+         * monotonic flag is still safe: the flag is set true only when the WHOLE list validated). The
+         * caller owns the TOC's immutability (it is loaded once and not mutated), so the list is retained
+         * by reference rather than defensively copied — a copy would add another O(n) for a huge book to
+         * no benefit given the ownership contract.
          */
         fun build(entries: List<TocEntry>): BookmarkTocIndex {
             var monotonic = true
