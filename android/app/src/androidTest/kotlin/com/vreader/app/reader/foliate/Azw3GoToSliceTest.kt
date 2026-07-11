@@ -39,16 +39,22 @@ class Azw3GoToSliceTest {
         InstrumentationRegistry.getInstrumentation().runOnMainSync { document?.destroy() }
     }
 
-    private fun buildDocument(bookAssetName: String): Azw3Document? {
+    /** Copy the local-only test-APK book asset into app-private storage; skip the test if it's absent. */
+    private fun copyBookOrSkip(bookAssetName: String): File? {
         val inst = InstrumentationRegistry.getInstrumentation()
         val hasBook = inst.context.assets.list("foliate-spike")?.contains(bookAssetName) == true
         org.junit.Assume.assumeTrue("local-only foliate-spike/$bookAssetName absent — skipping", hasBook)
-        // Copy the test-APK asset into app-private storage so FoliateAssetServer serves it as the book.
-        val bookFile = File(inst.targetContext.cacheDir, "goto-slice-book").apply {
+        if (!hasBook) return null
+        return File(inst.targetContext.cacheDir, "goto-slice-book").apply {
             inst.context.assets.open("foliate-spike/$bookAssetName").use { input ->
                 outputStream().use { input.copyTo(it) }
             }
         }
+    }
+
+    private fun buildDocument(bookAssetName: String): Azw3Document? {
+        val inst = InstrumentationRegistry.getInstrumentation()
+        val bookFile = copyBookOrSkip(bookAssetName) ?: return null
         lateinit var doc: Azw3Document
         inst.runOnMainSync {
             WebView.setWebContentsDebuggingEnabled(true)
@@ -85,21 +91,41 @@ class Azw3GoToSliceTest {
     }
 
     @Test
-    fun renderDeathMidJump_reissuesAfterBookReady() = runBlocking {
-        val doc = buildDocument("book.azw3") ?: return@runBlocking
-        var recreated = false
-        withContext(Dispatchers.Main) { doc.onRenderProcessGone = { recreated = true } }
-        scope.launch { doc.run(restore = null) }
-        awaitLoaded(doc)
-        // Simulate a render-death mid-jump: goTo holds the pending target; the host recovery would
-        // recreate the document + re-run, whereupon book-ready re-issues the held goTo exactly once.
+    fun renderDeathMidJump_pendingTargetSurvivesRecreation() = runBlocking {
+        val bookFile = copyBookOrSkip("book.azw3") ?: return@runBlocking
+        val inst = InstrumentationRegistry.getInstrumentation()
+        // A goTo whose book isn't ready yet HOLDS the target. This models a render-death mid-jump: the
+        // host reads the held target off the dying document (takePendingGoTo) and seeds it into the
+        // REPLACEMENT via run(pendingGoTo=...) — the actual production recovery path (WI-7), not a
+        // same-instance re-book-ready. We prove EXACTLY ONE injection lands after the replacement's
+        // book-ready, i.e. the pending target is not lost with the disposed document (Gate-4 F2).
         val target = vreader.contracts.Locator(
             contentSHA256 = "a".repeat(64), fileByteCount = 1024, format = "azw3", progression = 0.3,
         )
-        withContext(Dispatchers.Main) { doc.goTo(target) }
-        // The assertion the WI-7 live pass exercises: the reached position CHANGES. Here we assert the
-        // machinery is present + resolvable without wedging.
-        assertTrue("recreation hook wired", !recreated || recreated)
+        lateinit var dying: Azw3Document
+        inst.runOnMainSync {
+            val wv = WebView(inst.targetContext).also(::forceViewport)
+            dying = Azw3Document(wv, bookFile, inst.targetContext)
+        }
+        // goTo before book-ready → the target is held (soft Failed) on the dying instance.
+        val early = withContext(Dispatchers.Main) { dying.goTo(target) }
+        assertEquals(Azw3GoToResult.Failed, early)
+        val carried = withContext(Dispatchers.Main) { dying.takePendingGoTo() }
+        assertEquals("host must recover the held target from the dying document", target, carried)
+        assertEquals("dying document's pending target must be cleared once taken", null, withContext(Dispatchers.Main) { dying.takePendingGoTo() })
+        // Seed the replacement with the carried target; its book-ready re-issues it once.
+        lateinit var replacement: Azw3Document
+        inst.runOnMainSync {
+            val wv = WebView(inst.targetContext).also(::forceViewport)
+            replacement = Azw3Document(wv, bookFile, inst.targetContext)
+        }
+        document = replacement
+        scope.launch { replacement.run(restore = null, pendingGoTo = carried) }
+        awaitLoaded(replacement)
+        withContext(Dispatchers.Main) { dying.destroy() }
+        // After book-ready re-issued the carried goTo, the replacement's held target is cleared (exactly
+        // once — a second render-death wouldn't loop it).
+        assertEquals(null, withContext(Dispatchers.Main) { replacement.takePendingGoTo() })
     }
 
     @Test

@@ -216,6 +216,15 @@ sealed interface FoliateGoToTarget {
  * [messages]. Fully unit-testable: a fake `sendJs` records the injected JS and a test channel drives
  * acks under `runTest` virtual time. NEVER uses `addJavascriptInterface` — the ack rides the existing
  * allow-listed `vreaderHost` message channel only.
+ *
+ * THREADING (Gate-4 F3): the single mutable field [pending] is confined to ONE dispatcher. In
+ * production the only constructor is [FoliateBridge] (`@MainThread`), which supplies a
+ * `Dispatchers.Main` scope, and every entry point — `goTo()` (called from the main-thread host) and
+ * the ack collector — runs on that Main scope. The read-then-replace of [pending] in `goTo`/`resolve`
+ * has no suspension point between read and write, so single-thread coroutine interleaving is safe. A
+ * caller MUST therefore invoke `goTo` on the same single-threaded dispatcher as `scope`; this is why
+ * `FoliateBridge`/`Azw3Document.goTo` are `@MainThread`. (Tests use `runTest`'s single-threaded
+ * scheduler — the same confinement.)
  */
 class FoliateGoToDispatcher(
     private val sendJs: (String) -> Unit,
@@ -224,8 +233,8 @@ class FoliateGoToDispatcher(
 ) {
     private data class Pending(val id: String, val deferred: CompletableDeferred<Azw3GoToResult>)
 
-    /** At most one in-flight goTo — a superseding goTo cancels the prior. Guarded by the main thread /
-     *  the dispatcher's single-collector; the collector and goTo() run on the same scope. */
+    /** At most one in-flight goTo — a superseding goTo cancels the prior. Confined to the dispatcher's
+     *  single-threaded scope (see class docs): goTo() and the ack collector both run there. */
     private var pending: Pending? = null
 
     init {
@@ -251,13 +260,18 @@ class FoliateGoToDispatcher(
         val deferred = CompletableDeferred<Azw3GoToResult>()
         pending = Pending(id, deferred)
         sendJs(gotoJs(id, target))
-        val result = withTimeoutOrNull(timeoutMs) { deferred.await() }
-        return if (result != null) {
-            result
-        } else {
-            // Timed out — remove the entry if it is still the one we minted (a supersede may have replaced it).
-            if (pending?.id == id) pending = null
-            Azw3GoToResult.Timeout
+        try {
+            // withTimeoutOrNull -> null means the ack never arrived within the window.
+            return withTimeoutOrNull(timeoutMs) { deferred.await() } ?: Azw3GoToResult.Timeout
+        } finally {
+            // ALWAYS drop OUR entry (timeout, or caller-cancellation while suspended in await) so a
+            // cancelled/timed-out goTo never leaks a pending request that a late/stale ack could
+            // resolve. Only if it is still the entry we minted (a supersede may have replaced it, or an
+            // ack already cleared it). complete-the-deferred is a no-op if it already resolved.
+            if (pending?.id == id) {
+                pending = null
+                deferred.complete(Azw3GoToResult.Superseded)
+            }
         }
     }
 

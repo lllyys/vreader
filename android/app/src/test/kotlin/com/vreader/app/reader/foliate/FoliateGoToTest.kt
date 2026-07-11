@@ -118,6 +118,24 @@ class FoliateGoToTest {
     }
 
     @Test
+    fun cancelledGoTo_clearsPending_andLateAckIsIgnored() = runTest {
+        val h = Harness(backgroundScope)
+        val job = async { h.dispatcher.goTo(FoliateGoToTarget.Cfi("/2"), timeoutMs = 60_000) }
+        runCurrent()
+        assertEquals(1, h.dispatcher.pendingCount())
+        val id = h.requestIdOf(h.sent.first())
+        // Cancel the caller while it is suspended in await(): the pending entry must be cleared in the
+        // finally block so a cancelled goTo does NOT leak a request a late/stale ack could resolve.
+        job.cancel()
+        runCurrent()
+        assertEquals("cancelled goTo must clear its pending entry", 0, h.dispatcher.pendingCount())
+        // A late ack for the cancelled id must be a no-op (nothing to resolve).
+        h.messages.emit(FoliateMessage.GoToAck(id, ok = true, cfi = "/2", fraction = 0.1))
+        runCurrent()
+        assertEquals(0, h.dispatcher.pendingCount())
+    }
+
+    @Test
     fun injectedJs_isJsonEscaped_andCallsShimGoTo() = runTest {
         val h = Harness(backgroundScope)
         // A hostile CFI with a quote + newline must be neutralized by jsString (JSON-encoded) so it

@@ -64,6 +64,13 @@ class Azw3Document(
      * feature #135 WI-2 — a goTo target awaiting a render (the book isn't ready yet, or the render
      * process died mid-jump). Re-issued EXACTLY ONCE after the next book-ready so a bookmark jump
      * survives a renderer restart without an infinite re-issue loop. Main-thread-owned.
+     *
+     * IMPORTANT (Gate-4 F2): render-death recovery in the host (`Azw3ReaderActivity`, wired by WI-7)
+     * DISPOSES this document and creates a fresh one — so an in-document field alone does NOT survive
+     * that path. The host carries the pending target across recreation via [takePendingGoTo] (read on
+     * the dying instance) → [run]'s `pendingGoTo` argument (seeded on the replacement), mirroring how
+     * `resume`/`restore` already survive. The in-document re-issue at book-ready covers the case where
+     * the SAME instance receives a fresh book-ready (e.g. an in-place reopen).
      */
     private var pendingGoTo: Locator? = null
 
@@ -71,14 +78,25 @@ class Azw3Document(
     private var reissueScope: CoroutineScope? = null
 
     /**
+     * feature #135 WI-2 — the host reads + CLEARS the pending goTo target from a dying document during
+     * render-death recovery, then seeds it into the replacement via [run]'s `pendingGoTo` argument, so
+     * an in-flight bookmark jump survives the document recreation (Gate-4 F2). Main-thread only.
+     */
+    fun takePendingGoTo(): Locator? = pendingGoTo.also { pendingGoTo = null }
+
+    /**
      * Wire the bridge and load, then SUSPEND collecting messages until cancelled. Call from a
      * HOLDER-SCOPED `LaunchedEffect` on the Main dispatcher (WebView is main-thread-only) so a reload
      * / dispose cancels the collector and never retains the old document/bridge/WebView. The
      * `onSubscription { load() }` guarantees the collector is subscribed BEFORE the bundle emits (no
      * hot-flow race), so `bridge-ready`/`book-ready` are never missed.
+     *
+     * [pendingGoTo] (feature #135 WI-2) seeds a bookmark jump the host carried across a render-death
+     * recreation — it is re-issued EXACTLY ONCE after this instance's book-ready.
      */
-    suspend fun run(restore: VReaderLocator?) {
+    suspend fun run(restore: VReaderLocator?, pendingGoTo: Locator? = null) {
         this.restore = restore
+        this.pendingGoTo = pendingGoTo
         reissueScope = CoroutineScope(currentCoroutineContext())
         bridge.onWebViewUnsupported = { _state.value = Azw3DocState.WebViewUnsupported }
         bridge.onRenderProcessGone = { onRenderProcessGone?.invoke(); true } // survive; host recreates
