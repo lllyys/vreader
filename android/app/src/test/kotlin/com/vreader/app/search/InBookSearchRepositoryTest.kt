@@ -5,8 +5,6 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
-import kotlinx.coroutines.test.advanceUntilIdle
-import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -149,12 +147,14 @@ class InBookSearchRepositoryTest {
     }
 
     private class FakeIterator(private val pages: MutableList<Canned>) : SearchIteratorSource {
+        var closeCount = 0
+        val closed: Boolean get() = closeCount > 0
         override suspend fun nextPage(): SearchPageResult =
             when (val next = if (pages.isEmpty()) Canned.Exhausted else pages.removeAt(0)) {
                 is Canned.Page -> SearchPageResult.Locators(next.locators)
                 Canned.Exhausted -> SearchPageResult.Exhausted
             }
-        override fun close() = Unit
+        override fun close() { closeCount++ }
     }
 
     private class FakeSource(
@@ -162,10 +162,14 @@ class InBookSearchRepositoryTest {
         private val pages: List<Canned> = emptyList(),
     ) : PublicationSearchSource {
         var openedWithQuery: String? = null
+        var openCount = 0
+        val iterators = mutableListOf<FakeIterator>()
+        val lastIterator: FakeIterator? get() = iterators.lastOrNull()
         override suspend fun isSearchable(): Boolean = searchable
         override suspend fun openIterator(query: String): SearchIteratorSource {
             openedWithQuery = query
-            return FakeIterator(pages.toMutableList())
+            openCount++
+            return FakeIterator(pages.toMutableList()).also { iterators.add(it) }
         }
     }
 
@@ -410,26 +414,41 @@ class InBookSearchRepositoryTest {
 
     // ---- Cancellation mid-expansion ----------------------------------------------------------------
 
+    /** A resolver that SUSPENDS the first occurrence on a gate so the coroutine can be cancelled DURING the
+     *  repository's per-occurrence expansion loop (after the DAO returned a chunk and the matcher located
+     *  occurrences), exercising the repository's own `ensureActive()` in the expansion body. */
+    private inner class GatedResolver(
+        private val started: CompletableDeferred<Unit>,
+        private val gate: CompletableDeferred<Unit>,
+    ) : InBookSearchHitResolver {
+        var resolvedCount = 0
+        override fun resolve(sectionIndex: Int, occurrence: RawOccurrence): Locator? {
+            resolvedCount++
+            if (resolvedCount == 1) {
+                started.complete(Unit)
+                // Block until the gate opens so the cancellation lands mid-expansion.
+                while (!gate.isCompleted) { Thread.sleep(1) }
+            }
+            return FakeResolver().resolve(sectionIndex, occurrence)
+        }
+    }
+
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     @Test
-    fun cancellation_midExpansion_stopsFetchingPages() = runTest {
+    fun cancellation_midExpansion_stopsBeforeNextOccurrence() = runTest {
         val started = CompletableDeferred<Unit>()
         val gate = CompletableDeferred<Unit>()
-        // A DAO whose first page BLOCKS on a gate so we can cancel the coroutine while it is expanding.
-        val blockingDao = object {
-            var pagesFetched = 0
-            suspend fun matchingChunksPage(): List<SearchSectionEntity> {
-                pagesFetched++
-                if (pagesFetched == 1) { started.complete(Unit); gate.await() }
-                return emptyList()
-            }
-        }
+        val gated = GatedResolver(started, gate)
+        // One chunk with 3 occurrences of "cat" — the repository expands them one by one; cancellation is
+        // requested while the FIRST occurrence is being resolved, so the repository's expansion-loop
+        // `ensureActive()` must throw BEFORE the second occurrence is resolved.
+        val dao = FakeSearchDao(listOf(chunk(0, 0, 10L, "cat cat cat")))
         val repo = InBookSearchRepository(
-            dispatcher = StandardTestDispatcher(testScheduler),
+            dispatcher = kotlinx.coroutines.Dispatchers.Default, // a REAL background dispatcher so the blocking gate does not stall the test scheduler
             fts = InBookFtsDeps(
-                matchingChunksPage = { _, _, _, _, _ -> blockingDao.matchingChunksPage() },
-                chunkAtOrAfter = { _, _, _, _ -> null },
-                resolverFor = { FakeResolver() },
+                matchingChunksPage = { q, si, co, id, limit -> dao.matchingChunksPage(q, si, co, id, limit) },
+                chunkAtOrAfter = { q, si, co, id -> dao.chunkAtOrAfter(q, si, co, id) },
+                resolverFor = { gated },
             ),
             epubEngineFor = { error("no epub") },
         )
@@ -437,13 +456,90 @@ class InBookSearchRepositoryTest {
         val job: Job = launch {
             repo.page(bookKey, BookFormat.txt, "cat", cursor = null, pageSize = 50)
         }
-        runCurrent()
-        started.await()
-        job.cancel()
-        gate.complete(Unit)
-        advanceUntilIdle()
+        started.await()          // the resolver reached the FIRST occurrence and is blocked in expansion.
+        job.cancel()             // request cancellation WHILE expanding.
+        gate.complete(Unit)      // release the resolver so the loop reaches the next `ensureActive()`.
+        job.join()
 
         assertTrue("the coroutine was cancelled", job.isCancelled)
-        assertEquals("no further DAO page fetched after cancellation", 1, blockingDao.pagesFetched)
+        // The repository's expansion-loop ensureActive() must stop BEFORE resolving occurrence #2 or #3.
+        assertEquals("expansion stopped at the first occurrence after cancellation", 1, gated.resolvedCount)
+    }
+
+    // ---- Resolver-null continuation (Gate-4 Medium — never terminate early on a fully-unresolvable slice) ----
+
+    @Test
+    fun txt_sliceAllUnresolvable_keepsPaging_notPrematureNoResults() = runTest {
+        val d = StandardTestDispatcher(testScheduler)
+        // A resolver that returns null for section 0 (all occurrences unresolvable) but resolves section 1.
+        val nullingResolver = object : InBookSearchHitResolver {
+            override fun resolve(sectionIndex: Int, occurrence: RawOccurrence): Locator? =
+                if (sectionIndex == 0) null else FakeResolver().resolve(sectionIndex, occurrence)
+        }
+        // Section 0 has 3 "cat" occurrences (all unresolvable), section 1 has 1 (resolvable). pageSize=2.
+        val dao = FakeSearchDao(listOf(
+            chunk(0, 0, 10L, "cat cat cat"),
+            chunk(1, 1, 11L, "cat"),
+        ))
+        val repo = InBookSearchRepository(
+            dispatcher = d,
+            fts = InBookFtsDeps(
+                matchingChunksPage = { q, si, co, id, limit -> dao.matchingChunksPage(q, si, co, id, limit) },
+                chunkAtOrAfter = { q, si, co, id -> dao.chunkAtOrAfter(q, si, co, id) },
+                resolverFor = { nullingResolver },
+            ),
+            epubEngineFor = { error("no epub") },
+        )
+
+        var outcome = repo.page(bookKey, BookFormat.txt, "cat", cursor = null, pageSize = 2)
+        // Page 1: section 0's slice is entirely unresolvable, but nextOccurrenceIndex established a cursor —
+        // the page must NOT be a premature NoResults; it carries the continuation.
+        assertTrue("an all-unresolvable-but-continuable slice is Results, not NoResults", outcome is InBookSearchOutcome.Results)
+        var resolvedHits = 0
+        var guard = 0
+        while (outcome is InBookSearchOutcome.Results && guard++ < 20) {
+            val page = outcome.page
+            resolvedHits += page.groups.sumOf { it.hits.size }
+            outcome = if (page.moreAvailable) {
+                repo.page(bookKey, BookFormat.txt, "cat", cursor = page.nextCursor, pageSize = 2)
+            } else break
+        }
+        // Section 1's single resolvable occurrence is eventually reached (the search did not terminate early).
+        assertEquals("section 1's resolvable hit is reachable across pages", 1, resolvedHits)
+    }
+
+    // ---- EPUB iterator lifecycle (Gate-4 High — a same-book query swap / abandonment closes the iterator) ----
+
+    @Test
+    fun epub_sameBookNewQuery_closesPreviousQueryIterator() = runTest {
+        val d = StandardTestDispatcher(testScheduler)
+        // pageSize=1 with two locators → the first query leaves a LIVE cursor (moreAvailable=true).
+        val l = listOf(rloc(title = "C", highlight = "cat1"), rloc(title = "C", highlight = "cat2"))
+        val source = FakeSource(searchable = true, pages = listOf(Canned.Page(l), Canned.Exhausted))
+        val repo = epubRepo(source, d, pageSize = 1)
+
+        val page1 = (repo.page(bookKey, BookFormat.epub, "cat", cursor = null, pageSize = 1) as InBookSearchOutcome.Results).page
+        assertTrue("the first query left a live cursor", page1.moreAvailable)
+        val iter1 = source.lastIterator!!
+        assertFalse("the first query's iterator is open while held", iter1.closed)
+
+        // A NEW query on the SAME book (a fresh null-cursor page) must dispose the first query's iterator.
+        repo.page(bookKey, BookFormat.epub, "dog", cursor = null, pageSize = 1)
+        assertTrue("a same-book query swap closes the prior query's iterator (no leak)", iter1.closed)
+    }
+
+    @Test
+    fun epub_closeAllEpubCursors_disposesHeldIterator() = runTest {
+        val d = StandardTestDispatcher(testScheduler)
+        val l = listOf(rloc(title = "C", highlight = "cat1"), rloc(title = "C", highlight = "cat2"))
+        val source = FakeSource(searchable = true, pages = listOf(Canned.Page(l), Canned.Exhausted))
+        val repo = epubRepo(source, d, pageSize = 1)
+
+        repo.page(bookKey, BookFormat.epub, "cat", cursor = null, pageSize = 1)
+        val iter = source.lastIterator!!
+        assertFalse(iter.closed)
+
+        repo.closeAllEpubCursors()
+        assertTrue("closeAllEpubCursors disposes the held iterator (UI dismiss / session end)", iter.closed)
     }
 }

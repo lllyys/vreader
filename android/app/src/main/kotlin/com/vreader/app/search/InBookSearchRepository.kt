@@ -110,7 +110,13 @@ class InBookSearchRepository(
     ): InBookSearchOutcome {
         val engine = engineFor(bookKey)
         val outcome = when (cursor) {
-            null -> engine.searchFirstPage(rawQuery)
+            null -> {
+                // A FRESH first-page request supersedes any live cursor held for a prior query on THIS book
+                // (WI-8 replaces query A with B via flatMapLatest); close them so their Readium iterators
+                // never leak (Gate-4 High — a same-book query swap must dispose the old iterator).
+                closeAllEpubCursors()
+                engine.searchFirstPage(rawQuery)
+            }
             is SearchCursor.Epub -> {
                 val live = liveEpubCursors.remove(cursor.iteratorToken)
                     ?: return InBookSearchOutcome.Error("search cursor expired")
@@ -265,7 +271,12 @@ class InBookSearchRepository(
             }
         }
 
-        if (hits.isEmpty()) return InBookSearchOutcome.NoResults
+        // NoResults ONLY when the book is genuinely exhausted with nothing to show. If a continuation
+        // cursor survived (a slice whose occurrences ALL failed resolution, or a budget that filled at a
+        // chunk boundary), keep paging — otherwise later resolvable occurrences past the un-resolvable
+        // slice would be lost and `moreAvailable` would go false before whole-book exhaustion (Gate-4
+        // Medium — resolver-null must not prematurely terminate the search).
+        if (hits.isEmpty() && nextCursor == null) return InBookSearchOutcome.NoResults
         val groups = groupBySection(hits)
         return InBookSearchOutcome.Results(InBookSearchPage(groups, moreAvailable = nextCursor != null, nextCursor = nextCursor))
     }
