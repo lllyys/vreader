@@ -4,12 +4,15 @@
 // idempotent @Upsert), verifies the computed key matches the manifest, restores the manifest's
 // title/addedAt/lastOpenedAt/author via the single atomic applyRestoredMetadata seam (feature #128
 // WI-2 — author COALESCEd: manifest non-null wins, null preserves a coordinator backfill), THEN
-// restores the book's position (book-first so the position FK holds). A per-book failure (blob 404 /
-// fingerprint mismatch / import error) is collected and its position skipped — the rest restore.
-// Mirrors the iOS materializing-restore (WebDAVProvider + BookFileMaterializer). Idempotent: same
-// bytes ⇒ same key, no duplicate.
+// restores the book's position (book-first so the position FK holds), then (when the matching dao/repo
+// is wired) collections.json (feature #127) and annotations.json (feature #132 WI-8 — UUID-preserving,
+// idempotent, scoped to the manifest's in-selection books). A per-book failure (blob 404 / fingerprint
+// mismatch / import error) is collected and its position skipped — the rest restore. Mirrors the iOS
+// materializing-restore (WebDAVProvider + BookFileMaterializer). Idempotent: same bytes ⇒ same key,
+// no duplicate; a repeated restore of the same annotations applies 0.
 package com.vreader.app.backup
 
+import com.vreader.app.annotations.AnnotationsRepository
 import com.vreader.app.backup.archive.BackupArchiveReader
 import com.vreader.app.data.BookImporter
 import com.vreader.app.data.CollectionDao
@@ -20,6 +23,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import vreader.contracts.Locator
 import vreader.contracts.VReaderLocator
+import vreader.contracts.backup.BackupAnnotationsEnvelope
 import vreader.contracts.backup.BackupCollectionsEnvelope
 import vreader.contracts.backup.BackupJson
 import vreader.contracts.backup.BackupLibraryEntry
@@ -41,6 +45,8 @@ data class RestoreImportResult(
     val failed: List<RestoreBookFailure>,
     val positionsRestored: Int,
     val collectionsRestored: Int = 0,
+    // feature #132 WI-8 — the count of annotations (highlights + notes + bookmarks) freshly applied.
+    val annotationsRestored: Int = 0,
 )
 
 /**
@@ -57,6 +63,10 @@ class RestoreImporter(
     // feature #127 WI-6 — when present, collections.json is restored (merge by nameKey, membership
     // union) AFTER books so the membership FK holds. Null (default) skips collections (pre-#127).
     private val collectionDao: CollectionDao? = null,
+    // feature #132 WI-8 — when present, annotations.json is restored (UUID-preserving, idempotent,
+    // scoped to the manifest's in-selection books) AFTER books so the book row exists. Null (default)
+    // skips annotations (pre-#132).
+    private val annotationsRepository: AnnotationsRepository? = null,
 ) {
     suspend fun restore(
         reader: BackupArchiveReader,
@@ -87,7 +97,27 @@ class RestoreImporter(
         // restore / retryBook restores only memberships for the selected books and skips collections with no
         // selected member (so a single-book retry can't materialize unrelated collections — Gate-4 High).
         val collectionsRestored = restoreCollections(reader, selection)
-        RestoreImportResult(restored, failed, positionsRestored, collectionsRestored)
+        // Annotations restore AFTER books (the annotation's bookKey references a restored book). Scope =
+        // the manifest books in selection (all of them for a full restore) — WI-6b drops any row whose
+        // book isn't in that allowed set. Uses the manifest scope (not just the books that actually
+        // downloaded a blob) so an annotation for an already-local book still restores, iOS parity.
+        val allowedBookKeys = books.mapTo(HashSet()) { it.fingerprintKey }
+        val annotationsRestored = restoreAnnotations(reader, allowedBookKeys)
+        RestoreImportResult(restored, failed, positionsRestored, collectionsRestored, annotationsRestored)
+    }
+
+    /** Restore annotations.json (feature #132 WI-8): decode the [BackupAnnotationsEnvelope] and hand it
+     *  to WI-6b's UUID-preserving, idempotent [AnnotationsRepository.restoreAnnotations] scoped to
+     *  [allowedBookKeys] (rows for a book outside the scope are dropped). Absent section (a pre-#132
+     *  backup) / wrong-schema → 0, no crash — the same tolerance decodePositions has. Returns the total
+     *  freshly-applied count across highlights + notes + bookmarks. */
+    private suspend fun restoreAnnotations(reader: BackupArchiveReader, allowedBookKeys: Set<String>): Int {
+        val repo = annotationsRepository ?: return 0
+        val json = reader.sectionJson(BackupCollector.ANNOTATIONS_SECTION) ?: return 0
+        val env = runCatching { BackupJson.decode<BackupAnnotationsEnvelope>(json) }.getOrNull() ?: return 0
+        if (env.schemaVersion !in BackupSchema.ACCEPTED_SCHEMA_VERSIONS) return 0
+        val report = repo.restoreAnnotations(env, allowedBookKeys)
+        return report.highlights.applied + report.notes.applied + report.bookmarks.applied
     }
 
     /** Restore collections.json (feature #127 WI-6): merge each backed-up collection by nameKey
