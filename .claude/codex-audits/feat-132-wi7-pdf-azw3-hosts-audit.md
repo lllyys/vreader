@@ -137,3 +137,10 @@ main checkout clean.
 (informational one-shot-snapshot note). The change faithfully mirrors WI-6,
 respects the AZW3 no-goTo constraint (#135), leaves the foliate stack + bug-#357
 sizing untouched, and preserves each host's #129 Display affordance.
+
+## Filename note
+
+The hook derives the expected audit path from the branch name
+(`feat/132-wi7-pdf-azw3-hosts` → `feat-132-wi7-pdf-azw3-hosts-audit.md`). The lane
+originally wrote this content to `feat-132-wi7hosts-audit.md`; this branch-named
+copy is the merge-gate artifact. Content is identical.
