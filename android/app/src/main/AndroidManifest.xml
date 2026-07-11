@@ -41,5 +41,18 @@
         <activity
             android:name=".reader.Azw3ReaderActivity"
             android:exported="false" />
+        <!-- feature #134 WI-2 — share book file. A FileProvider scoped to filesDir/books
+             (@xml/file_paths) with a DISPLAY_NAME override so a shared book reports title.ext.
+             exported=false + grantUriPermissions: only intents WE launch (ACTION_SEND with the
+             read grant) can read a book file; no other path under filesDir is shareable. -->
+        <provider
+            android:name=".reader.share.BookFileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
     </application>
 </manifest>

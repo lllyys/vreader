@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  feature #134 WI-2 — FileProvider grant scope (§share-hardening, §display-name).
+  Grants read access to ONLY filesDir/books (where imported book artifacts live,
+  VReaderApp: File(filesDir, "books")). Nothing else under filesDir is shareable —
+  a FileProvider.getUriForFile for any path outside books/ throws IllegalArgumentException,
+  which BookShareIntent maps to a silent no-op. Do NOT widen this to <files-path path="."/>.
+-->
+<paths>
+    <files-path name="books" path="books/" />
+</paths>
