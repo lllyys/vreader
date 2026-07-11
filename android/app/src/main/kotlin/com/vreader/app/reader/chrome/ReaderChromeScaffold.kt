@@ -60,12 +60,15 @@ fun ReaderChromeScaffold(
 ) {
     val state = chromeState.value
 
+    // Sheet transitions read `chromeState.value` FRESH (never the composed-time [state] snapshot) so a
+    // rapid open/dismiss can't clobber a concurrent visibility toggle.
+    fun openSheet(sheet: ReaderSheet) { chromeState.value = chromeState.value.copy(sheet = sheet) }
+
     // Contents is available only when there IS a table of contents; an empty TOC hides the control
     // (the scaffold hands the bottom chrome a null open callback, so it omits it — no dead control).
     val onOpenContents: (() -> Unit)? =
-        if (tocEntries.isEmpty()) null
-        else { { chromeState.value = state.copy(sheet = ReaderSheet.Toc) } }
-    val onOpenNotes: () -> Unit = { chromeState.value = state.copy(sheet = ReaderSheet.Notes) }
+        if (tocEntries.isEmpty()) null else { { openSheet(ReaderSheet.Toc) } }
+    val onOpenNotes: () -> Unit = { openSheet(ReaderSheet.Notes) }
 
     Column(modifier.fillMaxSize().background(theme.background)) {
         if (state.chromeVisible) {
@@ -105,14 +108,14 @@ fun ReaderChromeScaffold(
             entries = tocEntries,
             currentTocIndex = currentTocIndex,
             onJump = onJumpToc,
-            onDismiss = { chromeState.value = state.copy(sheet = ReaderSheet.None) },
+            onDismiss = { openSheet(ReaderSheet.None) },
         )
         ReaderSheet.Notes -> AnnotationsReviewSheet(
             theme = theme,
             snapshot = annotations,
             onShareAll = onShareAnnotations,
             onJumpToAnnotation = onJumpToAnnotation,
-            onDismiss = { chromeState.value = state.copy(sheet = ReaderSheet.None) },
+            onDismiss = { openSheet(ReaderSheet.None) },
         )
     }
 }
