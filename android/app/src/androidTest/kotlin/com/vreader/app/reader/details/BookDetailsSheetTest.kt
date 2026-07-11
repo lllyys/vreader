@@ -246,12 +246,18 @@ class BookDetailsSheetTest {
 
     @Test fun rendersAcrossThemes() {
         // Pure function of the theme tokens — renders in every theme (light + dark) without crash.
-        for (theme in ReaderTheme.values()) {
-            compose.setContent {
-                BookDetailsSheetContent(theme = theme, model = model(), onCopyFingerprint = {}, onShare = {})
+        // AndroidComposeTestRule.setContent may be called only ONCE per test, so render every theme
+        // in a single content tree (a Column) rather than looping setContent (which throws
+        // "has already set content").
+        compose.setContent {
+            androidx.compose.foundation.layout.Column {
+                for (theme in ReaderTheme.values()) {
+                    BookDetailsSheetContent(theme = theme, model = model(), onCopyFingerprint = {}, onShare = {})
+                }
             }
-            compose.onNodeWithTag("book-details-sheet-content", useUnmergedTree = true).assertExists()
         }
+        compose.onAllNodesWithTag("book-details-sheet-content", useUnmergedTree = true)
+            .assertCountEquals(ReaderTheme.values().size)
     }
 
     @Test fun modelExposesFullFingerprintDistinctFromDisplay() {
