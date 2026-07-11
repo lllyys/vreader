@@ -1,8 +1,8 @@
 ---
 branch: chore/128-verified-finalize
-verdict: follow-up-recommended
+threadId: codex-gpt-5.6-sol-low
 rounds: 1
-thread_id: codex-gpt-5.6-sol-low
+final_verdict: follow-up-recommended
 date: 2026-07-11
 scope: feature #128 WI-8 finalization — SearchScreenUiTest locator fix only
 ---
