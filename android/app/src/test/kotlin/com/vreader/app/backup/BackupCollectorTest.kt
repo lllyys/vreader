@@ -9,6 +9,7 @@ import com.vreader.app.data.VReaderDatabase
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -46,6 +47,7 @@ class BackupCollectorTest {
         path: String? = "/data/$seed.epub",
         addedAt: Long = 1000L,
         lastOpenedAt: Long? = 5000L,
+        author: String? = null,
     ): Book {
         val sha = shaFor(seed)
         val key = Identity.canonicalKey(format.name, sha, bytes)
@@ -53,7 +55,7 @@ class BackupCollectorTest {
         return Book(
             fingerprintKey = key, title = title, originalFormat = format,
             contentSHA256 = sha, fileByteCount = bytes, localFilePath = path,
-            addedAt = addedAt, lastOpenedAt = lastOpenedAt,
+            addedAt = addedAt, lastOpenedAt = lastOpenedAt, author = author,
         )
     }
 
@@ -101,6 +103,34 @@ class BackupCollectorTest {
         assertEquals(0.5, decoded.progression!!, 1e-9)
         assertEquals(Instant.ofEpochMilli(7000L), pos.updatedAt)
         assertEquals(Instant.ofEpochMilli(5000L), pos.lastOpenedAt)
+    }
+
+    @Test fun collect_emitsBookAuthorIntoManifestEntry() = runTest {
+        // feature #128 WI-2: a book carrying an author surfaces that author in its manifest entry
+        // (before WI-2 the collector hard-coded author = null).
+        val b = book(author = "Herman Melville")
+        repo.upsertBook(b)
+
+        val out = collector().collect("Pixel 7", "0.7.3", "id", now)
+
+        assertEquals("Herman Melville", out.manifest.books[0].author)
+        // And the serialized manifest carries the author key.
+        val json = BackupJson.encode(out.manifest)
+        assertTrue("manifest JSON should carry author", json.contains("\"author\""))
+        assertTrue("manifest JSON should carry the author value", json.contains("Herman Melville"))
+    }
+
+    @Test fun collect_nullAuthor_isOmittedFromManifestJson() = runTest {
+        // A null author must be OMITTED from the serialized JSON (explicitNulls=false byte-stability
+        // / Swift parity) — not emitted as `"author": null`.
+        val b = book(author = null)
+        repo.upsertBook(b)
+
+        val out = collector().collect("Pixel 7", "0.7.3", "id", now)
+
+        assertNull(out.manifest.books[0].author)
+        val json = BackupJson.encode(out.manifest)
+        assertTrue("null author must NOT appear as an author key", !json.contains("\"author\""))
     }
 
     @Test fun collect_emptyLibrary_isValidEmpty() = runTest {
