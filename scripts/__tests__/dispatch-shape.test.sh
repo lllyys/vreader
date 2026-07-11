@@ -47,6 +47,11 @@ has "$SKILL" "git log origin/main..main" "committed-contamination detection"
 has "$SKILL" "check-write-set.sh" "write-set gate in the tail"
 has "$SKILL" "sim-lease.sh" "sim leases wired"
 
+# canon orientation (rule 56) — the brief routes the owning dossier(s) in as
+# read-only inputs, and forbids lanes editing canon
+has "$SKILL" "canon-owner.sh" "canon orientation wired into the lane brief"
+has "$SKILL" "NEVER edits canon" "brief carries the lane-never-edits-canon guard"
+
 # Gate-4 R1 operational invariants (audit thread 019f4467)
 has "$SKILL" "git -C <worktree> commit" "tail tracker/docs edits committed ON the lane branch"
 has "$SKILL" "as the branch's LAST commit" "bump is the branch's last commit, in the worktree"
