@@ -2,10 +2,12 @@
 // positions.json from a *.vreader.zip, fetches each (selected) book's blob from the content-
 // addressed store, materializes it through BookImporter (re-fingerprints → canonical identity,
 // idempotent @Upsert), verifies the computed key matches the manifest, restores the manifest's
-// title/addedAt/lastOpenedAt, THEN restores the book's position (book-first so the position FK
-// holds). A per-book failure (blob 404 / fingerprint mismatch / import error) is collected and its
-// position skipped — the rest restore. Mirrors the iOS materializing-restore (WebDAVProvider +
-// BookFileMaterializer). Idempotent: same bytes ⇒ same key, no duplicate.
+// title/addedAt/lastOpenedAt/author via the single atomic applyRestoredMetadata seam (feature #128
+// WI-2 — author COALESCEd: manifest non-null wins, null preserves a coordinator backfill), THEN
+// restores the book's position (book-first so the position FK holds). A per-book failure (blob 404 /
+// fingerprint mismatch / import error) is collected and its position skipped — the rest restore.
+// Mirrors the iOS materializing-restore (WebDAVProvider + BookFileMaterializer). Idempotent: same
+// bytes ⇒ same key, no duplicate.
 package com.vreader.app.backup
 
 import com.vreader.app.backup.archive.BackupArchiveReader
@@ -140,14 +142,17 @@ class RestoreImporter(
                 expectedKey = entry.fingerprintKey,
             )
         }
-        // Restore the manifest's title/addedAt/lastOpenedAt (BookImporter set title from the
-        // synthetic display name + addedAt=now). @Upsert keeps the just-saved file + any position.
-        repository.upsertBook(
-            imported.copy(
-                title = entry.title ?: imported.title,
-                addedAt = entry.addedAt.toEpochMilli(),
-                lastOpenedAt = entry.lastOpenedAt?.toEpochMilli(),
-            )
+        // Restore the manifest's title/addedAt/lastOpenedAt/author through the single atomic seam
+        // (feature #128 WI-2). BookImporter set title from the synthetic display name + addedAt=now +
+        // a null author; a column-scoped UPDATE keeps the just-saved file + any position. The author
+        // is COALESCEd — a non-null manifest author WINS; a null one PRESERVES whatever author a
+        // coordinator already backfilled onto the just-imported row.
+        repository.applyRestoredMetadata(
+            key = entry.fingerprintKey,
+            title = entry.title ?: imported.title,
+            addedAt = entry.addedAt.toEpochMilli(),
+            lastOpenedAt = entry.lastOpenedAt?.toEpochMilli(),
+            manifestAuthor = entry.author,
         )
     }
 

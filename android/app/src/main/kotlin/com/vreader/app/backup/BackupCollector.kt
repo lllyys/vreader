@@ -125,10 +125,12 @@ class BackupCollector(
         return CollectedBackup(metadata, manifest, sections, blobs)
     }
 
-    /** The manifest entry: canonical identity + blob path + preserved title/dates. `author` and
-     *  `sourceCanonicalKey` are null in v1 (Android `Book` carries neither). `originalExtension`
-     *  derives from the format (BookFormat names = canonical exts; distinct .mobi/.prc is a
-     *  follow-on if Android gains Kindle import). */
+    /** The manifest entry: canonical identity + blob path + preserved title/dates/author (feature
+     *  #128 WI-2 — the book's `author` is now emitted; a null author is OMITTED from the JSON by
+     *  BackupJson's explicitNulls=false, so the manifest stays byte-stable). `sourceCanonicalKey` is
+     *  null in v1 (Android `Book` carries no source key). `originalExtension` derives from the format
+     *  (BookFormat names = canonical exts; distinct .mobi/.prc is a follow-on if Android gains Kindle
+     *  import). */
     private fun Book.toManifestEntry(blobPath: String) = BackupLibraryEntry(
         fingerprintKey = fingerprintKey,
         format = originalFormat.name,
@@ -136,7 +138,7 @@ class BackupCollector(
         byteCount = fileByteCount,
         originalExtension = originalFormat.name,
         title = title,
-        author = null,
+        author = author,
         addedAt = Instant.ofEpochMilli(addedAt),
         lastOpenedAt = lastOpenedAt?.let(Instant::ofEpochMilli),
         blobPath = blobPath,
