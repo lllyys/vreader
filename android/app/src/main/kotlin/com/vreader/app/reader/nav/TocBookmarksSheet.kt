@@ -4,8 +4,9 @@
 // #132's [TocContentsSheetContent] UNCHANGED as the Contents tab body (one-writer serialization — WI-6
 // does NOT edit `TocContentsSheet.kt` in place, so #132's file stays untouched). The Bookmarks tab renders
 // rows from a `List<BookmarkRowItem>` (WI-4's [BookmarkRowUi] paired with its source [BookmarkRecord]):
-// each row is the design's bookmark icon (accent) · italic serif preview · `chapter · p.N · date` sub-line
-// · chevron. Tapping a row calls [onJumpBookmark] and dismisses ONLY on [JumpResult.Succeeded]; a
+// each row is the design's OUTLINE bookmark icon (accent, the design's stroked `Icons.Bookmark`) · italic
+// serif preview · `chapter · p.N · date` sub-line · chevron. Tap-to-jump is capability-gated (a null
+// [onJumpBookmark] leaves rows review-only, non-clickable) and dismisses ONLY on [JumpResult.Succeeded]; a
 // [JumpResult.Failed] keeps the sheet open with NO invented error surface (the #132 §navigation-outcome
 // posture). Empty bookmarks → the `bookmarks-empty` state. Bookmark row DELETION is DEFERRED to a follow-up
 // WI (rule 51 — the delete surface is not built here); there is NO swipe/long-press/confirm delete control.
@@ -32,7 +33,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
@@ -83,8 +84,10 @@ enum class TocTab { Contents, Bookmarks }
  * The two-tab reader TOC sheet as a [ModalBottomSheet]. [bookTitle] is the sheet header (the design's
  * book-title `Sheet` title). [entries]/[currentTocIndex] drive the Contents tab (the REUSED
  * [TocContentsSheetContent]); [bookmarks] drive the Bookmarks tab. [onJumpToc] performs a TOC jump
- * (returns success for dismiss-on-success); [onJumpBookmark] performs a bookmark jump (dismiss on
- * [JumpResult.Succeeded]). [onDismiss] closes the sheet. Renders in [theme]'s colors.
+ * (returns success for dismiss-on-success); [onJumpBookmark] is the capability-based nullable bookmark
+ * jump — a non-null callback makes bookmark rows clickable + dismisses on [JumpResult.Succeeded], a null
+ * one leaves them review-only, non-clickable (the §review-sheet-contract gate — an unwired host passes
+ * null; NO clickable dead rows). [onDismiss] closes the sheet. Renders in [theme]'s colors.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -95,7 +98,7 @@ fun TocBookmarksSheet(
     currentTocIndex: Int,
     bookmarks: List<BookmarkRowItem>,
     onJumpToc: (Int) -> Boolean,
-    onJumpBookmark: (BookmarkRecord) -> JumpResult,
+    onJumpBookmark: ((BookmarkRecord) -> JumpResult)?,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
     initialTab: TocTab = TocTab.Contents,
@@ -137,7 +140,7 @@ fun TocBookmarksSheetContent(
     currentTocIndex: Int,
     bookmarks: List<BookmarkRowItem>,
     onJumpToc: (Int) -> Boolean,
-    onJumpBookmark: (BookmarkRecord) -> JumpResult,
+    onJumpBookmark: ((BookmarkRecord) -> JumpResult)?,
     onDismiss: () -> Unit = {},
     initialTab: TocTab = TocTab.Contents,
 ) {
@@ -230,15 +233,17 @@ private fun androidx.compose.foundation.layout.RowScope.TocTabButton(
 }
 
 /**
- * The Bookmarks tab body — the bookmark rows or the `bookmarks-empty` state. Each row dismisses the sheet
- * ONLY when [onJumpBookmark] returns [JumpResult.Succeeded]; a [JumpResult.Failed] keeps the sheet open,
- * NO invented error surface (rule 51 §nav-error-presentation). NO delete affordance (deferred).
+ * The Bookmarks tab body — the bookmark rows or the `bookmarks-empty` state. Tap-to-jump is capability-based:
+ * a non-null [onJumpBookmark] makes each row clickable and dismisses the sheet ONLY when the jump returns
+ * [JumpResult.Succeeded] (a [JumpResult.Failed] keeps the sheet open — rule 51 §nav-error-presentation); a
+ * null callback leaves rows review-only, NOT clickable (the §review-sheet-contract gate — NO clickable dead
+ * rows for an unwired host). NO delete affordance (deferred).
  */
 @Composable
 private fun BookmarksTab(
     theme: ReaderTheme,
     bookmarks: List<BookmarkRowItem>,
-    onJumpBookmark: (BookmarkRecord) -> JumpResult,
+    onJumpBookmark: ((BookmarkRecord) -> JumpResult)?,
     onDismiss: () -> Unit,
 ) {
     if (bookmarks.isEmpty()) {
@@ -256,21 +261,25 @@ private fun BookmarksTab(
             BookmarkRow(
                 theme = theme,
                 item = item,
-                // Dismiss-on-Succeeded: dismiss only when the jump reports Succeeded; a Failed jump keeps
-                // the sheet open (no snackbar / error copy — rule 51 §nav-error-presentation).
-                onClick = { if (onJumpBookmark(item.record) == JumpResult.Succeeded) onDismiss() },
+                // Capability gate: only a non-null jump makes the row clickable. Dismiss-on-Succeeded — a
+                // Failed jump keeps the sheet open (no error surface — rule 51 §nav-error-presentation).
+                onClick = onJumpBookmark?.let { jump ->
+                    { if (jump(item.record) == JumpResult.Succeeded) onDismiss() }
+                },
             )
         }
     }
 }
 
 /**
- * One Bookmarks-tab row (vreader-panels.jsx `TOCSheet` Bookmarks tab): a leading bookmark icon (accent),
- * a column with the italic serif [BookmarkRowUi.preview] and the `chapter · p.N · date` meta sub-line, and
- * a trailing chevron. Tapping calls [onClick]. testTag `bookmark-row-${record.id}`. NO delete control.
+ * One Bookmarks-tab row (vreader-panels.jsx `TOCSheet` Bookmarks tab): a leading OUTLINE bookmark icon
+ * (accent, matching the design's stroked `Icons.Bookmark`), a column with the italic serif
+ * [BookmarkRowUi.preview] and the `chapter · p.N · date` meta sub-line, and a trailing chevron. The row is
+ * clickable → [onClick] ONLY when [onClick] is non-null (the capability gate — a null callback leaves it
+ * review-only, no ripple, no dead no-op). testTag `bookmark-row-${record.id}`. NO delete control.
  */
 @Composable
-private fun BookmarkRow(theme: ReaderTheme, item: BookmarkRowItem, onClick: () -> Unit) {
+private fun BookmarkRow(theme: ReaderTheme, item: BookmarkRowItem, onClick: (() -> Unit)?) {
     val ui = item.ui
     val sub = theme.ink.copy(alpha = 0.55f)
     // The design's primary line is the italic preview; when a bookmark has no preview (EPUB/AZW3/PDF) the
@@ -281,19 +290,22 @@ private fun BookmarkRow(theme: ReaderTheme, item: BookmarkRowItem, onClick: () -
         append("Bookmark: $primary")
         if (meta.isNotEmpty()) append(", $meta")
     }
+    val base = Modifier
+        .fillMaxWidth()
+    // Capability gate: attach a click only when a jump callback exists — a null callback leaves the row
+    // non-clickable (no ripple, no dead no-op — matches the review BookmarkCard).
+    val rowModifier = (if (onClick != null) base.clickable { onClick() } else base)
+        .heightIn(min = 48.dp)
+        .padding(vertical = 14.dp)
+        .testTag("bookmark-row-${item.record.id}")
+        .semantics { contentDescription = a11y }
     Row(
-        Modifier
-            .fillMaxWidth()
-            .clickable { onClick() }
-            .heightIn(min = 48.dp)
-            .padding(vertical = 14.dp)
-            .testTag("bookmark-row-${item.record.id}")
-            .semantics { contentDescription = a11y },
+        rowModifier,
         verticalAlignment = Alignment.Top,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Icon(
-            Icons.Filled.Bookmark,
+            Icons.Outlined.BookmarkBorder,
             contentDescription = null,
             tint = theme.accent,
             modifier = Modifier.size(18.dp),

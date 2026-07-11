@@ -4,6 +4,8 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertHasClickAction
+import androidx.compose.ui.test.assertHasNoClickAction
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
@@ -87,7 +89,7 @@ class TocBookmarksSheetTest {
         bookmarks: List<BookmarkRowItem> = threeBookmarks,
         currentTocIndex: Int = 0,
         onJumpToc: (Int) -> Boolean = { true },
-        onJumpBookmark: (BookmarkRecord) -> JumpResult = { JumpResult.Succeeded },
+        onJumpBookmark: ((BookmarkRecord) -> JumpResult)? = { JumpResult.Succeeded },
         onDismiss: () -> Unit = {},
         theme: ReaderTheme = ReaderTheme.Paper,
     ) {
@@ -188,6 +190,24 @@ class TocBookmarksSheetTest {
         // The bookmark rows are still present, and no invented error surface was rendered.
         compose.onNodeWithTag("bookmark-row-bm-1", useUnmergedTree = true).assertExists()
         compose.onAllNodesWithTag("bookmark-jump-error", useUnmergedTree = true).assertCountEquals(0)
+    }
+
+    // ── capability gate (nullable jump) ──────────────────────
+
+    @Test fun nonNullJump_bookmarkRowsAreClickable() {
+        setSheet(onJumpBookmark = { JumpResult.Succeeded })
+        compose.onNodeWithTag("toc-tab-bookmarks", useUnmergedTree = true).performClick()
+        compose.waitForIdle()
+        compose.onNodeWithTag("bookmark-row-bm-1", useUnmergedTree = true).assertHasClickAction()
+    }
+
+    @Test fun nullJump_bookmarkRowsAreNotClickable() {
+        // An unwired host (#132/#134/#135-WI-5 caller) passes null → review-only rows, NOT clickable dead
+        // rows (the §review-sheet-contract capability gate — no ripple, no silent no-op).
+        setSheet(onJumpBookmark = null)
+        compose.onNodeWithTag("toc-tab-bookmarks", useUnmergedTree = true).performClick()
+        compose.waitForIdle()
+        compose.onNodeWithTag("bookmark-row-bm-1", useUnmergedTree = true).assertHasNoClickAction()
     }
 
     // ── design gate: NO delete affordance (deferred) ─────────

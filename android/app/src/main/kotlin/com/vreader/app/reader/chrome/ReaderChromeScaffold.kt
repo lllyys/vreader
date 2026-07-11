@@ -86,9 +86,9 @@ import vreader.contracts.Locator
  * feature #135 WI-6 — the promoted two-tab TOC sheet: [ReaderSheet.Toc] renders [TocBookmarksSheet]
  * (Contents|Bookmarks, the Contents tab REUSING #132's body), and [ReaderSheet.Bookmarks] opens the same
  * sheet with the Bookmarks tab pre-selected. [bookmarks] are the projected Bookmarks-tab rows (default
- * empty); [onJumpBookmark] performs a bookmark jump (returns [JumpResult] for dismiss-on-Succeeded; null →
- * an unwired host, a jump degrades to Failed so the sheet stays open). Both are nullable/defaulted so #132
- * Contents/Notes-only callers stay valid (WI-7 feeds them per host).
+ * empty); [onJumpBookmark] is the capability-based nullable bookmark jump (non-null → clickable rows +
+ * dismiss-on-Succeeded; null → review-only, non-clickable rows, NO dead no-op). Both are nullable/defaulted
+ * so #132 Contents/Notes-only callers stay valid (WI-7 feeds them per host).
  *
  * [bottomChrome] receives the Contents/Notes open callbacks (a null Contents callback when [tocEntries] is
  * empty) and renders the reader's bottom chrome. [body] is the reader content; a center-tap on it toggles
@@ -195,12 +195,10 @@ fun ReaderChromeScaffold(
         )
     }
 
-    // feature #135 WI-6 — the two-tab sheet's Bookmarks-jump seam. An unwired host (null [onJumpBookmark],
-    // i.e. #132/#134/#135-WI-5 callers) degrades to a Failed jump so the sheet stays open (no dismiss, no
-    // invented error surface — rule 51); WI-7 supplies the real per-host jump.
-    val bookmarkJump: (BookmarkRecord) -> JumpResult = onJumpBookmark ?: { JumpResult.Failed }
-
     // Modal sheets — driven by the hoisted open-sheet state. Dismiss returns to [ReaderSheet.None].
+    // feature #135 WI-6 — [onJumpBookmark] is passed through nullable (capability-gated); an unwired host
+    // (#132/#134/#135-WI-5 callers) passes null → the Bookmarks-tab rows are review-only, NOT clickable
+    // dead rows (WI-7 supplies the real per-host jump).
     when (state.sheet) {
         ReaderSheet.None -> Unit
         // feature #135 WI-6 — the promoted two-tab TOC sheet (Contents|Bookmarks). The Contents tab REUSES
@@ -212,7 +210,7 @@ fun ReaderChromeScaffold(
             currentTocIndex = currentTocIndex,
             bookmarks = bookmarks,
             onJumpToc = onJumpToc,
-            onJumpBookmark = bookmarkJump,
+            onJumpBookmark = onJumpBookmark,
             onDismiss = { openSheet(ReaderSheet.None) },
         )
         ReaderSheet.Notes -> AnnotationsReviewSheet(
@@ -240,7 +238,7 @@ fun ReaderChromeScaffold(
             currentTocIndex = currentTocIndex,
             bookmarks = bookmarks,
             onJumpToc = onJumpToc,
-            onJumpBookmark = bookmarkJump,
+            onJumpBookmark = onJumpBookmark,
             onDismiss = { openSheet(ReaderSheet.None) },
             initialTab = TocTab.Bookmarks,
         )

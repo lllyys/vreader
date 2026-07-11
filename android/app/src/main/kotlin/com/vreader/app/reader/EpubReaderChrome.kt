@@ -157,9 +157,9 @@ fun EpubBottomBand(
  * success, stays open on false — no invented error surface). [onShareAnnotations] is the Notes sheet-level
  * Share. EPUB Notes cards are review-only (onJumpToAnnotation NULL) until #135's nav seam lands. feature
  * #135 WI-6 — the Toc route renders the promoted two-tab [TocBookmarksSheet]; [bookmarks] feed its
- * Bookmarks tab and [onJumpBookmark] performs the bookmark jump (dismiss-on-Succeeded; null → an unwired
- * jump degrades to Failed so the sheet stays open); the Bookmarks route opens the same sheet on its
- * Bookmarks tab (WI-7 lights up the EPUB jump). feature #134 WI-5 — [bookDetails] drives the Details sheet
+ * Bookmarks tab and [onJumpBookmark] is the capability-based nullable bookmark jump (non-null → clickable
+ * rows + dismiss-on-Succeeded; null → review-only, non-clickable rows before WI-7 lights up the EPUB jump);
+ * the Bookmarks route opens the same sheet on its Bookmarks tab. feature #134 WI-5 — [bookDetails] drives the Details sheet
  * (the WI-4 [BookDetailsSheet]); [onShareBook] is its Share flow and [onCopyFingerprint] its copy-fingerprint
  * mini-action (the host copies to the OS clipboard — no invented toast, rule 51). A Details route with no
  * [bookDetails] (should not happen — the route is only reachable when the More menu was fed a model) treats
@@ -183,10 +183,6 @@ fun EpubReaderSheets(
     if (sheet is ReaderSheet.None) return // render nothing → the fragment keeps all input
 
     fun closeSheet() { chromeState.value = chromeState.value.copy(sheet = ReaderSheet.None) }
-
-    // feature #135 WI-6 — the two-tab sheet's Bookmarks-jump seam. An unwired host (null [onJumpBookmark],
-    // i.e. before WI-7 lights up the EPUB jump) degrades to a Failed jump so the sheet stays open (rule 51).
-    val bookmarkJump: (BookmarkRecord) -> JumpResult = onJumpBookmark ?: { JumpResult.Failed }
 
     // feature #134 WI-5 — a Details route with NO model would render no sheet yet still lay the
     // full-screen dismiss overlay below, silently intercepting Readium scroll/selection/link input (a
@@ -224,7 +220,7 @@ fun EpubReaderSheets(
             currentTocIndex = chrome.currentTocIndex,
             bookmarks = bookmarks,
             onJumpToc = onJumpToc,
-            onJumpBookmark = bookmarkJump,
+            onJumpBookmark = onJumpBookmark,
             onDismiss = { closeSheet() },
         )
         ReaderSheet.Notes -> AnnotationsReviewSheet(
@@ -253,7 +249,7 @@ fun EpubReaderSheets(
             currentTocIndex = chrome.currentTocIndex,
             bookmarks = bookmarks,
             onJumpToc = onJumpToc,
-            onJumpBookmark = bookmarkJump,
+            onJumpBookmark = onJumpBookmark,
             onDismiss = { closeSheet() },
             initialTab = TocTab.Bookmarks,
         )
