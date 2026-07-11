@@ -174,10 +174,15 @@ class MorePopupTest {
 
     @Test fun rendersAcrossThemes() {
         // The popup is a pure function of the theme tokens — it renders in every theme (light + dark).
-        for (theme in ReaderTheme.values()) {
-            compose.setContent {
-                MorePopup(theme = theme, rows = listOf(detailsRow(), shareRow()), onDismiss = {})
-            }
+        // AndroidComposeTestRule.setContent may be called only ONCE per test; drive the theme via
+        // state across a single content tree instead of looping setContent (which throws
+        // "has already set content").
+        val theme = androidx.compose.runtime.mutableStateOf(ReaderTheme.values().first())
+        compose.setContent {
+            MorePopup(theme = theme.value, rows = listOf(detailsRow(), shareRow()), onDismiss = {})
+        }
+        for (t in ReaderTheme.values()) {
+            theme.value = t
             compose.onNodeWithTag("more-popup", useUnmergedTree = true).assertExists()
         }
     }
