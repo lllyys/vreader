@@ -1,0 +1,4 @@
+# This file lives inside the workspace; it does NOT control the rendered gazette.
+# The board is a sibling of the workspace (e.g. <repo>/board/), so it is ignored at the
+# REPO ROOT .gitignore — `bureau:init` adds the board dir there. Nothing inside the
+# workspace needs ignoring by default; the cabinets and logbook are committed.

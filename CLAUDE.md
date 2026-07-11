@@ -12,3 +12,7 @@
   rule in `AGENTS.md` → "Commit attribution".)
 - Add other Claude-only guidance here if needed (keep shared rules in AGENTS.md).
 
+<!-- bureau:start -->
+@BUREAU.md
+<!-- bureau:end -->
+
