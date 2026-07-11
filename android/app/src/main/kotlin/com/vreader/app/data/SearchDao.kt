@@ -4,8 +4,8 @@
 // these into observable TextHit results; the coordinator (WI-5) drives extraction → staging →
 // publish. Feature #133 WI-1 additively adds the book-scoped in-book (TXT/MD) find surface
 // (`matchingChunksPage` cursor page, `chunkAtOrAfter` inclusive resume, `matchingChunkCount`,
-// `observeIndexState` Flow) over the SAME FTS4 tables — no schema change (DB stays v7). Views never
-// touch this DAO directly (rule 50 §2).
+// `observeIndexState` Flow) over the SAME FTS4 tables — query-only, no schema change and no DB
+// version bump. Views never touch this DAO directly (rule 50 §2).
 //
 // Design notes:
 //  - No window functions (minSdk 26 = SQLite 3.18 has no ROW_NUMBER). First-hit-per-book is a

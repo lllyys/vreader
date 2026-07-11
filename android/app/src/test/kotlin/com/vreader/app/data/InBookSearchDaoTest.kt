@@ -205,6 +205,10 @@ class InBookSearchDaoTest {
 
     @Test fun observeIndexState_emitsNullThenRowOnInsert() = runBlocking {
         seedBook(bookA)
+        // Sequential `.first()` on the observable Flow — the proven codebase idiom for a Room Flow DAO
+        // under Robolectric (mirrors SearchDaoTest.observeUnsettledIndexableCount). A single-Flow
+        // `take(2).toList()` deadlocks Room's InvalidationTracker under runBlocking, so this asserts the
+        // pre- and post-write emission values, which is what the UI gate actually consumes.
         assertNull("no index-state row yet", dao.observeIndexState(bookA).first())
         dao.markIndexed(SearchIndexStateEntity(bookA, 1, 1L, "indexed"))
         val row = dao.observeIndexState(bookA).first()
