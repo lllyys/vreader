@@ -14,6 +14,15 @@
   bridge via `parent.*`). Reflowable path = `paginator.js:277`; fixed-layout path =
   `fixed-layout.js:86`.
 
+- **Patch 2** (feature #135 WI-2 — awaited AZW3 `goTo`) SHA-256
+  `c9b0e101435b1b1757eade7d06633bf7ba382980327574067ae449273e8cf3fa`:
+  `readerAPI.goTo` / `goToFraction` now **return** `view.goTo(...)`'s promise (a 2-line
+  change) so `reader.html`'s `window.__vreaderGoTo(id, target)` can `await` the relocate
+  and post `{name:'goto-ack', id, ok, cfi?, fraction?}` over the EXISTING `vreaderHost`
+  `WebViewCompat.addWebMessageListener` channel (shell origin + main-frame only; NEVER
+  `addJavascriptInterface`). This is what makes an AZW3 bookmark jump awaitable.
+  `FoliateBundleProvenanceTest` pins this current SHA.
+
 The source comments say `allow-scripts` is "needed for events because of a **WebKit**
 bug" — WI-0's spike empirically determines whether removing it breaks foliate's
 rendering/event handling on **Android Chromium WebView** (where that WebKit bug
