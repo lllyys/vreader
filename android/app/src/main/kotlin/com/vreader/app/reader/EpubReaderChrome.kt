@@ -23,10 +23,11 @@
 // same ReaderTheme token map as the other hosts.
 // @coordinates-with: ReaderActivity.kt (owns the StateFlow + the ComposeViews + the navigator jump + the
 //   Book-details model/share/copy wiring), ReaderChromeModel.kt (the collected model), chrome/ReaderTopChrome
-//   + chrome/ReaderBottomChrome (the reused designed bands), chrome/ReaderChromeState (the hoisted
-//   sheet/visibility state), chrome/ReaderChromeScaffold (the shared readerMoreRows assembler),
-//   more/MorePopup + details/BookDetailsSheet + nav/TocContentsSheet + annotations/AnnotationsReviewSheet
-//   (the popup + modal sheets).
+//   + chrome/ReaderBottomChrome (the reused designed bands), chrome/BookmarkToggleButton (the #135 top-bar
+//   bookmark toggle filling the top band's bookmark slot), chrome/ReaderChromeState (the hoisted
+//   sheet/visibility state incl. the #135 Bookmarks route), chrome/ReaderChromeScaffold (the shared
+//   readerMoreRows assembler), more/MorePopup + details/BookDetailsSheet + nav/TocContentsSheet +
+//   annotations/AnnotationsReviewSheet (the popup + modal sheets).
 package com.vreader.app.reader
 
 import androidx.compose.foundation.clickable
@@ -43,6 +44,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vreader.app.annotations.AnnotationsReviewSheet
+import com.vreader.app.reader.chrome.BookmarkToggleButton
 import com.vreader.app.reader.chrome.ReaderBottomChrome
 import com.vreader.app.reader.chrome.ReaderChromeState
 import com.vreader.app.reader.chrome.ReaderSheet
@@ -63,7 +65,11 @@ import kotlinx.coroutines.flow.StateFlow
  * control) and toggles the WI-3 [MorePopup] carrying ONLY the Details + Share rows: Details writes
  * [ReaderSheet.Details] onto [chromeState] (so [EpubReaderSheets] shows the Book Details sheet), Share
  * fires [onShareBook]. The popup renders in its own window (a full-screen backdrop) so the WRAP_CONTENT
- * band height doesn't clip it. Search/bookmark top-bar slots stay null (#133/#135 — no dead controls).
+ * band height doesn't clip it. The Search top-bar slot stays null (#133 — no dead control). feature #135
+ * WI-5 — the top-bar bookmark toggle: when [onToggleBookmark] is non-null the band fills [ReaderTopChrome]'s
+ * bookmark slot with the WI-5 [BookmarkToggleButton] (filled/outline by [isCurrentBookmarked]); a null
+ * callback leaves the slot empty (no dead control). Host wiring (feeding the callback + presence) lands in
+ * WI-7 — until then the EPUB host passes null and the slot stays absent.
  */
 @Composable
 fun EpubTopBand(
@@ -73,12 +79,21 @@ fun EpubTopBand(
     chromeState: MutableState<ReaderChromeState>,
     bookDetails: BookDetailsUiModel?,
     onShareBook: () -> Unit,
+    isCurrentBookmarked: Boolean = false,
+    onToggleBookmark: (() -> Unit)? = null,
 ) {
     val chrome by model.collectAsStateWithLifecycle()
     var showMore by remember { mutableStateOf(false) }
     // More is available only when this book has a Book-details data source (no dead control).
     val onMore: (() -> Unit)? = if (bookDetails != null) ({ showMore = true }) else null
-    ReaderTopChrome(theme = theme, title = chrome.title, onBack = onBack, onMore = onMore)
+    // feature #135 WI-5 — the bookmark slot is built only when the host opts in via [onToggleBookmark].
+    val bookmarkSlot: (@Composable () -> Unit)? =
+        if (onToggleBookmark != null) {
+            { BookmarkToggleButton(theme = theme, isBookmarked = isCurrentBookmarked, onToggle = onToggleBookmark) }
+        } else {
+            null
+        }
+    ReaderTopChrome(theme = theme, title = chrome.title, onBack = onBack, onMore = onMore, bookmarkSlot = bookmarkSlot)
     if (showMore && bookDetails != null) {
         MorePopup(
             theme = theme,
@@ -167,6 +182,14 @@ fun EpubReaderSheets(
         return
     }
 
+    // feature #135 WI-5 — the Bookmarks route has no rendered surface yet (WI-6 wires the designed
+    // TocBookmarksSheet; rule 51 forbids an invented list here). Normalize it to None BEFORE the scrim so
+    // it never intercepts the Readium fragment's scroll/selection/link input.
+    if (sheet is ReaderSheet.Bookmarks) {
+        closeSheet()
+        return
+    }
+
     // The open-only full-screen dismiss overlay — a transparent scrim under the sheet. An outside tap
     // (a tap that reaches the scrim, not the sheet) closes the sheet. Present ONLY while a sheet is open.
     Box(
@@ -208,5 +231,9 @@ fun EpubReaderSheets(
             onShare = onShareBook,
             onDismiss = { closeSheet() },
         )
+        // feature #135 WI-5 — the Bookmarks route is normalized to None BEFORE the scrim (see the guard
+        // above), so this branch is unreachable; it exists only to keep the `when` exhaustive. WI-6 wires
+        // the designed TocBookmarksSheet (rule 51 — no invented list here).
+        ReaderSheet.Bookmarks -> Unit
     }
 }

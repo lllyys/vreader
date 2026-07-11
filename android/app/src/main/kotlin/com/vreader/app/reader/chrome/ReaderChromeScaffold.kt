@@ -11,8 +11,14 @@
 // Details opens the Details sheet, Share fires [onShareBook], and the Details sheet's copy-fingerprint
 // mini-action fires [onCopyFingerprint] (the host copies to the OS clipboard — no invented toast, rule 51).
 // The Contents control is HIDDEN when [tocEntries] is empty (the scaffold passes a null open callback,
-// so the bottom chrome omits it — the no-dead-controls rule). NO bookmark route/params (#135). Pure
-// function of hoisted state + callbacks (rule 50 §4); same [ReaderTheme] token map as the reader chrome.
+// so the bottom chrome omits it — the no-dead-controls rule). feature #135 WI-5 — the top-bar bookmark
+// toggle: when [onToggleBookmark] is non-null the scaffold fills [ReaderTopChrome]'s reserved bookmark
+// slot with the WI-5 [BookmarkToggleButton] (filled/outline by [isCurrentBookmarked]); a null callback
+// omits it (the #129 no-dead-control rule → #132 Contents/Notes-only callers stay back-compatible). The
+// [ReaderSheet.Bookmarks] route is added here but its designed LIST surface is WI-6's TocBookmarksSheet,
+// so WI-5 renders it as a documented no-op ([currentLocator] is threaded for the host to derive presence
+// but the scaffold does not read it). Pure function of hoisted state + callbacks (rule 50 §4); same
+// [ReaderTheme] token map as the reader chrome.
 package com.vreader.app.reader.chrome
 
 import androidx.compose.foundation.background
@@ -43,6 +49,7 @@ import com.vreader.app.reader.more.MoreRow
 import com.vreader.app.reader.nav.TocContentsSheet
 import com.vreader.app.reader.nav.TocEntry
 import com.vreader.app.reader.settings.ReaderTheme
+import vreader.contracts.Locator
 
 /**
  * The host-agnostic reader chrome scaffold. [chromeState] is the hoisted [ReaderChromeState]
@@ -60,6 +67,15 @@ import com.vreader.app.reader.settings.ReaderTheme
  * (the host copies to the OS clipboard — no invented copy-confirmation UI, rule 51). When [bookDetails] is
  * null the More button is omitted (no dead control) — a caller-supplied [onOpenMore] still populates the
  * More slot for hosts that want a different More action.
+ *
+ * feature #135 WI-5 — the top-bar bookmark toggle: when [onToggleBookmark] is non-null the scaffold fills
+ * [ReaderTopChrome]'s reserved bookmark slot with the WI-5 [BookmarkToggleButton], rendered filled/outline
+ * by [isCurrentBookmarked]; a null callback omits the slot (the #129 no-dead-control rule → #132
+ * Contents/Notes-only callers stay valid). [currentLocator] is the current reading position the host uses
+ * to derive presence + create the bookmark (threaded through for WI-7's host wiring; the scaffold itself
+ * does not read it). The [ReaderSheet.Bookmarks] route is a documented no-op here — its designed LIST
+ * surface is WI-6's TocBookmarksSheet. A host that passes [topBookmarkSlot] directly overrides the built
+ * toggle (kept for symmetry with [onOpenMore]).
  *
  * [bottomChrome] receives the Contents/Notes open callbacks (a null Contents callback when [tocEntries] is
  * empty) and renders the reader's bottom chrome. [body] is the reader content; a center-tap on it toggles
@@ -82,12 +98,26 @@ fun ReaderChromeScaffold(
     modifier: Modifier = Modifier,
     onOpenSearch: (() -> Unit)? = null,
     onOpenMore: (() -> Unit)? = null,
+    isCurrentBookmarked: Boolean = false,
+    onToggleBookmark: (() -> Unit)? = null,
+    currentLocator: Locator? = null,
     topBookmarkSlot: (@Composable () -> Unit)? = null,
     bookDetails: BookDetailsUiModel? = null,
     onShareBook: () -> Unit = {},
     onCopyFingerprint: (String) -> Unit = {},
 ) {
     val state = chromeState.value
+
+    // feature #135 WI-5 — build the top-bar bookmark slot from the WI-5 [BookmarkToggleButton] when the
+    // host opts in via [onToggleBookmark]. An explicit [topBookmarkSlot] (rare) wins; otherwise a non-null
+    // toggle synthesizes the button, and a null toggle leaves the slot empty (no dead control).
+    val bookmarkSlot: (@Composable () -> Unit)? = when {
+        topBookmarkSlot != null -> topBookmarkSlot
+        onToggleBookmark != null -> {
+            { BookmarkToggleButton(theme = theme, isBookmarked = isCurrentBookmarked, onToggle = onToggleBookmark) }
+        }
+        else -> null
+    }
 
     // Sheet transitions read `chromeState.value` FRESH (never the composed-time [state] snapshot) so a
     // rapid open/dismiss can't clobber a concurrent visibility toggle.
@@ -116,7 +146,7 @@ fun ReaderChromeScaffold(
                 onBack = onBack,
                 onSearch = onOpenSearch,
                 onMore = onMore,
-                bookmarkSlot = topBookmarkSlot,
+                bookmarkSlot = bookmarkSlot,
             )
         }
 
@@ -177,6 +207,10 @@ fun ReaderChromeScaffold(
             onShare = onShareBook,
             onDismiss = { openSheet(ReaderSheet.None) },
         )
+        // feature #135 WI-5 — the Bookmarks route is a documented no-op: its designed LIST surface is
+        // WI-6's TocBookmarksSheet (rule 51 — WI-5 must not invent an undesigned list). Rendering nothing
+        // keeps the route safe (no dead surface / scrim) until WI-6 wires the sheet.
+        ReaderSheet.Bookmarks -> Unit
     }
 }
 

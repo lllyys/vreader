@@ -11,6 +11,7 @@ import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
@@ -203,6 +204,82 @@ class ReaderChromeScaffoldTest {
         // Defensive: a Details route with no model (should not happen, but must not crash / NPE).
         val state = mutableStateOf(ReaderChromeState(chromeVisible = true, sheet = ReaderSheet.Details))
         compose.setContent { moreScaffold(state, bookDetails = null) }
+        compose.onAllNodesWithTag("book-details-sheet-content", useUnmergedTree = true).assertCountEquals(0)
+    }
+
+    // --- feature #135 WI-5: the top-bar bookmark toggle slot + the Bookmarks route ---
+
+    @Composable
+    private fun bookmarkScaffold(
+        state: MutableState<ReaderChromeState>,
+        isCurrentBookmarked: Boolean = false,
+        onToggleBookmark: (() -> Unit)? = null,
+    ) {
+        ReaderChromeScaffold(
+            theme = ReaderTheme.Paper,
+            title = "The Book",
+            chromeState = state,
+            onBack = {},
+            tocEntries = emptyList(),
+            currentTocIndex = 0,
+            annotations = emptySnapshot,
+            onJumpToc = { true },
+            onJumpToAnnotation = null,
+            onShareAnnotations = {},
+            isCurrentBookmarked = isCurrentBookmarked,
+            onToggleBookmark = onToggleBookmark,
+            bottomChrome = { onOpenContents, onOpenNotes ->
+                ReaderBottomChrome(
+                    ReaderTheme.Paper, progress = 0f, displayPage = 1, totalPages = 10,
+                    onScrub = {}, onOpenDisplay = {}, onOpenContents = onOpenContents, onOpenNotes = onOpenNotes,
+                )
+            },
+            body = { Box(Modifier.fillMaxSize().testTag("reader-body")) },
+        )
+    }
+
+    @Test fun bookmarkSlotAbsent_whenNoToggleCallback() {
+        // #132 Contents/Notes-only back-compat: a host that does NOT opt into the bookmark toggle sees no
+        // dead bookmark control in the top bar (the #129 no-dead-control rule).
+        val state = mutableStateOf(ReaderChromeState(chromeVisible = true, sheet = ReaderSheet.None))
+        compose.setContent { bookmarkScaffold(state, onToggleBookmark = null) }
+        compose.onAllNodesWithTag("chrome-bookmark-slot", useUnmergedTree = true).assertCountEquals(0)
+    }
+
+    @Test fun bookmarkSlotPresent_whenToggleCallbackSupplied() {
+        val state = mutableStateOf(ReaderChromeState(chromeVisible = true, sheet = ReaderSheet.None))
+        compose.setContent { bookmarkScaffold(state, onToggleBookmark = {}) }
+        compose.onNodeWithTag("chrome-bookmark-slot", useUnmergedTree = true).assertExists()
+    }
+
+    @Test fun tappingBookmarkSlot_firesOnToggleBookmark() {
+        val state = mutableStateOf(ReaderChromeState(chromeVisible = true, sheet = ReaderSheet.None))
+        var toggled = false
+        compose.setContent {
+            bookmarkScaffold(state, isCurrentBookmarked = false, onToggleBookmark = { toggled = true })
+        }
+        compose.onNodeWithContentDescription("Add bookmark").performClick()
+        assertTrue(toggled)
+    }
+
+    @Test fun bookmarkSlot_reflectsBookmarkedState() {
+        // isCurrentBookmarked=true → the filled/Remove state is rendered in the slot.
+        val state = mutableStateOf(ReaderChromeState(chromeVisible = true, sheet = ReaderSheet.None))
+        compose.setContent {
+            bookmarkScaffold(state, isCurrentBookmarked = true, onToggleBookmark = {})
+        }
+        compose.onNodeWithContentDescription("Remove bookmark").assertExists()
+    }
+
+    @Test fun bookmarksRoute_rendersNoUndesignedSurface() {
+        // WI-5 adds the Bookmarks ROUTE only; the designed Bookmarks LIST surface is WI-6's
+        // TocBookmarksSheet (rule 51). The route must be a safe no-op here — no invented list, no crash,
+        // and (unlike Details) no full-screen dismiss scrim to intercept touch.
+        val state = mutableStateOf(ReaderChromeState(chromeVisible = true, sheet = ReaderSheet.Bookmarks))
+        compose.setContent { bookmarkScaffold(state, onToggleBookmark = {}) }
+        // No designed sheet is shown; the body is still present (the route rendered nothing).
+        compose.onNodeWithTag("reader-body").assertExists()
+        compose.onAllNodesWithTag("toc-sheet", useUnmergedTree = true).assertCountEquals(0)
         compose.onAllNodesWithTag("book-details-sheet-content", useUnmergedTree = true).assertCountEquals(0)
     }
 }
