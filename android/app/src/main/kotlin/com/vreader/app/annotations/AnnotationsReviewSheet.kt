@@ -22,10 +22,12 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.outlined.BorderColor
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
@@ -212,17 +214,37 @@ private fun FilterChipRow(theme: ReaderTheme, active: AnnotationFilter, onSelect
     }
 }
 
-/** The empty state — shown when the selected filter yields no cards (design's "Nothing saved yet"). */
+/**
+ * The empty state — shown when the selected filter yields no cards. Faithful to the design's
+ * `AnnotationsSheet` empty state: a circular tinted badge with the Highlighter (BorderColor) glyph, the
+ * "Nothing saved yet" heading, and the approved explanatory copy.
+ */
 @Composable
 private fun AnnotationsEmptyState(theme: ReaderTheme) {
     Column(
         Modifier
             .fillMaxWidth()
-            .heightIn(min = 160.dp)
+            .heightIn(min = 200.dp)
             .padding(horizontal = 30.dp, vertical = 48.dp)
             .testTag("annot-empty"),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
+        // The design's circular Highlighter badge (a 60dp tinted disc with the highlighter glyph).
+        Box(
+            Modifier
+                .padding(bottom = 18.dp)
+                .clip(CircleShape)
+                .background(theme.ink.copy(alpha = if (theme.isDark) 0.05f else 0.04f))
+                .size(60.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                Icons.Outlined.BorderColor,
+                contentDescription = null,
+                tint = theme.ink.copy(alpha = 0.45f),
+                modifier = Modifier.size(28.dp),
+            )
+        }
         Text(
             "Nothing saved yet",
             color = theme.ink,
@@ -230,11 +252,12 @@ private fun AnnotationsEmptyState(theme: ReaderTheme) {
             fontSize = 19.sp,
         )
         Text(
-            "Press and hold a passage to highlight it, or jot a standalone note.",
+            "Press and hold a passage to highlight it, or tap the note icon on a chapter to jot a standalone note.",
             modifier = Modifier.padding(top = 8.dp),
             color = theme.ink.copy(alpha = 0.62f),
             fontFamily = VReaderFonts.Sans,
             fontSize = 14.sp,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
         )
     }
 }
