@@ -1,7 +1,9 @@
 // Purpose: feature #132 WI-5 (#110 Phase 3) — the host-agnostic reader chrome state consumed by
 // [ReaderChromeScaffold]: whether the top/bottom chrome is visible, and which modal sheet (if any) is
 // open. #132 ships the Contents + Notes sheet routes; #134 WI-5 adds the [Details] (Book details) route
-// reached from the top-bar More menu; the `Bookmarks` route arrives with #135 (the no-dead-route rule).
+// reached from the top-bar More menu; #135 WI-5 adds the [Bookmarks] route (the token/Saver land here so
+// the route survives process death; the designed Bookmarks LIST surface is WI-6's TocBookmarksSheet, so
+// WI-5's render of this route is a no-op — no dead route until it has a data source).
 // Persisted across rotation / process death via [ReaderChromeStateSaver] — a custom
 // `Saver<ReaderChromeState, String>` mirroring #127's `SheetRouteSaver` (library/CollectionSheets.kt),
 // because `rememberSaveable` cannot auto-persist an arbitrary class. Any unrecognized/malformed token
@@ -12,14 +14,16 @@ import androidx.compose.runtime.saveable.Saver
 
 /**
  * Which modal sheet the reader chrome currently shows. #132 has Contents ([Toc]) and Notes; #134 WI-5
- * adds [Details] (the Book details sheet, opened from the More menu); the `Bookmarks` route is added by
- * #135 (documented handoff — no dead route until it has a data source).
+ * adds [Details] (the Book details sheet, opened from the More menu); #135 WI-5 adds [Bookmarks] (the
+ * two-tab TOC sheet's Bookmarks surface — routed here so it persists across process death; WI-6 renders
+ * the designed surface, so WI-5 treats this route as a documented no-op).
  */
 sealed interface ReaderSheet {
     data object None : ReaderSheet
     data object Toc : ReaderSheet
     data object Notes : ReaderSheet
     data object Details : ReaderSheet
+    data object Bookmarks : ReaderSheet
 }
 
 /**
@@ -38,6 +42,7 @@ private fun ReaderSheet.token(): String = when (this) {
     ReaderSheet.Toc -> "toc"
     ReaderSheet.Notes -> "notes"
     ReaderSheet.Details -> "details"
+    ReaderSheet.Bookmarks -> "bookmarks"
 }
 
 /** Parses a sheet token; any unknown value falls back to [ReaderSheet.None] (never throws). */
@@ -45,6 +50,7 @@ private fun sheetFromToken(token: String): ReaderSheet = when (token) {
     "toc" -> ReaderSheet.Toc
     "notes" -> ReaderSheet.Notes
     "details" -> ReaderSheet.Details
+    "bookmarks" -> ReaderSheet.Bookmarks
     else -> ReaderSheet.None
 }
 

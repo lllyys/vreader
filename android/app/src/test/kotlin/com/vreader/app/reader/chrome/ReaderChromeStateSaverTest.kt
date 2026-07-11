@@ -52,9 +52,26 @@ class ReaderChromeStateSaverTest {
         assertEquals(state, roundTrip(state))
     }
 
+    @Test fun roundTrips_visibleBookmarks() {
+        // feature #135 WI-5 — the Bookmarks route survives process death like Toc/Notes/Details.
+        val state = ReaderChromeState(chromeVisible = true, sheet = ReaderSheet.Bookmarks)
+        assertEquals(state, roundTrip(state))
+    }
+
+    @Test fun roundTrips_hiddenBookmarks() {
+        val state = ReaderChromeState(chromeVisible = false, sheet = ReaderSheet.Bookmarks)
+        assertEquals(state, roundTrip(state))
+    }
+
     @Test fun detailsToken_restoresToDetails() {
         val restored = ReaderChromeStateSaver.restore("true|details")
         assertEquals(ReaderSheet.Details, restored!!.sheet)
+    }
+
+    @Test fun bookmarksToken_restoresToBookmarks() {
+        // feature #135 WI-5 — the "bookmarks" token codes the Bookmarks route.
+        val restored = ReaderChromeStateSaver.restore("true|bookmarks")
+        assertEquals(ReaderSheet.Bookmarks, restored!!.sheet)
     }
 
     @Test fun garbageToken_restoresToNoneHidden() {
@@ -69,7 +86,9 @@ class ReaderChromeStateSaverTest {
 
     @Test fun unknownSheetName_restoresToNoneHidden_forVisibleFlag() {
         // A well-formed "visible|<unknown>" token falls back to sheet=None but MUST NOT throw.
-        val restored = ReaderChromeStateSaver.restore("true|bookmarks")
+        // (Uses a genuinely-unknown sheet name; "bookmarks" is now a real route — see
+        // bookmarksToken_restoresToBookmarks.)
+        val restored = ReaderChromeStateSaver.restore("true|totally-unknown-sheet")
         assertEquals(ReaderSheet.None, restored!!.sheet)
     }
 
