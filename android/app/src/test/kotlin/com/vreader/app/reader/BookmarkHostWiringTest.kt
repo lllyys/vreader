@@ -154,11 +154,16 @@ class BookmarkHostWiringTest {
 
     // ---- TXT scroll target (out-of-range → Failed) ----
 
-    @Test fun txtBookmarkScrollTarget_inRange() =
+    @Test fun txtBookmarkScrollTarget_inRange() {
         assertEquals(50, txtBookmarkScrollTarget(offset = 50, textLength = 100))
+        assertEquals(99, txtBookmarkScrollTarget(offset = 99, textLength = 100)) // last valid index is in range
+    }
 
-    @Test fun txtBookmarkScrollTarget_atEofBoundaryClamps() =
-        assertEquals(99, txtBookmarkScrollTarget(offset = 100, textLength = 100)) // clamps to last valid index
+    @Test fun txtBookmarkScrollTarget_atOrPastEof_null() {
+        // At/past EOF is OUT of range → Failed (a corrupt / cross-file-restored anchor), the PDF-analog posture.
+        assertNull(txtBookmarkScrollTarget(offset = 100, textLength = 100)) // offset == length → out of range
+        assertNull(txtBookmarkScrollTarget(offset = 150, textLength = 100)) // offset > length → out of range
+    }
 
     @Test fun txtBookmarkScrollTarget_negativeOrEmpty_null() {
         assertNull(txtBookmarkScrollTarget(offset = -1, textLength = 100)) // negative → Failed

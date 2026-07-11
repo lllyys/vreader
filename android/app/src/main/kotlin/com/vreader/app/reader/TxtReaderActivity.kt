@@ -822,14 +822,15 @@ fun txtBookmarkLocator(book: com.vreader.app.data.Book, charOffsetUTF16: Int): v
 
 /**
  * feature #135 WI-7 — the TXT/MD bookmark jump target: the char offset to scroll to, or null when it is out
- * of range (→ [JumpResult.Failed], the sheet stays open — rule 51). A null/negative offset, or an offset
- * at/past EOF, is out of range; a valid offset is clamped to the last valid index (a safe scroll target for
- * a bookmark at the very end). An empty document ([textLength] == 0) is always out of range. Pure/JVM-testable.
+ * of range (→ [JumpResult.Failed], the sheet stays open — rule 51). A null/negative offset, an offset AT or
+ * PAST EOF ([offset] >= [textLength] — a corrupt/cross-file-restored anchor), or an empty document
+ * ([textLength] == 0) is out of range; a valid in-range offset is returned as-is (the PDF-page analog —
+ * [pdfBookmarkPageTarget] — rejects the same way). Pure/JVM-testable.
  */
 fun txtBookmarkScrollTarget(offset: Int?, textLength: Int): Int? {
     if (textLength <= 0) return null
-    if (offset == null || offset < 0) return null
-    return offset.coerceAtMost(textLength - 1)
+    if (offset == null || offset < 0 || offset >= textLength) return null
+    return offset
 }
 
 /**
