@@ -108,6 +108,18 @@ class EpubTextExtractorTest {
     }
 
     @Test
+    fun construct_nonPositiveMaxChunkChars_throws() {
+        val appContext = InstrumentationRegistry.getInstrumentation().targetContext
+        var threw = false
+        try {
+            EpubTextExtractor(BookOpener(appContext), maxChunkChars = 0)
+        } catch (e: IllegalArgumentException) {
+            threw = true
+        }
+        assertTrue("a non-positive maxChunkChars is rejected at construction", threw)
+    }
+
+    @Test
     fun extract_canRunTwice_publicationClosedEachTime() = runBlocking {
         // If the publication weren't closed, a second open of the same file handle could fail; two
         // clean extracts prove the finally-close released the resource.

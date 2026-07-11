@@ -35,6 +35,12 @@ class EpubTextExtractor(
     private val maxChunkChars: Int = DEFAULT_MAX_CHUNK_CHARS,
 ) : BookTextExtractor {
 
+    init {
+        // A non-positive chunk size would make drainRemaining()/emitFullChunks() make no progress
+        // (cut == 0) and loop forever — reject it at construction.
+        require(maxChunkChars > 0) { "maxChunkChars must be > 0, was $maxChunkChars" }
+    }
+
     override suspend fun extract(book: Book, sink: SectionSink): ExtractResult {
         val path = book.localFilePath ?: return ExtractResult.Unsupported
         val file = File(path)
