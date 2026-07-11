@@ -22,6 +22,7 @@
 // per-book failure is isolated and recorded as a retryable `failed` state (only if the book exists).
 package com.vreader.app.search
 
+import android.util.Log
 import com.vreader.app.data.Book
 import com.vreader.app.data.LibraryRepository
 import com.vreader.app.data.SearchDao
@@ -150,7 +151,10 @@ class SearchIndexCoordinator(
         }.onFailure { e ->
             // A CancellationException must still propagate (structured concurrency) even from here.
             if (e is CancellationException) throw e
-            // Any other failure (e.g. an FK-constraint loss to a concurrent delete) is a benign no-op.
+            // Any other failure (e.g. an FK-constraint loss to a concurrent delete) is a benign no-op
+            // for collector availability, but log it so a persistent DB/programming fault is observable
+            // (Gate-4 round-2 follow-up) rather than silently swallowed.
+            Log.w(TAG, "search-index terminal-state write for $bookKey ($status) failed; skipping", e)
         }
     }
 
@@ -203,6 +207,8 @@ class SearchIndexCoordinator(
         const val INDEXER_VERSION: Int = 1
 
         const val DEFAULT_BATCH_SIZE: Int = 32
+
+        private const val TAG = "SearchIndexCoordinator"
 
         private const val STATUS_INDEXED = "indexed"
         private const val STATUS_SKIPPED_UNSUPPORTED = "skipped_unsupported"
