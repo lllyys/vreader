@@ -460,4 +460,199 @@ class InBookSearchViewModelTest {
         assertNull("no cursor consulted", searcher.cursorsSeen.firstOrNull())
         model.onCleared()
     }
+
+    // ---- 13. Gate-4 round-1 hardening: single-flight + generation-gated paging ---------------------
+
+    /**
+     * A backend whose [page] can be held on a per-request gate (a CompletableDeferred), so a test can drive a
+     * GENUINELY late completion (the cancellation-resistant race the round-1 Low flagged) — not just sequential
+     * replacement.
+     */
+    private class GatedSearcher(
+        private val outcome: (query: String, cursor: SearchCursor?) -> InBookSearchOutcome,
+    ) : InBookSearcher {
+        val queriesSeen = mutableListOf<String>()
+        val cursorsSeen = mutableListOf<SearchCursor?>()
+        var closeCursorsCalls = 0
+        /** The next page(...) call parks on this gate (if set) before returning. */
+        var gate: kotlinx.coroutines.CompletableDeferred<Unit>? = null
+        /** Models the repository's live-cursor registry: a Results-with-Epub-cursor page REGISTERS an iterator
+         *  (AFTER the gate — the realistic late-mint order); closeAllEpubCursors() reaps them. [liveCursors]>0
+         *  after a completion means the repository leaked an iterator the VM never reaped. */
+        var liveCursors = 0
+            private set
+
+        override suspend fun page(bookKey: String, format: BookFormat, rawQuery: String, cursor: SearchCursor?, pageSize: Int): InBookSearchOutcome {
+            queriesSeen.add(rawQuery)
+            cursorsSeen.add(cursor)
+            gate?.let { it.await() }
+            val result = outcome(rawQuery, cursor)
+            // Late-mint: register the live iterator only AFTER the (possibly gated) work completes — exactly the
+            // window in which a prior closeAllEpubCursors() could not have reaped it.
+            if (result is InBookSearchOutcome.Results && result.page.nextCursor is SearchCursor.Epub) liveCursors++
+            return result
+        }
+
+        override fun closeAllEpubCursors() { closeCursorsCalls++; liveCursors = 0 }
+    }
+
+    @Test fun rapidDoubleLoadMore_txt_consumesCursorOnce() = runTest {
+        // H1: two loadMore() calls before the first page returns must NOT double-consume the same cursor.
+        val d = StandardTestDispatcher(testScheduler)
+        val cursor1 = SearchCursor.Fts(0, 0, 1L, 3)
+        var pageCalls = 0
+        val searcher = object : InBookSearcher {
+            val cursorsSeen = mutableListOf<SearchCursor?>()
+            override suspend fun page(bookKey: String, format: BookFormat, rawQuery: String, cursor: SearchCursor?, pageSize: Int): InBookSearchOutcome {
+                cursorsSeen.add(cursor)
+                pageCalls++
+                return if (cursor == null) {
+                    InBookSearchOutcome.Results(InBookSearchPage(listOf(InBookGroup("S", listOf(hit("S", "a")))), true, cursor1))
+                } else {
+                    InBookSearchOutcome.Results(InBookSearchPage(listOf(InBookGroup("S", listOf(hit("S", "b")))), false, null))
+                }
+            }
+            override fun closeAllEpubCursors() {}
+        }
+        val model = vm(this, d, searcher)
+
+        model.onQueryChange("x")
+        advanceUntilIdle()
+        val firstPageCalls = pageCalls
+        model.loadMore()
+        model.loadMore()                      // second call while the first is (about to be) in flight
+        advanceUntilIdle()
+
+        val continuationCalls = searcher.cursorsSeen.count { it == cursor1 }
+        assertEquals("the append cursor is consumed exactly once despite two loadMore() calls", 1, continuationCalls)
+        val content = model.state.value.content as InBookSearchContent.Results
+        assertEquals("no duplicate append", listOf("a", "b"), content.groups.single().hits.map { it.snippet })
+        model.onCleared()
+    }
+
+    @Test fun lateFirstPage_forSupersededQuery_doesNotArmPagingForNewQuery() = runTest {
+        // H2: a slow first-page response for query A that completes AFTER query B started must not leave A's
+        // cursor armed as B's nextCursor (which would make a B-loadMore page A's cursor).
+        val d = StandardTestDispatcher(testScheduler)
+        val aCursor = SearchCursor.Fts(9, 9, 99L, 0)
+        val searcher = GatedSearcher { q, _ ->
+            when (q) {
+                "aaa" -> InBookSearchOutcome.Results(InBookSearchPage(listOf(InBookGroup("A", listOf(hit("A", "a")))), true, aCursor))
+                else -> InBookSearchOutcome.NoResults
+            }
+        }
+        val model = vm(this, d, searcher)
+
+        val gate = kotlinx.coroutines.CompletableDeferred<Unit>()
+        searcher.gate = gate
+        model.onQueryChange("aaa")
+        advanceTimeBy(debounce + 1)           // "aaa" first-page dispatched, parked on the gate
+        searcher.gate = null                  // "bbb" will not park
+        model.onQueryChange("bbb")            // supersede A before it completes
+        advanceUntilIdle()                    // "bbb" -> NoResults content, new generation
+        gate.complete(Unit)                   // NOW let A's late first page finish
+        advanceUntilIdle()
+
+        // A's late completion must NOT have armed paging for the live "bbb" session.
+        assertTrue("live content is bbb's NoResults", model.state.value.content is InBookSearchContent.NoResults)
+        model.loadMore()
+        advanceUntilIdle()
+        assertFalse("A's stale cursor was never armed for bbb → no continuation call with A's cursor",
+            searcher.cursorsSeen.contains(aCursor))
+        model.onCleared()
+    }
+
+    @Test fun dismiss_duringInFlightFirstPage_dropsLateCompletion() = runTest {
+        // M2: dismissing while a first-page search is in flight must invalidate it — its late completion (which
+        // would mint a live EPUB cursor) is dropped, and dismiss closes cursors.
+        val d = StandardTestDispatcher(testScheduler)
+        val searcher = GatedSearcher { q, _ ->
+            InBookSearchOutcome.Results(InBookSearchPage(listOf(InBookGroup("C", listOf(hit("C", q)))), true, SearchCursor.Epub("live-$q")))
+        }
+        val model = vm(this, d, searcher, format = BookFormat.epub, bookKey = epubKey, indexStateFlow = flowOf(null))
+
+        val gate = kotlinx.coroutines.CompletableDeferred<Unit>()
+        searcher.gate = gate
+        model.onQueryChange("cat")
+        advanceTimeBy(debounce + 1)           // first-page parked on the gate
+        val closesBefore = searcher.closeCursorsCalls
+        model.onDismiss()                     // dismiss while in flight
+        advanceUntilIdle()
+        assertTrue("dismiss closed cursors", searcher.closeCursorsCalls > closesBefore)
+        gate.complete(Unit)                   // late completion arrives AFTER dismiss (mints its iterator NOW)
+        advanceUntilIdle()
+        // The dismissed session's late page must not become the visible Results with a live cursor.
+        assertFalse("a dismissed session's late first page does not arm a live paging session", model.state.value.content is InBookSearchContent.Results)
+        // round-3 bounded residual: the stale completion is NOT reaped inline (a close-all could close a live
+        // newer-session cursor); the orphan is instead reaped by the next lifecycle close — onCleared() below.
+        model.onCleared()
+        assertEquals("onCleared reaps every EPUB cursor (bounded by the VM lifetime, never leaked)", 0, searcher.liveCursors)
+    }
+
+    // ---- 14. Gate-4 round-2 hardening: session invalidated SYNCHRONOUSLY on query change ------------
+
+    @Test fun queryChange_duringInFlightLoadMore_invalidatesTheAppend() = runTest {
+        // round-2 High: a loadMore() in flight when the user types a NEW query must be invalidated the INSTANT
+        // the text changes (not 250 ms later at the debounce) — its late page must not overwrite the new query's
+        // state, and it must not page() with the new query text.
+        val d = StandardTestDispatcher(testScheduler)
+        val firstCursor = SearchCursor.Fts(0, 0, 1L, 5)
+        val appendCursor = SearchCursor.Fts(0, 0, 1L, 9)
+        val searcher = GatedSearcher { q, cursor ->
+            when {
+                cursor == null && q == "aaa" -> InBookSearchOutcome.Results(InBookSearchPage(listOf(InBookGroup("A", listOf(hit("A", "a1")))), true, firstCursor))
+                cursor == firstCursor -> InBookSearchOutcome.Results(InBookSearchPage(listOf(InBookGroup("A", listOf(hit("A", "a2")))), true, appendCursor))
+                else -> InBookSearchOutcome.NoResults   // any "bbb" first page
+            }
+        }
+        val model = vm(this, d, searcher)
+
+        model.onQueryChange("aaa")
+        advanceUntilIdle()                    // first page for "aaa" armed (firstCursor)
+        assertTrue(model.state.value.content is InBookSearchContent.Results)
+
+        // Park the append, fire loadMore, THEN type a new query before the append returns.
+        val gate = kotlinx.coroutines.CompletableDeferred<Unit>()
+        searcher.gate = gate
+        model.loadMore()                      // append for "aaa" dispatched, parked on the gate
+        advanceUntilIdle()
+        searcher.gate = null
+        model.onQueryChange("bbb")            // NEW query — must invalidate the in-flight append IMMEDIATELY
+        gate.complete(Unit)                   // now the "aaa" append returns late
+        advanceUntilIdle()
+
+        // The late "aaa" append must NOT have appended into "bbb"'s state.
+        val liveQuery = model.state.value.query
+        assertEquals("the live query is bbb", "bbb", liveQuery)
+        // The append call used "aaa" (the session's captured query), NOT the newer "bbb" text.
+        assertFalse("the invalidated append never paged with the new query text",
+            searcher.queriesSeen.any { it == "bbb" && searcher.cursorsSeen[searcher.queriesSeen.indexOf(it)] == firstCursor })
+        // "a2" (the append's hit) must not be visible — the append was dropped.
+        val content = model.state.value.content
+        val visibleSnippets = (content as? InBookSearchContent.Results)?.groups?.flatMap { it.hits }?.map { it.snippet } ?: emptyList()
+        assertFalse("the invalidated append's hit never reaches bbb's results", visibleSnippets.contains("a2"))
+        model.onCleared()
+    }
+
+    @Test fun loadMore_threadsSessionQuery_notNewlyTypedText() = runTest {
+        // round-2 High corollary: loadMore captures the session's query at launch; even if the text field is
+        // then edited, the append pages the ORIGINAL session query with its own cursor.
+        val d = StandardTestDispatcher(testScheduler)
+        val firstCursor = SearchCursor.Fts(1, 0, 2L, 0)
+        val searcher = GatedSearcher { q, cursor ->
+            if (cursor == null) InBookSearchOutcome.Results(InBookSearchPage(listOf(InBookGroup("S", listOf(hit("S", "p1")))), true, firstCursor))
+            else InBookSearchOutcome.Results(InBookSearchPage(listOf(InBookGroup("S", listOf(hit("S", "p2")))), false, null))
+        }
+        val model = vm(this, d, searcher)
+
+        model.onQueryChange("orig")
+        advanceUntilIdle()
+        model.loadMore()
+        advanceUntilIdle()
+
+        // The continuation page was requested with the session query "orig", never a partially-typed newer one.
+        val continuationIdx = searcher.cursorsSeen.indexOfFirst { it == firstCursor }
+        assertEquals("loadMore threads the session query", "orig", searcher.queriesSeen[continuationIdx])
+        model.onCleared()
+    }
 }

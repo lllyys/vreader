@@ -78,3 +78,24 @@ data class InBookSearchScreenState(
 ) {
     val hidesSearchEntry: Boolean get() = content is InBookSearchContent.Unsupported
 }
+
+/**
+ * Merge an appended page's [next] groups into the [existing] displayed groups (append-on-scroll): a group whose
+ * title matches the LAST existing group coalesces (its hits append), any other new group is appended as-is.
+ * Because a page always continues in reading order, only the boundary group can straddle a page split, so
+ * matching the last existing group is sufficient — no gap, no duplicate.
+ */
+internal fun coalesce(existing: List<InBookGroup>, next: List<InBookGroup>): List<InBookGroup> {
+    if (next.isEmpty()) return existing
+    if (existing.isEmpty()) return next
+    val merged = existing.toMutableList()
+    val first = next.first()
+    val last = merged.last()
+    if (last.title == first.title) {
+        merged[merged.lastIndex] = last.copy(hits = last.hits + first.hits)
+        merged.addAll(next.drop(1))
+    } else {
+        merged.addAll(next)
+    }
+    return merged
+}

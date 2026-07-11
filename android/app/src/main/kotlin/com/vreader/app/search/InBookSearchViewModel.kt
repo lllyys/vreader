@@ -5,29 +5,27 @@
 // disposes its live EPUB Readium iterators (`closeAllEpubCursors`) on every reset/dismiss/onCleared so no
 // iterator leaks. The composable (WI-9) is a pure function of [InBookSearchScreenState].
 //
-// Pipeline: onQueryChange -> _query -> trim -> debounce(250 ms) -> distinctUntilChanged ->
-//   flatMapLatest (cancel the prior query's search) -> combine with IndexStateGate.observe(bookKey):
-//     · empty query            -> Idle (and dispose EPUB cursors — a fresh search session for the next query)
-//     · gate=Indexing (TXT/MD) -> Indexing hint, the FTS search is HELD (not run) until the index settles;
-//                                 the gate's Flow re-emits Ready/NoResults on settle so the held query
-//                                 auto-re-runs with no manual re-type (EPUB never enters Indexing).
-//     · gate=Unsupported       -> Unsupported (host hides the Search entry)
-//     · gate=NoResults (0 occ) -> NoResults (definitive, never a false empty while indexing)
-//     · gate=Ready / Failed    -> run the backend page(...) -> map the outcome to content
-//   Each settled batch is tagged with the exact live query so a late emission for a superseded query is
-//   discarded (the #128 SearchViewModel stale-tag pattern). loadMore() threads the last page's nextCursor
-//   back through page(...) for BOTH tracks and COALESCES same-section groups so append-on-scroll is complete.
+// Pipeline: onQueryChange -> _query -> trim -> debounce(250 ms) -> distinctUntilChanged -> flatMapLatest
+//   (cancel the prior query's search) -> IndexStateGate.observe(bookKey), mapping the gate state to content:
+//   empty->Idle (+dispose EPUB cursors); Indexing (TXT/MD)->the FTS search is HELD, the hint shows, and the
+//   gate's Flow re-emits Ready/NoResults on settle so the held query auto-re-runs with no re-type (EPUB never
+//   Indexing); Unsupported->hide the entry; NoResults(0 occ)->definitive empty; Ready/Failed->run page(...).
+//   Each batch is tagged with the query + the search-SESSION generation so a late emission for a superseded
+//   session/query is discarded (the #128 SearchViewModel stale-tag pattern, hardened with a generation token).
+//   loadMore() threads the last page's nextCursor back through page(...) for BOTH tracks and COALESCES
+//   same-section groups so append-on-scroll is complete.
 //
 // Key decisions:
-// - The backend is consumed through the [InBookSearcher] interface (constructor-injected) so tests fake it;
-//   production wires the concrete WI-6 InBookSearchRepository behind it. ONE instance per session.
+// - The backend is the [InBookSearcher] interface (constructor-injected) so tests fake it; production wires the
+//   concrete WI-6 InBookSearchRepository behind it. ONE instance per session.
 // - `closeAllEpubCursors()` is the hard lifecycle invariant (WI-6: the live Readium SearchIterator leaks
-//   otherwise). Called on empty-query reset, explicit dismiss, and onCleared — never a fresh repo per query.
-// - Recents are the GLOBAL RecentSearchesStore (design shows no per-book persistence; iOS parity) reused
-//   through two lambda seams (a Flow + a suspend record) — the VM records + surfaces; the store enforces the
-//   case-insensitive dedupe + cap-8, so the VM never reimplements the cap.
-// - An injected CoroutineScope + CoroutineDispatcher make debounce/flatMapLatest deterministic under a
-//   StandardTestDispatcher; production defaults to viewModelScope + the passed dispatcher.
+//   otherwise). Called on empty-query reset, dismiss, and onCleared — never a fresh repo per query.
+// - A single monotonic `generation` token invalidates a superseded/dismissed search session: ALL paging-field
+//   writes + first-page/append commits are gated on it, so a late/non-cooperative completion can't corrupt the
+//   live session's paging or mint an abandoned EPUB cursor (a stale completion additionally reaps its own).
+// - Recents are the GLOBAL RecentSearchesStore (iOS parity, no per-book persistence) reused via two lambda
+//   seams — the VM records + surfaces; the store owns the case-insensitive dedupe + cap-8, never reimplemented.
+// - An injected CoroutineScope + CoroutineDispatcher make debounce/flatMapLatest deterministic in tests.
 //
 // @coordinates-with search/InBookSearchViewState.kt (the InBookSearcher seam + InBookSearchContent /
 //   InBookSearchScreenState this VM exposes), search/InBookSearchRepository.kt (WI-6 — the InBookSearcher
@@ -37,7 +35,6 @@
 package com.vreader.app.search
 
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
 import com.vreader.app.data.SearchIndexStateEntity
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -90,15 +87,31 @@ class InBookSearchViewModel(
     private val _state = MutableStateFlow(InBookSearchScreenState())
     val state: StateFlow<InBookSearchScreenState> = _state.asStateFlow()
 
-    /** The cursor for the NEXT append-on-scroll page (null = no more / not yet searched). Only meaningful
-     *  when [content] is Results with moreAvailable — guarded by [loadMore]. */
+    /** The monotonic SEARCH-SESSION id — the single generation token that invalidates a superseded search. It
+     *  bumps per distinct query ([flatMapLatest]), on an empty-query reset, and on [onDismiss]; ALL paging-field
+     *  writes + result commits are gated on `gen == generation`, so a late/non-cooperative completion from a
+     *  superseded/dismissed session can't corrupt the live session's paging or mint an abandoned EPUB cursor
+     *  (Gate-4 round-1 H1/H2/M1/M2). Everything runs on the ONE injected dispatcher, so these var reads/writes
+     *  are serialized — the token guards LOGICAL interleaving across suspension points, not a memory race. */
+    private var generation: Long = 0L
+
+    /** The cursor for the NEXT append-on-scroll page (null = no more / not yet searched). */
     private var nextCursor: SearchCursor? = null
 
     /** The currently displayed groups (kept so [loadMore] can COALESCE the appended page). */
     private var currentGroups: List<InBookGroup> = emptyList()
 
-    /** The query the displayed results belong to — a loadMore for a stale query is dropped. */
-    private var resultsQuery: String = ""
+    /** The generation the displayed results + [nextCursor] belong to (a loadMore for a stale session drops). */
+    private var resultsGeneration: Long = -1L
+
+    /** The trimmed query of the CURRENT session — set synchronously in [onQueryChange]/[beginSession] so a
+     *  session change is visible to an in-flight [loadMore] IMMEDIATELY (not only after the 250 ms debounce),
+     *  and so [loadMore] threads the session's own query, never a just-typed newer one (Gate-4 round-2 High). */
+    private var sessionQuery: String = ""
+
+    /** Single-flight guard: true while a [loadMore] page is in flight (prevents rapid scroll callbacks from
+     *  double-consuming the SAME [nextCursor] → duplicate pages / expired EPUB cursor — Gate-4 H1). */
+    private var loadingMore: Boolean = false
 
     @OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
     private val contentFlow: Flow<TaggedContent> =
@@ -107,16 +120,18 @@ class InBookSearchViewModel(
             .debounce(debounceMillis)
             .distinctUntilChanged()
             .flatMapLatest { q ->
+                // The session was already begun synchronously in onQueryChange (which invalidates any in-flight
+                // loadMore the instant the text changes — round-2 High); here we just capture that generation.
+                // A HELD (Indexing) query's gate re-emission on settle keeps the SAME session, so it auto-re-runs.
+                val gen = generation
                 if (q.isEmpty()) {
                     // A cleared query resets the session: dispose any live EPUB iterators before Idle.
                     searcher.closeAllEpubCursors()
-                    flowOf(TaggedContent(q, InBookSearchContent.Idle))
+                    flowOf(TaggedContent(q, gen, InBookSearchContent.Idle))
                 } else {
-                    // The gate re-emits on index settle so a HELD (Indexing) query auto-re-runs; each emission
-                    // maps the gate state → either a held/terminal content or a fresh backend search.
                     indexStateGate
                         .observe(format, bookKey, hasOccurrence = hasOccurrence, indexStateFlow = indexStateFlow)
-                        .flatMapContent(q)
+                        .flatMapContent(q, gen)
                 }
             }
 
@@ -124,15 +139,12 @@ class InBookSearchViewModel(
         combine(contentFlow, recentsFlow) { tagged, recents -> tagged to recents }
             .onEach { (tagged, recents) ->
                 val live = _query.value.trim()
-                // Discard a batch tagged for a superseded query (arrived during the next query's window);
-                // keep the always-live recents fresh, but do not flash mislabeled content.
-                if (tagged.query != live) {
+                // Discard a batch from a superseded session OR tagged for a superseded query (arrived during
+                // the next query's window); keep the always-live recents fresh, but do not flash mislabeled
+                // content.
+                if (tagged.generation != generation || tagged.query != live) {
                     _state.value = _state.value.copy(recents = recents)
                     return@onEach
-                }
-                if (tagged.content is InBookSearchContent.Results) {
-                    currentGroups = tagged.content.groups
-                    resultsQuery = tagged.query
                 }
                 _state.value = InBookSearchScreenState(
                     query = _query.value,
@@ -143,41 +155,67 @@ class InBookSearchViewModel(
             .launchIn(scope)
     }
 
-    /** Map the observed [InBookIndexState] Flow → the search content for [q]; a Ready/Failed gate runs the
-     *  backend page(1), a non-searchable gate short-circuits to the matching terminal content. */
+    /** Invalidate the current session, clear paging state synchronously (so any in-flight append/first-page is
+     *  immediately stale), record the new session's [query], and mint the new generation. */
+    private fun beginSession(query: String) {
+        generation += 1
+        nextCursor = null
+        currentGroups = emptyList()
+        resultsGeneration = -1L
+        loadingMore = false
+        sessionQuery = query
+    }
+
+    /** Map the observed [InBookIndexState] Flow → the search content for [q] in session [gen]; a Ready/Failed
+     *  gate runs the backend page(1) (committing paging state only if [gen] is still current), a non-searchable
+     *  gate short-circuits to the matching terminal content. */
     @OptIn(ExperimentalCoroutinesApi::class)
-    private fun Flow<InBookIndexState>.flatMapContent(q: String): Flow<TaggedContent> =
+    private fun Flow<InBookIndexState>.flatMapContent(q: String, gen: Long): Flow<TaggedContent> =
         this.map { gate ->
             when (gate) {
-                InBookIndexState.Indexing -> TaggedContent(q, InBookSearchContent.Indexing)
-                InBookIndexState.NoResults -> TaggedContent(q, InBookSearchContent.NoResults)
-                InBookIndexState.Unsupported -> TaggedContent(q, InBookSearchContent.Unsupported)
+                InBookIndexState.Indexing -> TaggedContent(q, gen, InBookSearchContent.Indexing)
+                InBookIndexState.NoResults -> TaggedContent(q, gen, InBookSearchContent.NoResults)
+                InBookIndexState.Unsupported -> TaggedContent(q, gen, InBookSearchContent.Unsupported)
                 // Ready (searchable now) and Failed (retryable — attempt the search) both run the backend.
-                InBookIndexState.Ready, InBookIndexState.Failed -> {
-                    nextCursor = null
-                    currentGroups = emptyList()
-                    resultsQuery = q
-                    TaggedContent(q, mapOutcome(searcher.page(bookKey, format, q, cursor = null, pageSize)))
-                }
+                InBookIndexState.Ready, InBookIndexState.Failed ->
+                    TaggedContent(q, gen, mapOutcome(searcher.page(bookKey, format, q, cursor = null, pageSize), gen))
             }
         }
 
-    /** Map a backend outcome → content, capturing the first-page cursor for append-on-scroll. */
-    private fun mapOutcome(outcome: InBookSearchOutcome): InBookSearchContent = when (outcome) {
+    /** Map a first-page backend outcome → content. Commits the append cursor ONLY if [gen] is still the live
+     *  generation (a superseded/dismissed session's late completion must not arm paging for the new session).
+     *
+     *  NOTE (Gate-4 round-3, bounded residual): a stale (`gen != generation`) EPUB completion may leave the
+     *  repository holding a just-minted iterator that this VM never commits. We deliberately do NOT reap it via
+     *  `closeAllEpubCursors()` here — that API closes ALL cursors, so it would also close the LIVE cursor a
+     *  newer session may already have minted (a worse defect). The orphan is instead reaped by the very next
+     *  `beginSession()` → `closeAllEpubCursors()` (any query change / clear / dismiss) and unconditionally by
+     *  [onCleared], so the hold is bounded by the sheet's re-interaction / the VM lifetime — a minor bounded
+     *  resource hold, never an unbounded leak. A precise per-session reap needs a repository session-scoped
+     *  close API (a WI-6 follow-up: the close-all seam cannot selectively reap without repository support). */
+    private fun mapOutcome(outcome: InBookSearchOutcome, gen: Long): InBookSearchContent = when (outcome) {
         is InBookSearchOutcome.Results -> {
-            nextCursor = outcome.page.nextCursor
+            if (gen == generation) {
+                nextCursor = outcome.page.nextCursor
+                currentGroups = outcome.page.groups
+                resultsGeneration = gen
+            }
             InBookSearchContent.Results(outcome.page.groups, outcome.page.moreAvailable)
         }
-        InBookSearchOutcome.NoResults -> { nextCursor = null; InBookSearchContent.NoResults }
-        InBookSearchOutcome.Unsupported -> { nextCursor = null; InBookSearchContent.Unsupported }
-        is InBookSearchOutcome.Error -> { nextCursor = null; InBookSearchContent.Error(outcome.message) }
+        InBookSearchOutcome.NoResults -> InBookSearchContent.NoResults
+        InBookSearchOutcome.Unsupported -> InBookSearchContent.Unsupported
+        is InBookSearchOutcome.Error -> InBookSearchContent.Error(outcome.message)
     }
 
-    /** Update the query text. Immediately reflects the raw text (so the field is responsive) and resets the
-     *  content so no stale rows / definitive copy linger while the debounce settles. */
+    /** Update the query text. Immediately reflects the raw text (so the field is responsive), and — when the
+     *  TRIMMED query changes — synchronously begins a new session (bumping the generation + clearing paging), so
+     *  an in-flight [loadMore] is invalidated the instant the text changes rather than 250 ms later at the
+     *  debounce (Gate-4 round-2 High). Resets the content so no stale rows / definitive copy linger. */
     fun onQueryChange(text: String) {
+        val trimmed = text.trim()
+        if (trimmed != sessionQuery) beginSession(trimmed)
         _query.value = text
-        val reset = if (text.trim().isEmpty()) InBookSearchContent.Idle else InBookSearchContent.Loading
+        val reset = if (trimmed.isEmpty()) InBookSearchContent.Idle else InBookSearchContent.Loading
         _state.value = _state.value.copy(query = text, content = reset)
     }
 
@@ -195,35 +233,52 @@ class InBookSearchViewModel(
     /**
      * Append the next page of results (append-on-scroll). Threads the last page's [nextCursor] back through
      * page(...) for BOTH tracks, COALESCES same-section groups so no gap/duplicate, and stops when the page
-     * reports no more. A no-op when there is no more, no cursor, or the results are for a stale query.
+     * reports no more. Single-flight ([loadingMore]) so rapid scroll callbacks never double-consume the same
+     * cursor; generation-gated so a page arriving after a query change / dismiss is dropped. A no-op when there
+     * is no more, no cursor, a paging session mismatch, or an append is already in flight.
      */
     fun loadMore() {
+        if (loadingMore) return
         val cursor = nextCursor ?: return
         val current = state.value.content
         if (current !is InBookSearchContent.Results || !current.moreAvailable) return
-        val q = resultsQuery
-        if (q.isEmpty() || q != _query.value.trim()) return
+        val gen = generation
+        if (resultsGeneration != gen) return
+        // Thread the SESSION's own query (captured at launch), never a newer just-typed one (round-2 High).
+        val q = sessionQuery
+        loadingMore = true
         scope.launch(dispatcher) {
-            when (val outcome = searcher.page(bookKey, format, q, cursor, pageSize)) {
-                is InBookSearchOutcome.Results -> {
-                    // Only append if the query is still current when the page arrives (guard a race with a
-                    // just-typed query whose flatMapLatest reset already ran).
-                    if (resultsQuery != q || _query.value.trim() != q) return@launch
-                    nextCursor = outcome.page.nextCursor
-                    currentGroups = coalesce(currentGroups, outcome.page.groups)
-                    _state.value = _state.value.copy(
-                        content = InBookSearchContent.Results(currentGroups, outcome.page.moreAvailable),
-                    )
+            try {
+                val outcome = searcher.page(bookKey, format, q, cursor, pageSize)
+                // Only append if THIS session is still live when the page arrives (a query change / dismiss
+                // between launch and completion bumped the generation → drop it, no dup, no wrong-session write).
+                // A stale EPUB cursor minted here is reaped by the next beginSession/onCleared, not here (a
+                // close-all reap could close the live session's cursor — see [mapOutcome]'s round-3 note).
+                if (gen != generation) return@launch
+                when (outcome) {
+                    is InBookSearchOutcome.Results -> {
+                        nextCursor = outcome.page.nextCursor
+                        currentGroups = coalesce(currentGroups, outcome.page.groups)
+                        _state.value = _state.value.copy(
+                            content = InBookSearchContent.Results(currentGroups, outcome.page.moreAvailable),
+                        )
+                    }
+                    // A terminal outcome on a continuation is unexpected; stop paging without discarding what
+                    // is already shown.
+                    else -> nextCursor = null
                 }
-                // A terminal outcome on a continuation is unexpected; stop paging without discarding what
-                // is already shown.
-                else -> { nextCursor = null }
+            } finally {
+                if (gen == generation) loadingMore = false
             }
         }
     }
 
-    /** Explicit dismiss (host closed the sheet): dispose the live EPUB iterators for this session. */
+    /** Explicit dismiss (host closed the sheet): invalidate the active session so any in-flight first-page /
+     *  append completion is a no-op (it can't mint an abandoned cursor into a live session; a stale completion
+     *  additionally reaps its own just-minted EPUB cursor — see [mapOutcome]/[loadMore]), then dispose the live
+     *  EPUB iterators held so far. */
     fun onDismiss() {
+        beginSession(_query.value.trim())
         searcher.closeAllEpubCursors()
     }
 
@@ -233,32 +288,12 @@ class InBookSearchViewModel(
         super.onCleared()
     }
 
-    /** A settled content batch tagged with the (trimmed) query it was computed for (stale-tag discard). */
-    private data class TaggedContent(val query: String, val content: InBookSearchContent)
+    /** A settled content batch tagged with the (trimmed) query + the search-session [generation] it was
+     *  computed for (stale-tag + stale-session discard). */
+    private data class TaggedContent(val query: String, val generation: Long, val content: InBookSearchContent)
 
     companion object {
         const val DEFAULT_DEBOUNCE_MILLIS: Long = 250L
         const val DEFAULT_PAGE_SIZE: Int = 50
-
-        /**
-         * Merge an appended page's [next] groups into the [existing] ones: a group whose title matches the
-         * LAST existing group coalesces (its hits append), any other new group is appended as-is. Because a
-         * page always continues in reading order, only the boundary group can straddle a page split, so
-         * matching the last existing group is sufficient — no gap, no duplicate.
-         */
-        internal fun coalesce(existing: List<InBookGroup>, next: List<InBookGroup>): List<InBookGroup> {
-            if (next.isEmpty()) return existing
-            if (existing.isEmpty()) return next
-            val merged = existing.toMutableList()
-            val first = next.first()
-            val last = merged.last()
-            if (last.title == first.title) {
-                merged[merged.lastIndex] = last.copy(hits = last.hits + first.hits)
-                merged.addAll(next.drop(1))
-            } else {
-                merged.addAll(next)
-            }
-            return merged
-        }
     }
 }
