@@ -158,6 +158,15 @@ fun EpubReaderSheets(
 
     fun closeSheet() { chromeState.value = chromeState.value.copy(sheet = ReaderSheet.None) }
 
+    // feature #134 WI-5 — a Details route with NO model would render no sheet yet still lay the
+    // full-screen dismiss overlay below, silently intercepting Readium scroll/selection/link input (a
+    // dead route). Normalize it back to None so touch-through is preserved (Gate-4 P1). In practice this
+    // route is only reached once [bookDetails] fed the More menu, so this is a defensive guard.
+    if (sheet is ReaderSheet.Details && bookDetails == null) {
+        closeSheet()
+        return
+    }
+
     // The open-only full-screen dismiss overlay — a transparent scrim under the sheet. An outside tap
     // (a tap that reaches the scrim, not the sheet) closes the sheet. Present ONLY while a sheet is open.
     Box(
