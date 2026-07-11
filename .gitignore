@@ -84,3 +84,6 @@ android/.gradle/
 android/local.properties
 android/app/build/
 .gradle/
+
+# bureau rendered board (built by bureau:inspect, never committed)
+/gazette/

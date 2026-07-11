@@ -1,0 +1,2385 @@
+{
+ "generated": "2026-07-11",
+ "classes": [
+  "notification",
+  "protocol-seam",
+  "persistence-access",
+  "js-bridge",
+  "contract-surface",
+  "build-dependency"
+ ],
+ "note": "Mechanical grep-based extraction, not AST-precise. verdict=unchecked/ambiguous rows are Phase-3 C3 Codex audit targets, not yet human-confirmed edges.",
+ "rows": [
+  {
+   "class": "notification",
+   "from": "post:bookDidImport",
+   "to": "observe:bookDidImport",
+   "evidence": {
+    "from_loc": [
+     "vreader/Services/BookImporter.swift:297",
+     "vreader/Services/BookImporter.swift:420"
+    ],
+    "to_loc": [
+     "vreader/Views/Library/LibraryViewObservers.swift:61"
+    ]
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented"
+  },
+  {
+   "class": "notification",
+   "from": "post:bookFileStateDidChange",
+   "to": "observe:bookFileStateDidChange",
+   "evidence": {
+    "from_loc": [
+     "vreader/Services/Backup/SelectiveRestoreCoordinator.swift:206",
+     "vreader/Services/Backup/LazyDownloadCoordinator.swift:201",
+     "vreader/Services/Backup/LazyDownloadCoordinator.swift:466",
+     "vreader/Services/Backup/LazyDownloadCoordinator.swift:513"
+    ],
+    "to_loc": [
+     "vreader/Views/Library/LibraryViewObservers.swift:54"
+    ]
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented"
+  },
+  {
+   "class": "notification",
+   "from": "post:debugBridgeAIAction",
+   "to": "observe:debugBridgeAIAction",
+   "evidence": {
+    "from_loc": [
+     "vreader/Services/DebugBridge/RealDebugBridgeContext+AIAction.swift:57"
+    ],
+    "to_loc": []
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented",
+   "audit_evidence": "RealDebugBridgeContext+AIAction.swift:57 posts; AIReaderPanel+DebugBridgeAIAction.swift:37 observes via NotificationCenter publisher.",
+   "audit_batch": "c3a"
+  },
+  {
+   "class": "notification",
+   "from": "post:debugBridgeBilingualCommand",
+   "to": "observe:debugBridgeBilingualCommand",
+   "evidence": {
+    "from_loc": [
+     "vreader/Services/DebugBridge/RealDebugBridgeContext.swift:430"
+    ],
+    "to_loc": []
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented",
+   "audit_evidence": "RealDebugBridgeContext.swift:430 posts; ReaderDebugBridgeBilingualObserver.swift:28 observes.",
+   "audit_batch": "c3a"
+  },
+  {
+   "class": "notification",
+   "from": "post:debugBridgeHighlightCommand",
+   "to": "observe:debugBridgeHighlightCommand",
+   "evidence": {
+    "from_loc": [
+     "vreader/Services/DebugBridge/RealDebugBridgeContext.swift:460"
+    ],
+    "to_loc": []
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented",
+   "audit_evidence": "RealDebugBridgeContext.swift:460 posts; DebugBridgeHighlightObserver.swift:38 and EPUBReaderContainerView+DebugBridgeHighlight.swift:266 observe.",
+   "audit_batch": "c3a"
+  },
+  {
+   "class": "notification",
+   "from": "post:debugBridgeLandingBloomChanged",
+   "to": "observe:debugBridgeLandingBloomChanged",
+   "evidence": {
+    "from_loc": [
+     "vreader/Views/Reader/HighlightableTextView.swift:304"
+    ],
+    "to_loc": []
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented",
+   "audit_evidence": "HighlightableTextView.swift:304 posts; ReaderContainerView+DebugBridgeLandingBloom.swift:38 observes.",
+   "audit_batch": "c3a"
+  },
+  {
+   "class": "notification",
+   "from": "post:debugBridgeLibraryChanged",
+   "to": "observe:debugBridgeLibraryChanged",
+   "evidence": {
+    "from_loc": [
+     "vreader/Services/DebugBridge/RealDebugBridgeContext.swift:126",
+     "vreader/Services/DebugBridge/RealDebugBridgeContext.swift:174",
+     "vreader/Services/DebugBridge/RealDebugBridgeContext+SeedSessions.swift:45"
+    ],
+    "to_loc": [
+     "vreader/Views/Library/LibraryViewObservers.swift:177"
+    ]
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented"
+  },
+  {
+   "class": "notification",
+   "from": "post:debugBridgeNavigateCommand",
+   "to": "observe:debugBridgeNavigateCommand",
+   "evidence": {
+    "from_loc": [
+     "vreader/Services/DebugBridge/RealDebugBridgeContext+Navigate.swift:40"
+    ],
+    "to_loc": [
+     "vreader/Views/Reader/EPUBReaderContainerView.swift:363"
+    ]
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented"
+  },
+  {
+   "class": "notification",
+   "from": "post:debugBridgeOpenBook",
+   "to": "observe:debugBridgeOpenBook",
+   "evidence": {
+    "from_loc": [
+     "vreader/Services/DebugBridge/RealDebugBridgeContext.swift:251"
+    ],
+    "to_loc": [
+     "vreader/Views/Library/LibraryViewObservers.swift:165"
+    ]
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented"
+  },
+  {
+   "class": "notification",
+   "from": "post:debugBridgePDFHighlightCommand",
+   "to": "observe:debugBridgePDFHighlightCommand",
+   "evidence": {
+    "from_loc": [
+     "vreader/Services/DebugBridge/RealDebugBridgeContext+PDFHighlight.swift:48"
+    ],
+    "to_loc": []
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented",
+   "audit_evidence": "RealDebugBridgeContext+PDFHighlight.swift:48 posts; PDFReaderContainerView+DebugBridgePDFHighlight.swift:315 observes.",
+   "audit_batch": "c3a"
+  },
+  {
+   "class": "notification",
+   "from": "post:debugBridgePresentSheet",
+   "to": "observe:debugBridgePresentSheet",
+   "evidence": {
+    "from_loc": [
+     "vreader/Services/DebugBridge/RealDebugBridgeContext+Present.swift:46"
+    ],
+    "to_loc": []
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented",
+   "audit_evidence": "RealDebugBridgeContext+Present.swift:46 posts; ReaderContainerView+DebugBridgePresent.swift:30 observes.",
+   "audit_batch": "c3a"
+  },
+  {
+   "class": "notification",
+   "from": "post:debugBridgeRenderedTextChanged",
+   "to": "observe:debugBridgeRenderedTextChanged",
+   "evidence": {
+    "from_loc": [
+     "vreader/Views/Reader/TXTReaderContainerView.swift:807"
+    ],
+    "to_loc": []
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented",
+   "audit_evidence": "TXTReaderContainerView.swift:807 posts; ReaderContainerView+DebugBridgeRenderedText.swift:37 observes.",
+   "audit_batch": "c3a"
+  },
+  {
+   "class": "notification",
+   "from": "post:debugBridgeScrollBoundaryCommand",
+   "to": "observe:debugBridgeScrollBoundaryCommand",
+   "evidence": {
+    "from_loc": [
+     "vreader/Services/DebugBridge/RealDebugBridgeContext+ScrollBoundary.swift:41"
+    ],
+    "to_loc": []
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented",
+   "audit_evidence": "RealDebugBridgeContext+ScrollBoundary.swift:41 posts; EPUBReaderContainerView+DebugBridgeScrollBoundary.swift:85 observes.",
+   "audit_batch": "c3a"
+  },
+  {
+   "class": "notification",
+   "from": "post:debugBridgeScrollSheet",
+   "to": "observe:debugBridgeScrollSheet",
+   "evidence": {
+    "from_loc": [
+     "vreader/Services/DebugBridge/RealDebugBridgeContext+ScrollSheet.swift:62"
+    ],
+    "to_loc": []
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented",
+   "audit_evidence": "RealDebugBridgeContext+ScrollSheet.swift:62 posts; TranslationResultCard.swift:233 observes.",
+   "audit_batch": "c3a"
+  },
+  {
+   "class": "notification",
+   "from": "post:debugBridgeSearchCommand",
+   "to": "observe:debugBridgeSearchCommand",
+   "evidence": {
+    "from_loc": [
+     "vreader/Services/DebugBridge/RealDebugBridgeContext.swift:403"
+    ],
+    "to_loc": []
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented",
+   "audit_evidence": "RealDebugBridgeContext.swift:403 posts; ReaderContainerView+DebugBridgeSearch.swift:27 observes.",
+   "audit_batch": "c3a"
+  },
+  {
+   "class": "notification",
+   "from": "post:debugBridgeSeekFraction",
+   "to": "observe:debugBridgeSeekFraction",
+   "evidence": {
+    "from_loc": [
+     "vreader/Services/DebugBridge/RealDebugBridgeContext+Seek.swift:36"
+    ],
+    "to_loc": []
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented",
+   "audit_evidence": "RealDebugBridgeContext+Seek.swift:36 posts; FoliateDebugSeekFractionObserver.swift observes the publisher.",
+   "audit_batch": "c3a"
+  },
+  {
+   "class": "notification",
+   "from": "post:debugBridgeSetLayoutCommand",
+   "to": "observe:debugBridgeSetLayoutCommand",
+   "evidence": {
+    "from_loc": [
+     "vreader/Services/DebugBridge/RealDebugBridgeContext+SetLayout.swift:37"
+    ],
+    "to_loc": []
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented",
+   "audit_evidence": "RealDebugBridgeContext+SetLayout.swift:37 posts; the DEBUG reader layout observer consumes the notification through a NotificationCenter publisher.",
+   "audit_batch": "c3a"
+  },
+  {
+   "class": "notification",
+   "from": "post:debugBridgeTTSCommand",
+   "to": "observe:debugBridgeTTSCommand",
+   "evidence": {
+    "from_loc": [
+     "vreader/Services/DebugBridge/RealDebugBridgeContext.swift:378"
+    ],
+    "to_loc": [
+     "vreader/Views/Reader/ReaderContainerView.swift:678"
+    ]
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented"
+  },
+  {
+   "class": "notification",
+   "from": "post:debugBridgeThemeChanged",
+   "to": "observe:debugBridgeThemeChanged",
+   "evidence": {
+    "from_loc": [
+     "vreader/Services/DebugBridge/RealDebugBridgeContext.swift:355"
+    ],
+    "to_loc": [
+     "vreader/Views/Reader/ReaderContainerView.swift:643"
+    ]
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented"
+  },
+  {
+   "class": "notification",
+   "from": "post:epubFootnoteDetected",
+   "to": "observe:epubFootnoteDetected",
+   "evidence": {
+    "from_loc": [
+     "vreader/Views/Reader/EPUBWebViewBridgeCoordinator.swift:374"
+    ],
+    "to_loc": []
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented",
+   "audit_evidence": "EPUBWebViewBridgeCoordinator.swift:374 posts; the reader host's NotificationCenter publisher consumes the detected-footnote event.",
+   "audit_batch": "c3a"
+  },
+  {
+   "class": "notification",
+   "from": "post:foliateAnnotationTapRequested",
+   "to": "observe:foliateAnnotationTapRequested",
+   "evidence": {
+    "from_loc": [
+     "vreader/Views/Reader/FoliateSpikeView.swift:974"
+    ],
+    "to_loc": []
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented",
+   "audit_evidence": "FoliateSpikeView.swift:974 posts; the Foliate reader container annotation handler observes it.",
+   "audit_batch": "c3a"
+  },
+  {
+   "class": "notification",
+   "from": "post:foliateBilingualBlocksEnumerated",
+   "to": "observe:foliateBilingualBlocksEnumerated",
+   "evidence": {
+    "from_loc": [
+     "vreader/Views/Reader/FoliateSpikeView.swift:1084"
+    ],
+    "to_loc": []
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented",
+   "audit_evidence": "FoliateSpikeView.swift:1084 posts; FoliateBilingualContainerView consumes the enumerated-block payload.",
+   "audit_batch": "c3a"
+  },
+  {
+   "class": "notification",
+   "from": "post:foliateBookReadyTOC",
+   "to": "observe:foliateBookReadyTOC",
+   "evidence": {
+    "from_loc": [
+     "vreader/Views/Reader/FoliateSpikeView.swift:784"
+    ],
+    "to_loc": []
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented",
+   "audit_evidence": "FoliateSpikeView.swift:784 posts; the Foliate TOC adapter observes it and publishes foliateTOCAvailable.",
+   "audit_batch": "c3a"
+  },
+  {
+   "class": "notification",
+   "from": "post:foliateEvaluateJS",
+   "to": "observe:foliateEvaluateJS",
+   "evidence": {
+    "from_loc": [
+     "vreader/Views/Reader/FoliateReaderContainerView+Navigation.swift:18",
+     "vreader/Views/Reader/FoliateReaderContainerView+Navigation.swift:30"
+    ],
+    "to_loc": []
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented",
+   "audit_evidence": "FoliateReaderContainerView+Navigation.swift:18,30 posts raw JS; the Foliate WKWebView coordinator observes and evaluates it.",
+   "audit_batch": "c3a"
+  },
+  {
+   "class": "notification",
+   "from": "post:foliateOverlayReadyForSection",
+   "to": "observe:foliateOverlayReadyForSection",
+   "evidence": {
+    "from_loc": [
+     "vreader/Views/Reader/FoliateSpikeView.swift:952"
+    ],
+    "to_loc": []
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented",
+   "audit_evidence": "FoliateSpikeView.swift:952 posts; the Foliate highlight repaint path observes the section-ready event.",
+   "audit_batch": "c3a"
+  },
+  {
+   "class": "notification",
+   "from": "post:foliateRelocated",
+   "to": "observe:foliateRelocated",
+   "evidence": {
+    "from_loc": [
+     "vreader/Views/Reader/FoliateSpikeView.swift:1036"
+    ],
+    "to_loc": []
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented",
+   "audit_evidence": "FoliateSpikeView.swift:1036 posts; Foliate reader state/position handling observes the relocation payload.",
+   "audit_batch": "c3a"
+  },
+  {
+   "class": "notification",
+   "from": "post:foliateRequestAnnotationJSCreate",
+   "to": "observe:foliateRequestAnnotationJSCreate",
+   "evidence": {
+    "from_loc": [
+     "vreader/Views/Reader/FoliateSpikeView+Selection.swift:163"
+    ],
+    "to_loc": [
+     "vreader/Views/Reader/FoliateSpikeView.swift:607"
+    ]
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented"
+  },
+  {
+   "class": "notification",
+   "from": "post:foliateRequestAnnotationJSDelete",
+   "to": "observe:foliateRequestAnnotationJSDelete",
+   "evidence": {
+    "from_loc": [
+     "vreader/ViewModels/HighlightListViewModel.swift:141"
+    ],
+    "to_loc": [
+     "vreader/Views/Reader/FoliateSpikeView.swift:585"
+    ]
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented"
+  },
+  {
+   "class": "notification",
+   "from": "post:foliateRequestBilingualEvalJS",
+   "to": "observe:foliateRequestBilingualEvalJS",
+   "evidence": {
+    "from_loc": [
+     "vreader/Views/Reader/FoliateBilingualContainerView.swift:894"
+    ],
+    "to_loc": [
+     "vreader/Views/Reader/FoliateSpikeView.swift:627"
+    ]
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented"
+  },
+  {
+   "class": "notification",
+   "from": "post:foliateRequestSeekFraction",
+   "to": "observe:foliateRequestSeekFraction",
+   "evidence": {
+    "from_loc": [
+     "vreader/Views/Reader/FoliateDebugSeekFractionObserver.swift:44",
+     "vreader/Views/Reader/FoliateBilingualContainerView+BottomChrome.swift:89",
+     "vreader/Views/Reader/FoliateBilingualContainerView+Position.swift:161"
+    ],
+    "to_loc": [
+     "vreader/Views/Reader/FoliateSpikeView.swift:675"
+    ]
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented"
+  },
+  {
+   "class": "notification",
+   "from": "post:foliateRequestSeekTarget",
+   "to": "observe:foliateRequestSeekTarget",
+   "evidence": {
+    "from_loc": [
+     "vreader/Views/Reader/FoliateBilingualContainerView+Position.swift:168",
+     "vreader/Views/Reader/FoliateBilingualContainerView.swift:341"
+    ],
+    "to_loc": [
+     "vreader/Views/Reader/FoliateSpikeView.swift:696"
+    ]
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented"
+  },
+  {
+   "class": "notification",
+   "from": "post:foliateSectionLoaded",
+   "to": "observe:foliateSectionLoaded",
+   "evidence": {
+    "from_loc": [
+     "vreader/Views/Reader/FoliateSpikeView.swift:1102"
+    ],
+    "to_loc": []
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented",
+   "audit_evidence": "FoliateSpikeView.swift:1102 posts; Foliate bilingual orchestration observes loaded sections.",
+   "audit_batch": "c3a"
+  },
+  {
+   "class": "notification",
+   "from": "post:foliateSelectionDetected",
+   "to": "observe:foliateSelectionDetected",
+   "evidence": {
+    "from_loc": [
+     "vreader/Views/Reader/FoliateSpikeView.swift:917"
+    ],
+    "to_loc": []
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented",
+   "audit_evidence": "FoliateSpikeView.swift:917 posts; Foliate selection/highlight handling observes it.",
+   "audit_batch": "c3a"
+  },
+  {
+   "class": "notification",
+   "from": "post:foliateTOCAvailable",
+   "to": "observe:foliateTOCAvailable",
+   "evidence": {
+    "from_loc": [
+     "vreader/Views/Reader/FoliateBilingualContainerView.swift:320"
+    ],
+    "to_loc": []
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented",
+   "audit_evidence": "FoliateBilingualContainerView.swift:320 posts; shared reader TOC presentation observes it.",
+   "audit_batch": "c3a"
+  },
+  {
+   "class": "notification",
+   "from": "post:libraryRowTappedWhileNotLocal",
+   "to": "observe:libraryRowTappedWhileNotLocal",
+   "evidence": {
+    "from_loc": [
+     "vreader/Views/LibraryView.swift:446",
+     "vreader/Views/Backup/BookDownloadSheet.swift:112"
+    ],
+    "to_loc": [
+     "vreader/Views/Library/LibraryViewObservers.swift:37"
+    ]
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented"
+  },
+  {
+   "class": "notification",
+   "from": "post:opdsBookDownloaded",
+   "to": "observe:opdsBookDownloaded",
+   "evidence": {
+    "from_loc": [
+     "vreader/Views/OPDS/OPDSEntryView.swift:152"
+    ],
+    "to_loc": [
+     "vreader/Views/Library/LibraryViewSheets.swift:73"
+    ]
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented"
+  },
+  {
+   "class": "notification",
+   "from": "post:openReadingStatsRequested",
+   "to": "observe:openReadingStatsRequested",
+   "evidence": {
+    "from_loc": [
+     "vreader/Views/Settings/SettingsView.swift:128"
+    ],
+    "to_loc": [
+     "vreader/Views/Settings/SettingsView.swift:152"
+    ]
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented"
+  },
+  {
+   "class": "notification",
+   "from": "post:providerProfilesDidChange",
+   "to": "observe:providerProfilesDidChange",
+   "evidence": {
+    "from_loc": [
+     "vreader/Services/AI/ProviderProfileStore.swift:163"
+    ],
+    "to_loc": [
+     "vreader/ViewModels/AIProviderPickerViewModel.swift:80"
+    ]
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented"
+  },
+  {
+   "class": "notification",
+   "from": "post:readerAnnotationRequested",
+   "to": "observe:readerAnnotationRequested",
+   "evidence": {
+    "from_loc": [],
+    "to_loc": [
+     "vreader/Views/Reader/EPUBReaderContainerView.swift:430",
+     "vreader/Views/Reader/ReaderNotificationModifier.swift:73",
+     "vreader/Views/Reader/ReadiumEPUBHost+Annotations.swift:42"
+    ]
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented",
+   "audit_evidence": "SelectionPopoverActionRouter posts the routed action; EPUBReaderContainerView.swift:430, ReaderNotificationModifier.swift:73, and ReadiumEPUBHost+Annotations.swift:42 observe.",
+   "audit_batch": "c3a"
+  },
+  {
+   "class": "notification",
+   "from": "post:readerAnnotationsDidChange",
+   "to": "observe:readerAnnotationsDidChange",
+   "evidence": {
+    "from_loc": [
+     "vreader/Services/PersistenceActor+AnnotationBus.swift:25"
+    ],
+    "to_loc": [
+     "vreader/Services/AI/ChatAnnotationCache.swift:64"
+    ]
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented"
+  },
+  {
+   "class": "notification",
+   "from": "post:readerAskAIRequested",
+   "to": "observe:readerAskAIRequested",
+   "evidence": {
+    "from_loc": [],
+    "to_loc": [
+     "vreader/Views/Reader/ReaderContainerView.swift:1345"
+    ]
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented",
+   "audit_evidence": "SelectionPopoverActionRouter posts the routed action; ReaderContainerView.swift:1345 observes and opens/seeds AI chat.",
+   "audit_batch": "c3a"
+  },
+  {
+   "class": "notification",
+   "from": "post:readerBilingualDidChange",
+   "to": "observe:readerBilingualDidChange",
+   "evidence": {
+    "from_loc": [
+     "vreader/ViewModels/BilingualReadingViewModel+Prefetch.swift:231"
+    ],
+    "to_loc": [
+     "vreader/Views/Reader/ReaderContainerView.swift:518",
+     "vreader/Views/Reader/ReadiumEPUBHost+Bilingual.swift:299"
+    ]
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented"
+  },
+  {
+   "class": "notification",
+   "from": "post:readerBilingualPrefetchDidChange",
+   "to": "observe:readerBilingualPrefetchDidChange",
+   "evidence": {
+    "from_loc": [
+     "vreader/ViewModels/BilingualReadingViewModel.swift:119"
+    ],
+    "to_loc": [
+     "vreader/Views/Reader/ReadiumEPUBHost+Bilingual.swift:308"
+    ]
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented"
+  },
+  {
+   "class": "notification",
+   "from": "post:readerBilingualReTranslateApplied",
+   "to": "observe:readerBilingualReTranslateApplied",
+   "evidence": {
+    "from_loc": [
+     "vreader/Views/Reader/ReaderContainerView+ReTranslate.swift:197"
+    ],
+    "to_loc": []
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented",
+   "audit_evidence": "ReaderContainerView+ReTranslate.swift:197 posts; per-format bilingual hosts observe the applied-segments event.",
+   "audit_batch": "c3a"
+  },
+  {
+   "class": "notification",
+   "from": "post:readerBilingualRetranslateStarted",
+   "to": "observe:readerBilingualRetranslateStarted",
+   "evidence": {
+    "from_loc": [
+     "vreader/Views/Reader/Bilingual/BilingualSettingsEditRouter.swift:81"
+    ],
+    "to_loc": []
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented",
+   "audit_evidence": "BilingualSettingsEditRouter.swift:81 posts; reader bilingual state handling observes the start signal.",
+   "audit_batch": "c3a"
+  },
+  {
+   "class": "notification",
+   "from": "post:readerBilingualRetry",
+   "to": "observe:readerBilingualRetry",
+   "evidence": {
+    "from_loc": [
+     "vreader/Views/Reader/PDFReaderContainerView+Bilingual.swift:304"
+    ],
+    "to_loc": []
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented",
+   "audit_evidence": "PDFReaderContainerView+Bilingual.swift:304 posts; PDF bilingual panel/orchestration observes the retry signal.",
+   "audit_batch": "c3a"
+  },
+  {
+   "class": "notification",
+   "from": "post:readerBilingualSectionEvicted",
+   "to": "observe:readerBilingualSectionEvicted",
+   "evidence": {
+    "from_loc": [
+     "vreader/Views/Reader/EPUBReaderContainerView.swift:660"
+    ],
+    "to_loc": []
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented",
+   "audit_evidence": "EPUBReaderContainerView.swift:660 posts; bilingual cache/prefetch state observes the fingerprintKey and spineIndex payload.",
+   "audit_batch": "c3a"
+  },
+  {
+   "class": "notification",
+   "from": "post:readerBilingualSectionMaterialized",
+   "to": "observe:readerBilingualSectionMaterialized",
+   "evidence": {
+    "from_loc": [
+     "vreader/Views/Reader/EPUBReaderContainerView.swift:712"
+    ],
+    "to_loc": []
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented",
+   "audit_evidence": "EPUBReaderContainerView.swift:712 posts; bilingual cache/prefetch state observes the fingerprintKey and spineIndex payload.",
+   "audit_batch": "c3a"
+  },
+  {
+   "class": "notification",
+   "from": "post:readerBookTranslationProgressDidChange",
+   "to": "observe:readerBookTranslationProgressDidChange",
+   "evidence": {
+    "from_loc": [
+     "vreader/Services/AI/BookTranslationCoordinator.swift:490"
+    ],
+    "to_loc": []
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented",
+   "audit_evidence": "BookTranslationCoordinator.swift:490 posts; whole-book translation UI/state observes progress changes.",
+   "audit_batch": "c3a"
+  },
+  {
+   "class": "notification",
+   "from": "post:readerBookTranslationTextProviderAvailable",
+   "to": "observe:readerBookTranslationTextProviderAvailable",
+   "evidence": {
+    "from_loc": [
+     "vreader/Views/Reader/TXTReaderContainerView+Bilingual.swift:184",
+     "vreader/Views/Reader/EPUBReaderContainerView+Bilingual.swift:147",
+     "vreader/Views/Reader/MDReaderContainerView+Bilingual.swift:126",
+     "vreader/Views/Reader/ReadiumEPUBHost+Bilingual.swift:117",
+     "vreader/Views/Reader/FoliateBilingualContainerView.swift:458"
+    ],
+    "to_loc": []
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented",
+   "audit_evidence": "TXTReaderContainerView+Bilingual.swift:184, EPUBReaderContainerView+Bilingual.swift:147, MDReaderContainerView+Bilingual.swift:126, ReadiumEPUBHost+Bilingual.swift:117, and FoliateBilingualContainerView.swift:458 post providers; ReaderContainerView/reader dispatcher caches the ChapterTextProviding adapter.",
+   "audit_batch": "c3a"
+  },
+  {
+   "class": "notification",
+   "from": "post:readerBookmarkRequested",
+   "to": "observe:readerBookmarkRequested",
+   "evidence": {
+    "from_loc": [
+     "vreader/Views/Reader/ReaderContainerView+Sheets.swift:368"
+    ],
+    "to_loc": [
+     "vreader/Views/Reader/EPUBReaderContainerView.swift:268",
+     "vreader/Views/Reader/ReaderNotificationModifier.swift:28",
+     "vreader/Views/Reader/FoliateSpikeView.swift:179",
+     "vreader/Views/Reader/PDFReaderContainerView.swift:242",
+     "vreader/Views/Reader/FoliateReaderContainerView.swift:75"
+    ]
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented"
+  },
+  {
+   "class": "notification",
+   "from": "post:readerContentTapped",
+   "to": "observe:readerContentTapped",
+   "evidence": {
+    "from_loc": [
+     "vreader/Views/Reader/TXTBridgeShared.swift:117",
+     "vreader/Views/Reader/FoliateSpikeView.swift:898",
+     "vreader/Views/Reader/ReaderTapZoneRouter.swift:129",
+     "vreader/Views/Reader/TapZoneOverlay.swift:17",
+     "vreader/Views/Reader/FoliateReaderContainerView.swift:202"
+    ],
+    "to_loc": [
+     "vreader/Views/Reader/EPUBReaderContainerView.swift:283",
+     "vreader/Views/Reader/MDReaderContainerView.swift:270",
+     "vreader/Views/Reader/ReaderContainerView.swift:334",
+     "vreader/Views/Reader/TXTReaderContainerView.swift:294",
+     "vreader/Views/Reader/PDFReaderContainerView.swift:257"
+    ]
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented"
+  },
+  {
+   "class": "notification",
+   "from": "post:readerDefineRequested",
+   "to": "observe:readerDefineRequested",
+   "evidence": {
+    "from_loc": [],
+    "to_loc": [
+     "vreader/Views/Reader/ReaderContainerView.swift:436"
+    ]
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented",
+   "audit_evidence": "Legacy edit-menu selection routing posts; ReaderContainerView.swift:436 observes.",
+   "audit_batch": "c3a"
+  },
+  {
+   "class": "notification",
+   "from": "post:readerDidClose",
+   "to": "observe:readerDidClose",
+   "evidence": {
+    "from_loc": [
+     "vreader/ViewModels/ReaderLifecycleHelper.swift:160"
+    ],
+    "to_loc": [
+     "vreader/Views/Library/LibraryViewObservers.swift:40"
+    ]
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented"
+  },
+  {
+   "class": "notification",
+   "from": "post:readerHighlightEditRequested",
+   "to": "observe:readerHighlightEditRequested",
+   "evidence": {
+    "from_loc": [
+     "vreader/Views/Reader/Annotations/HighlightsSheet+Delete.swift:118"
+    ],
+    "to_loc": []
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented",
+   "audit_evidence": "HighlightsSheet+Delete.swift:118 posts; reader highlight edit routing observes and navigates/reopens the editor.",
+   "audit_batch": "c3a"
+  },
+  {
+   "class": "notification",
+   "from": "post:readerHighlightRemoved",
+   "to": "observe:readerHighlightRemoved",
+   "evidence": {
+    "from_loc": [
+     "vreader/ViewModels/HighlightListViewModel.swift:130",
+     "vreader/Views/Reader/HighlightCoordinator.swift:261"
+    ],
+    "to_loc": [
+     "vreader/Views/Reader/EPUBReaderContainerView.swift:389",
+     "vreader/Views/Reader/ReaderNotificationModifier.swift:83",
+     "vreader/Views/Reader/ReadiumEPUBHost+Highlights.swift:47",
+     "vreader/Views/Reader/PDFReaderContainerView.swift:310"
+    ]
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented"
+  },
+  {
+   "class": "notification",
+   "from": "post:readerHighlightRequested",
+   "to": "observe:readerHighlightRequested",
+   "evidence": {
+    "from_loc": [],
+    "to_loc": [
+     "vreader/Views/Reader/EPUBReaderContainerView.swift:420",
+     "vreader/Views/Reader/ReaderNotificationModifier.swift:47",
+     "vreader/Views/Reader/ReadiumEPUBHost+Highlights.swift:43"
+    ]
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented",
+   "audit_evidence": "SelectionPopoverActionRouter posts; EPUBReaderContainerView.swift:420, ReaderNotificationModifier.swift:47, and ReadiumEPUBHost+Highlights.swift:43 observe.",
+   "audit_batch": "c3a"
+  },
+  {
+   "class": "notification",
+   "from": "post:readerHighlightTapped",
+   "to": "observe:readerHighlightTapped",
+   "evidence": {
+    "from_loc": [
+     "vreader/Views/Reader/FoliateReaderContainerView+Highlights.swift:71",
+     "vreader/Views/Reader/TXTChunkedReaderBridge.swift:922",
+     "vreader/Views/Reader/TXTTextViewBridgeCoordinator.swift:269",
+     "vreader/Views/Reader/FoliateSpikeView+HighlightTap.swift:72",
+     "vreader/Views/Reader/EPUBWebViewBridgeCoordinator.swift:320"
+    ],
+    "to_loc": []
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented",
+   "audit_evidence": "FoliateReaderContainerView+Highlights.swift:71, TXTChunkedReaderBridge.swift:922, TXTTextViewBridgeCoordinator.swift:269, FoliateSpikeView+HighlightTap.swift:72, and EPUBWebViewBridgeCoordinator.swift:320 post; shared highlight-editor presentation observes.",
+   "audit_batch": "c3a"
+  },
+  {
+   "class": "notification",
+   "from": "post:readerHighlightsDidImport",
+   "to": "observe:readerHighlightsDidImport",
+   "evidence": {
+    "from_loc": [
+     "vreader/Views/Reader/Annotations/HighlightsSheet+Export.swift:127"
+    ],
+    "to_loc": [
+     "vreader/Views/Reader/EPUBReaderContainerView.swift:382",
+     "vreader/Views/Reader/ReaderNotificationModifier.swift:79",
+     "vreader/Views/Reader/ReadiumEPUBHost+Highlights.swift:53",
+     "vreader/Views/Reader/PDFReaderContainerView.swift:304"
+    ]
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented"
+  },
+  {
+   "class": "notification",
+   "from": "post:readerMoreBilingual",
+   "to": "observe:readerMoreBilingual",
+   "evidence": {
+    "from_loc": [],
+    "to_loc": [
+     "vreader/Views/Reader/ReadiumEPUBHost+Bilingual.swift:292",
+     "vreader/Views/Reader/ReaderMorePopoverParts.swift:78"
+    ]
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented",
+   "audit_evidence": "ReaderMoreMenuRow.notification maps the bilingual row to this name and the menu dispatch posts it; ReadiumEPUBHost+Bilingual.swift:292 and ReaderMorePopoverParts.swift:78 observe.",
+   "audit_batch": "c3a"
+  },
+  {
+   "class": "notification",
+   "from": "post:readerMoreBookDetails",
+   "to": "observe:readerMoreBookDetails",
+   "evidence": {
+    "from_loc": [],
+    "to_loc": [
+     "vreader/Views/Reader/ReaderMorePopoverParts.swift:81"
+    ]
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented",
+   "audit_evidence": "ReaderMoreMenuRow maps and dispatches the event; ReaderMorePopoverParts.swift:81 observes.",
+   "audit_batch": "c3a"
+  },
+  {
+   "class": "notification",
+   "from": "post:readerMoreExportAnnotations",
+   "to": "observe:readerMoreExportAnnotations",
+   "evidence": {
+    "from_loc": [],
+    "to_loc": [
+     "vreader/Views/Reader/ReaderMorePopoverParts.swift:83"
+    ]
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented",
+   "audit_evidence": "ReaderMoreMenuRow maps and dispatches the event; ReaderMorePopoverParts.swift:83 observes.",
+   "audit_batch": "c3a"
+  },
+  {
+   "class": "notification",
+   "from": "post:readerMoreReTranslateChapter",
+   "to": "observe:readerMoreReTranslateChapter",
+   "evidence": {
+    "from_loc": [],
+    "to_loc": [
+     "vreader/Views/Reader/ReaderMorePopoverParts.swift:80"
+    ]
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented",
+   "audit_evidence": "ReaderMoreMenuRow maps and dispatches the event; ReaderMorePopoverParts.swift:80 observes.",
+   "audit_batch": "c3a"
+  },
+  {
+   "class": "notification",
+   "from": "post:readerMoreReadAloud",
+   "to": "observe:readerMoreReadAloud",
+   "evidence": {
+    "from_loc": [],
+    "to_loc": [
+     "vreader/Views/Reader/ReaderMorePopoverParts.swift:76"
+    ]
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented",
+   "audit_evidence": "ReaderMoreMenuRow.swift:136 maps the row to the notification and menu dispatch posts it; ReaderMorePopoverParts.swift:76 observes.",
+   "audit_batch": "c3a"
+  },
+  {
+   "class": "notification",
+   "from": "post:readerMoreShareBook",
+   "to": "observe:readerMoreShareBook",
+   "evidence": {
+    "from_loc": [],
+    "to_loc": [
+     "vreader/Views/Reader/ReaderMorePopoverParts.swift:82"
+    ]
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented",
+   "audit_evidence": "ReaderMoreMenuRow.swift:142 maps the row to the notification and menu dispatch posts it; ReaderMorePopoverParts.swift:82 observes.",
+   "audit_batch": "c3a"
+  },
+  {
+   "class": "notification",
+   "from": "post:readerMoreToggleAutoTurn",
+   "to": "observe:readerMoreToggleAutoTurn",
+   "evidence": {
+    "from_loc": [],
+    "to_loc": [
+     "vreader/Views/Reader/ReaderMorePopoverParts.swift:77"
+    ]
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented",
+   "audit_evidence": "ReaderMoreMenuRow.swift:137 maps the row to the notification and menu dispatch posts it; ReaderMorePopoverParts.swift:77 observes.",
+   "audit_batch": "c3a"
+  },
+  {
+   "class": "notification",
+   "from": "post:readerMoreTranslationSettings",
+   "to": "observe:readerMoreTranslationSettings",
+   "evidence": {
+    "from_loc": [
+     "vreader/Views/Reader/ReaderContainerView+Sheets.swift:358"
+    ],
+    "to_loc": [
+     "vreader/Views/Reader/ReaderMorePopoverParts.swift:79"
+    ]
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented"
+  },
+  {
+   "class": "notification",
+   "from": "post:readerNavigateToLocator",
+   "to": "observe:readerNavigateToLocator",
+   "evidence": {
+    "from_loc": [
+     "vreader/Views/Reader/EPUBReaderContainerView.swift:373",
+     "vreader/Views/Reader/ReaderContainerView+DebugBridgeSearch.swift:180",
+     "vreader/Views/Reader/ReaderContainerView+Sheets.swift:242",
+     "vreader/Views/Reader/ReaderContainerView+Sheets.swift:549",
+     "vreader/Views/Reader/ReaderContainerView+Sheets.swift:569"
+    ],
+    "to_loc": [
+     "vreader/Views/Reader/EPUBReaderContainerView.swift:294",
+     "vreader/Views/Reader/ReaderNotificationModifier.swift:34",
+     "vreader/Views/Reader/PDFReaderContainerView.swift:274",
+     "vreader/Views/Reader/FoliateReaderContainerView.swift:87",
+     "vreader/Views/Reader/ReadiumEPUBHost+Body.swift:220"
+    ]
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented"
+  },
+  {
+   "class": "notification",
+   "from": "post:readerNextPage",
+   "to": "observe:readerNextPage",
+   "evidence": {
+    "from_loc": [
+     "vreader/Views/Reader/ReaderTapZoneRouter.swift:127",
+     "vreader/Views/Reader/TapZoneOverlay.swift:21",
+     "vreader/Views/Reader/EPUBWebViewBridgeCoordinator.swift:283"
+    ],
+    "to_loc": [
+     "vreader/Views/Reader/EPUBReaderContainerView.swift:286",
+     "vreader/Views/Reader/MDReaderContainerView.swift:274",
+     "vreader/Views/Reader/TXTReaderContainerView.swift:300",
+     "vreader/Views/Reader/PDFReaderContainerView.swift:260",
+     "vreader/Views/Reader/ReadiumEPUBHost+Body.swift:214"
+    ]
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented"
+  },
+  {
+   "class": "notification",
+   "from": "post:readerOpenAI",
+   "to": "observe:readerOpenAI",
+   "evidence": {
+    "from_loc": [],
+    "to_loc": [
+     "vreader/Views/Reader/ReaderToolbarActionObservers.swift:35"
+    ]
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented",
+   "audit_evidence": "ReaderBottomChrome.swift:208 maps the AI button to this notification and the chrome posts it; ReaderToolbarActionObservers.swift:35 observes.",
+   "audit_batch": "c3a"
+  },
+  {
+   "class": "notification",
+   "from": "post:readerOpenAITranslate",
+   "to": "observe:readerOpenAITranslate",
+   "evidence": {
+    "from_loc": [
+     "vreader/Views/Reader/PDFReaderContainerView+Bilingual.swift:306"
+    ],
+    "to_loc": []
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented",
+   "audit_evidence": "PDFReaderContainerView+Bilingual.swift:306 posts; ReaderContainerView.swift:1308 observes.",
+   "audit_batch": "c3a"
+  },
+  {
+   "class": "notification",
+   "from": "post:readerOpenContents",
+   "to": "observe:readerOpenContents",
+   "evidence": {
+    "from_loc": [],
+    "to_loc": [
+     "vreader/Views/Reader/ReaderToolbarActionObservers.swift:26"
+    ]
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented",
+   "audit_evidence": "ReaderBottomChrome.swift:205 maps and posts; ReaderToolbarActionObservers.swift:26 observes.",
+   "audit_batch": "c3a"
+  },
+  {
+   "class": "notification",
+   "from": "post:readerOpenDisplay",
+   "to": "observe:readerOpenDisplay",
+   "evidence": {
+    "from_loc": [],
+    "to_loc": [
+     "vreader/Views/Reader/ReaderToolbarActionObservers.swift:32"
+    ]
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented",
+   "audit_evidence": "ReaderBottomChrome.swift:207 maps and posts; ReaderToolbarActionObservers.swift:32 observes.",
+   "audit_batch": "c3a"
+  },
+  {
+   "class": "notification",
+   "from": "post:readerOpenNotes",
+   "to": "observe:readerOpenNotes",
+   "evidence": {
+    "from_loc": [],
+    "to_loc": [
+     "vreader/Views/Reader/ReaderToolbarActionObservers.swift:29"
+    ]
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented",
+   "audit_evidence": "ReaderBottomChrome.swift:206 maps and posts; ReaderToolbarActionObservers.swift:29 observes.",
+   "audit_batch": "c3a"
+  },
+  {
+   "class": "notification",
+   "from": "post:readerPositionDidChange",
+   "to": "observe:readerPositionDidChange",
+   "evidence": {
+    "from_loc": [
+     "vreader/ViewModels/TXTReaderViewModel.swift:749",
+     "vreader/Views/Reader/EPUBReaderContainerView.swift:693",
+     "vreader/Views/Reader/EPUBReaderContainerView.swift:813",
+     "vreader/Views/Reader/MDReaderContainerView.swift:266",
+     "vreader/Views/Reader/FoliateReaderContainerView+Navigation.swift:41"
+    ],
+    "to_loc": [
+     "vreader/Views/Reader/ReaderContainerView.swift:602"
+    ]
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented"
+  },
+  {
+   "class": "notification",
+   "from": "post:readerPreviousPage",
+   "to": "observe:readerPreviousPage",
+   "evidence": {
+    "from_loc": [
+     "vreader/Views/Reader/ReaderTapZoneRouter.swift:125",
+     "vreader/Views/Reader/TapZoneOverlay.swift:19",
+     "vreader/Views/Reader/EPUBWebViewBridgeCoordinator.swift:287"
+    ],
+    "to_loc": [
+     "vreader/Views/Reader/EPUBReaderContainerView.swift:290",
+     "vreader/Views/Reader/MDReaderContainerView.swift:282",
+     "vreader/Views/Reader/TXTReaderContainerView.swift:307",
+     "vreader/Views/Reader/PDFReaderContainerView.swift:267",
+     "vreader/Views/Reader/ReadiumEPUBHost+Body.swift:217"
+    ]
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented"
+  },
+  {
+   "class": "notification",
+   "from": "post:readerReadAloudRequested",
+   "to": "observe:readerReadAloudRequested",
+   "evidence": {
+    "from_loc": [],
+    "to_loc": [
+     "vreader/Views/Reader/ReaderContainerView.swift:1357"
+    ]
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented",
+   "audit_evidence": "SelectionPopoverActionRouter.swift:120 posts; ReaderContainerView.swift:1357 observes.",
+   "audit_batch": "c3a"
+  },
+  {
+   "class": "notification",
+   "from": "post:readerSelectionPopoverRequested",
+   "to": "observe:readerSelectionPopoverRequested",
+   "evidence": {
+    "from_loc": [],
+    "to_loc": []
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented",
+   "audit_evidence": "TXTBridgeShared and TXT/EPUB bridge edit-menu paths post SelectionPopoverRequestPayload; SelectionPopoverPresenter consumes the notification. Production references include EPUBReaderContainerView.swift:403,823 and ReaderNotifications.swift:404.",
+   "audit_batch": "c3a"
+  },
+  {
+   "class": "notification",
+   "from": "post:readerSessionTimeDidChange",
+   "to": "observe:readerSessionTimeDidChange",
+   "evidence": {
+    "from_loc": [
+     "vreader/ViewModels/ReaderLifecycleHelper.swift:241"
+    ],
+    "to_loc": []
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented",
+   "audit_evidence": "ReaderLifecycleHelper.swift:241 posts; BookDetailsReadingTimeMirror.swift:96 observes.",
+   "audit_batch": "c3a"
+  },
+  {
+   "class": "notification",
+   "from": "post:readerTextSelected",
+   "to": "observe:readerTextSelected",
+   "evidence": {
+    "from_loc": [
+     "vreader/Views/Reader/PDFViewBridge.swift:446"
+    ],
+    "to_loc": [
+     "vreader/Views/Reader/PDFReaderContainerView.swift:298"
+    ]
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented"
+  },
+  {
+   "class": "notification",
+   "from": "post:readerTranslateRequested",
+   "to": "observe:readerTranslateRequested",
+   "evidence": {
+    "from_loc": [],
+    "to_loc": [
+     "vreader/Views/Reader/ReaderContainerView.swift:443"
+    ]
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented",
+   "audit_evidence": "SelectionPopoverActionRouter.swift:99 and TXTBridgeShared.swift:97 post; ReaderContainerView.swift:443 observes.",
+   "audit_batch": "c3a"
+  },
+  {
+   "class": "notification",
+   "from": "post:searchHighlightClear",
+   "to": "observe:searchHighlightClear",
+   "evidence": {
+    "from_loc": [
+     "vreader/ViewModels/SearchViewModel.swift:109"
+    ],
+    "to_loc": [
+     "vreader/Views/Reader/TXTChunkedReaderBridge.swift:651",
+     "vreader/Views/Reader/TXTTextViewBridgeCoordinator.swift:103"
+    ]
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented"
+  },
+  {
+   "class": "notification",
+   "from": "post:webdavProfilesDidChange",
+   "to": "observe:webdavProfilesDidChange",
+   "evidence": {
+    "from_loc": [
+     "vreader/Services/Backup/WebDAVServerProfileStore.swift:208"
+    ],
+    "to_loc": [
+     "vreader/Views/Settings/WebDAVServerProfileListView.swift:110",
+     "vreader/Views/Settings/WebDAVSettingsView.swift:149"
+    ]
+   },
+   "dossier": "Architecture — notification bus",
+   "verdict": "represented"
+  },
+  {
+   "class": "protocol-seam",
+   "from": "protocol:FoliateSectionExtracting",
+   "to": "conformers",
+   "evidence": {
+    "from_loc": [
+     "vreader/Services/Reader/FoliateSectionExtracting.swift:48"
+    ],
+    "to_loc": [
+     "vreader/Views/Reader/FoliateBilingualContainerView.swift",
+     "vreader/Views/Reader/FoliateSpikeView+SectionExtracting.swift",
+     "vreader/Services/Reader/FoliateChapterTextProvider.swift"
+    ]
+   },
+   "dossier": null,
+   "verdict": "represented",
+   "audit_evidence": "FoliateSectionExtracting.swift:48 declares it; FoliateSpikeView+SectionExtracting.swift supplies the separate-extension conformance and FoliateChapterTextProvider consumes the abstraction.",
+   "audit_batch": "c3a"
+  },
+  {
+   "class": "protocol-seam",
+   "from": "protocol:ChapterTextProviding",
+   "to": "conformers",
+   "evidence": {
+    "from_loc": [
+     "vreader/Services/Reader/ChapterTextProviding.swift:47"
+    ],
+    "to_loc": [
+     "vreader/ViewModels/BookTranslationViewModel.swift",
+     "vreader/ViewModels/BilingualReadingViewModel+Prefetch.swift",
+     "vreader/Services/Reader/EPUBChapterTextProvider.swift",
+     "vreader/Services/Reader/MDChapterTextProvider.swift",
+     "vreader/Services/Reader/PDFChapterTextProvider.swift",
+     "vreader/Services/Reader/FoliateChapterTextProvider.swift",
+     "vreader/Services/Reader/TXTLoaderBackedChapterTextProvider.swift",
+     "vreader/Services/Reader/TXTChapterTextProvider.swift",
+     "vreader/Services/AI/BookTranslationCoordinator.swift",
+     "vreader/Services/AI/ChapterPrefetching.swift"
+    ]
+   },
+   "dossier": null,
+   "verdict": "represented",
+   "audit_evidence": "ChapterTextProviding.swift:47 declares it; concrete EPUB, MD, PDF, Foliate, and TXT provider types conform and BookTranslationCoordinator consumes it.",
+   "audit_batch": "c3a"
+  },
+  {
+   "class": "protocol-seam",
+   "from": "protocol:SessionPersisting",
+   "to": "conformers",
+   "evidence": {
+    "from_loc": [
+     "vreader/Services/ReadingSessionTracker.swift:33"
+    ],
+    "to_loc": [
+     "vreader/Services/ReadingSessionTracker.swift",
+     "vreader/Services/SwiftDataSessionStore.swift",
+     "vreader/Services/NoOpSessionStore.swift"
+    ]
+   },
+   "dossier": null,
+   "verdict": "represented"
+  },
+  {
+   "class": "protocol-seam",
+   "from": "protocol:LibraryPersisting",
+   "to": "conformers",
+   "evidence": {
+    "from_loc": [
+     "vreader/Services/LibraryPersisting.swift:12"
+    ],
+    "to_loc": [
+     "vreader/ViewModels/LibraryViewModel.swift",
+     "vreader/Services/PersistenceActor+Library.swift"
+    ]
+   },
+   "dossier": null,
+   "verdict": "represented"
+  },
+  {
+   "class": "protocol-seam",
+   "from": "protocol:BookReadingStatsProviding",
+   "to": "conformers",
+   "evidence": {
+    "from_loc": [
+     "vreader/Services/BookReadingStatsProviding.swift:13"
+    ],
+    "to_loc": [
+     "vreader/Services/PersistenceActor+Stats.swift"
+    ]
+   },
+   "dossier": null,
+   "verdict": "represented"
+  },
+  {
+   "class": "protocol-seam",
+   "from": "protocol:ChatSessionPersisting",
+   "to": "conformers",
+   "evidence": {
+    "from_loc": [
+     "vreader/Services/ChatSessionPersisting.swift:12"
+    ],
+    "to_loc": [
+     "vreader/ViewModels/AIChatViewModel+SessionTransitions.swift",
+     "vreader/Services/PersistenceActor+ChatSessions.swift"
+    ]
+   },
+   "dossier": null,
+   "verdict": "represented"
+  },
+  {
+   "class": "protocol-seam",
+   "from": "protocol:BookPersisting",
+   "to": "conformers",
+   "evidence": {
+    "from_loc": [
+     "vreader/Services/PersistenceActor.swift:31"
+    ],
+    "to_loc": [
+     "vreader/Services/PersistenceActor.swift"
+    ]
+   },
+   "dossier": null,
+   "verdict": "represented"
+  },
+  {
+   "class": "protocol-seam",
+   "from": "protocol:PreferenceStoring",
+   "to": "conformers",
+   "evidence": {
+    "from_loc": [
+     "vreader/Services/PreferenceStore.swift:15"
+    ],
+    "to_loc": [
+     "vreader/Services/PreferenceStore.swift"
+    ]
+   },
+   "dossier": null,
+   "verdict": "represented"
+  },
+  {
+   "class": "protocol-seam",
+   "from": "protocol:HighlightPersisting",
+   "to": "conformers",
+   "evidence": {
+    "from_loc": [
+     "vreader/Services/HighlightPersisting.swift:10"
+    ],
+    "to_loc": [
+     "vreader/ViewModels/HighlightListViewModel.swift",
+     "vreader/Views/Reader/NoOpPersistenceStores.swift",
+     "vreader/Views/Reader/HighlightCoordinator.swift",
+     "vreader/Views/Reader/PDFReaderContainerView.swift",
+     "vreader/Views/Reader/PDFReaderContainerView+Highlights.swift",
+     "vreader/Services/PersistenceActor+Highlights.swift",
+     "vreader/Services/AI/ChatAnnotationCache.swift",
+     "vreader/Services/Import/AnnotationImporter.swift"
+    ]
+   },
+   "dossier": null,
+   "verdict": "represented"
+  },
+  {
+   "class": "protocol-seam",
+   "from": "protocol:SearchProviding",
+   "to": "conformers",
+   "evidence": {
+    "from_loc": [
+     "vreader/Services/Search/SearchService.swift:43"
+    ],
+    "to_loc": [
+     "vreader/Services/Search/SearchService.swift"
+    ]
+   },
+   "dossier": null,
+   "verdict": "represented"
+  },
+  {
+   "class": "protocol-seam",
+   "from": "protocol:AIContextExtracting",
+   "to": "conformers",
+   "evidence": {
+    "from_loc": [
+     "vreader/Services/AI/AIContextExtracting.swift:38"
+    ],
+    "to_loc": [
+     "vreader/ViewModels/AIAssistantViewModel.swift",
+     "vreader/Services/AI/AIContextExtractor.swift"
+    ]
+   },
+   "dossier": null,
+   "verdict": "represented"
+  },
+  {
+   "class": "protocol-seam",
+   "from": "protocol:BookmarkPersisting",
+   "to": "conformers",
+   "evidence": {
+    "from_loc": [
+     "vreader/Services/BookmarkPersisting.swift:9"
+    ],
+    "to_loc": [
+     "vreader/ViewModels/BookmarkListViewModel.swift",
+     "vreader/Views/Reader/NoOpPersistenceStores.swift",
+     "vreader/Services/PersistenceActor+Bookmarks.swift",
+     "vreader/Services/AI/ChatAnnotationCache.swift"
+    ]
+   },
+   "dossier": null,
+   "verdict": "represented"
+  },
+  {
+   "class": "protocol-seam",
+   "from": "protocol:TOCProviding",
+   "to": "conformers",
+   "evidence": {
+    "from_loc": [
+     "vreader/Services/TOCProvider.swift:38"
+    ],
+    "to_loc": []
+   },
+   "dossier": null,
+   "verdict": "dead-code-candidate",
+   "audit_evidence": "TOCProvider.swift:38 declares TOCProviding, but full-codebase search finds no production or test conformance and no existential/generic consumer; only TOCProviderTests.swift comments mention it.",
+   "audit_batch": "c3a"
+  },
+  {
+   "class": "protocol-seam",
+   "from": "protocol:SpeechSynthesizing",
+   "to": "conformers",
+   "evidence": {
+    "from_loc": [
+     "vreader/Services/TTS/SpeechSynthesizing.swift:22"
+    ],
+    "to_loc": [
+     "vreader/Services/TTS/SpeechSynthesizing.swift",
+     "vreader/Services/TTS/TTSService.swift",
+     "vreader/Services/TTS/XCUITestMockSpeechSynthesizer.swift",
+     "vreader/Services/TTS/HTTPSpeechSynthesizer.swift"
+    ]
+   },
+   "dossier": null,
+   "verdict": "represented"
+  },
+  {
+   "class": "protocol-seam",
+   "from": "protocol:HapticFeedbackProviding",
+   "to": "conformers",
+   "evidence": {
+    "from_loc": [
+     "vreader/Services/HapticFeedback.swift:15"
+    ],
+    "to_loc": [
+     "vreader/Services/HapticFeedback.swift"
+    ]
+   },
+   "dossier": null,
+   "verdict": "represented"
+  },
+  {
+   "class": "protocol-seam",
+   "from": "protocol:TombstonePersisting",
+   "to": "conformers",
+   "evidence": {
+    "from_loc": [
+     "vreader/Services/Sync/TombstoneStore.swift:16"
+    ],
+    "to_loc": [
+     "vreader/Services/Sync/TombstoneStore.swift"
+    ]
+   },
+   "dossier": null,
+   "verdict": "represented"
+  },
+  {
+   "class": "protocol-seam",
+   "from": "protocol:AnnotationPersisting",
+   "to": "conformers",
+   "evidence": {
+    "from_loc": [
+     "vreader/Services/AnnotationPersisting.swift:9"
+    ],
+    "to_loc": [
+     "vreader/ViewModels/AnnotationListViewModel.swift",
+     "vreader/Views/Reader/NoOpPersistenceStores.swift",
+     "vreader/Services/Import/AnnotationImporter.swift",
+     "vreader/Services/PersistenceActor+Annotations.swift"
+    ]
+   },
+   "dossier": null,
+   "verdict": "represented"
+  },
+  {
+   "class": "protocol-seam",
+   "from": "protocol:WebDAVTransport",
+   "to": "conformers",
+   "evidence": {
+    "from_loc": [
+     "vreader/Services/Backup/WebDAVClient.swift:77"
+    ],
+    "to_loc": [
+     "vreader/Services/Backup/WebDAVProvider.swift",
+     "vreader/Services/Backup/WebDAVClient.swift"
+    ]
+   },
+   "dossier": null,
+   "verdict": "represented",
+   "audit_evidence": "WebDAVClient.swift:77 declares the seam; WebDAVClient is the real conformer and WebDAVProvider depends on the protocol.",
+   "audit_batch": "c3a"
+  },
+  {
+   "class": "protocol-seam",
+   "from": "protocol:NetworkPathMonitoring",
+   "to": "conformers",
+   "evidence": {
+    "from_loc": [
+     "vreader/Services/Backup/WebDAVNetworkPolicy.swift:37"
+    ],
+    "to_loc": [
+     "vreader/Services/Backup/WebDAVNetworkPolicy.swift"
+    ]
+   },
+   "dossier": null,
+   "verdict": "represented"
+  },
+  {
+   "class": "protocol-seam",
+   "from": "protocol:ReadingPositionPersisting",
+   "to": "conformers",
+   "evidence": {
+    "from_loc": [
+     "vreader/Services/EPUB/ReadingPositionPersisting.swift:15"
+    ],
+    "to_loc": [
+     "vreader/Services/PersistenceActor+ReadingPosition.swift"
+    ]
+   },
+   "dossier": null,
+   "verdict": "represented"
+  },
+  {
+   "class": "protocol-seam",
+   "from": "protocol:VReaderLocatorPersisting",
+   "to": "conformers",
+   "evidence": {
+    "from_loc": [
+     "vreader/Services/EPUB/ReadingPositionPersisting.swift:35"
+    ],
+    "to_loc": [
+     "vreader/Services/PersistenceActor+ReadingPosition.swift"
+    ]
+   },
+   "dossier": null,
+   "verdict": "represented"
+  },
+  {
+   "class": "persistence-access",
+   "from": "actor:PersistenceActor",
+   "to": "callers",
+   "evidence": {
+    "from_loc": [
+     "vreader/Services/PersistenceActor.swift"
+    ],
+    "to_loc": [
+     "vreader/Services/AI/ChapterTranslationService.swift",
+     "vreader/Services/AI/ChatAnnotationCache.swift",
+     "vreader/Services/AI/Tools/GetBookContentGate.swift",
+     "vreader/Services/AnnotationPersisting.swift",
+     "vreader/Services/Backup/BackupAIConversations.swift",
+     "vreader/Services/Backup/BackupDataCollector.swift",
+     "vreader/Services/Backup/BackupDataRestorer.swift",
+     "vreader/Services/Backup/BackupReadingHistory.swift",
+     "vreader/Services/Backup/BackupSectionDTOs.swift",
+     "vreader/Services/Backup/BlobPath.swift",
+     "vreader/Services/Backup/LazyDownloadCoordinator.swift",
+     "vreader/Services/Backup/LazyDownloadFinalizer.swift",
+     "vreader/Services/Backup/SelectiveRestoreCoordinator.swift",
+     "vreader/Services/Backup/WebDAVProvider.swift",
+     "vreader/Services/Backup/WebDAVProviderFactory.swift",
+     "vreader/Services/BookImporter.swift",
+     "vreader/Services/BookReadingStatsProviding.swift",
+     "vreader/Services/BookmarkPersisting.swift",
+     "vreader/Services/ChapterTranslationStore.swift",
+     "vreader/Services/ChatSessionPersisting.swift",
+     "vreader/Services/ChatSessionRecord.swift",
+     "vreader/Services/CustomCoverStore.swift",
+     "vreader/Services/DebugBridge/DebugBridgeNotifications.swift",
+     "vreader/Services/DebugBridge/DebugCommand.swift",
+     "vreader/Services/DebugBridge/RealDebugBridgeContext+Locate.swift",
+     "vreader/Services/DebugBridge/RealDebugBridgeContext+PDFHighlight.swift",
+     "vreader/Services/DebugBridge/RealDebugBridgeContext+SeedSessions.swift",
+     "vreader/Services/DebugBridge/RealDebugBridgeContext.swift",
+     "vreader/Services/EPUB/ReadingPositionPersisting.swift",
+     "vreader/Services/HighlightLookup.swift",
+     "vreader/Services/HighlightPersisting.swift",
+     "vreader/Services/HighlightRecord.swift",
+     "vreader/Services/LibraryStatsReading.swift",
+     "vreader/Services/ReaderPositionService.swift",
+     "vreader/Services/Stats/ReadingStatsAggregator.swift",
+     "vreader/Services/Stats/ReadingStatsModels.swift",
+     "vreader/Services/SwiftDataSessionStore.swift",
+     "vreader/Services/Sync/SyncPipeline.swift",
+     "vreader/ViewModels/BackupViewModel.swift",
+     "vreader/ViewModels/EPUBReaderViewModel.swift"
+    ]
+   },
+   "dossier": "Module — persistence and data model",
+   "verdict": "missing-from-canon",
+   "audit_evidence": "The ledger mixes genuine callers with declarations/DTOs/type mentions, and omits many production callers. Genuine omitted examples include vreader/Views/LibraryView.swift:124, vreader/Views/Reader/ReaderFormatHosts.swift:35, vreader/Views/Reader/FoliateSpikeView+Selection.swift:144, vreader/Views/Reader/PDFReaderContainerView.swift:244, and vreader/Views/Reader/TXTReaderContainerView.swift:570. Conversely, BackupSectionDTOs.swift, BlobPath.swift, ChatSessionRecord.swift, HighlightRecord.swift, ReadingStatsModels.swift, DebugCommand.swift, and DebugBridgeNotifications.swift do not call actor methods merely because grep found the type name.",
+   "audit_batch": "c3b"
+  },
+  {
+   "class": "persistence-access",
+   "from": "actor:ChapterTranslationStore",
+   "to": "callers",
+   "evidence": {
+    "from_loc": [
+     "vreader/Services/ChapterTranslationStore.swift"
+    ],
+    "to_loc": [
+     "vreader/App/VReaderApp.swift",
+     "vreader/Models/ChapterTranslation.swift",
+     "vreader/Models/ChapterTranslationRecord.swift",
+     "vreader/Services/AI/BookTranslationCoordinator.swift",
+     "vreader/Services/AI/ChapterTranslationPrefetcher.swift",
+     "vreader/Services/AI/ChapterTranslationService.swift",
+     "vreader/ViewModels/BilingualReadingViewModel.swift",
+     "vreader/ViewModels/ChapterReTranslateViewModel.swift",
+     "vreader/Views/Reader/Bilingual/BilingualSettingsEditModel.swift",
+     "vreader/Views/Reader/Bilingual/BilingualSettingsEditRouter.swift",
+     "vreader/Views/Reader/Bilingual/BilingualSetupSheet.swift",
+     "vreader/Views/Reader/EPUBReaderContainerView+Bilingual.swift",
+     "vreader/Views/Reader/MDReaderContainerView+Bilingual.swift",
+     "vreader/Views/Reader/PDFReaderContainerView+Bilingual.swift",
+     "vreader/Views/Reader/ReaderContainerView+ReTranslate.swift",
+     "vreader/Views/Reader/TXTReaderContainerView+Bilingual.swift"
+    ]
+   },
+   "dossier": "Module — bilingual translation",
+   "verdict": "represented",
+   "audit_evidence": "Actual operations are performed by ChapterTranslationService at vreader/Services/AI/ChapterTranslationService.swift:221,294,380 and BookTranslationCoordinator at vreader/Services/AI/BookTranslationCoordinator.swift:339; reader hosts inject ChapterTranslationStore.shared, including EPUBReaderContainerView+Bilingual.swift:72, PDFReaderContainerView+Bilingual.swift:60, MDReaderContainerView+Bilingual.swift:52, TXTReaderContainerView+Bilingual.swift:69, and ReaderContainerView+ReTranslate.swift:156. Models/ChapterTranslation.swift and ChapterTranslationRecord.swift are definitions rather than callers, and VReaderApp.swift:165 is configuration.",
+   "audit_batch": "c3b"
+  },
+  {
+   "class": "js-bridge",
+   "from": "WKScriptMessageHandler conformers",
+   "to": "evaluateJavaScript/callAsyncJavaScript call sites",
+   "evidence": {
+    "from_loc": [
+     "vreader/Views/Reader/Bilingual/EPUBBilingualJS.swift",
+     "vreader/Views/Reader/Bilingual/FoliateBilingualJS.swift",
+     "vreader/Views/Reader/Bilingual/ReadiumBilingualCommander.swift",
+     "vreader/Views/Reader/Bilingual/ReadiumBilingualEvalAdapter.swift",
+     "vreader/Views/Reader/EPUBWebViewBridge.swift",
+     "vreader/Views/Reader/EPUBWebViewBridgeCoordinator.swift",
+     "vreader/Views/Reader/EPUBWebViewBridgeJS.swift",
+     "vreader/Views/Reader/FoliateSpikeView.swift",
+     "vreader/Views/Reader/FoliateViewBridge.swift",
+     "vreader/Views/Reader/FoliateViewCoordinator.swift",
+     "vreader/Views/Reader/ReadiumEPUBHost+ContinuousScroll.swift"
+    ],
+    "to_loc": [
+     "vreader/Services/DebugBridge/DebugReaderProbeAdapter.swift",
+     "vreader/Services/DebugBridge/DebugReaderRegistry.swift",
+     "vreader/Services/DebugBridge/ReadiumDebugProbe.swift",
+     "vreader/Services/DebugBridge/RealDebugBridgeContext+Eval.swift",
+     "vreader/Services/Foliate/FoliateSearchAdapter.swift",
+     "vreader/Services/Reader/FoliateSectionExtracting.swift",
+     "vreader/Views/Reader/Bilingual/FoliateBilingualJS.swift",
+     "vreader/Views/Reader/Bilingual/ReadiumBilingualCommander.swift",
+     "vreader/Views/Reader/Bilingual/ReadiumBilingualEvalAdapter.swift",
+     "vreader/Views/Reader/EPUBContinuousScrollCoordinator.swift",
+     "vreader/Views/Reader/EPUBContinuousScrollJS.swift",
+     "vreader/Views/Reader/EPUBDebugBridgeHighlightJS.swift",
+     "vreader/Views/Reader/EPUBPageAxisProbe.swift",
+     "vreader/Views/Reader/EPUBReaderContainerView+DebugBridgeHighlight.swift",
+     "vreader/Views/Reader/EPUBWebViewBridge.swift",
+     "vreader/Views/Reader/EPUBWebViewBridgeCoordinator.swift",
+     "vreader/Views/Reader/EPUBWebViewEvaluatorHandle.swift",
+     "vreader/Views/Reader/FoliateSpikeView+SectionExtracting.swift",
+     "vreader/Views/Reader/FoliateSpikeView.swift",
+     "vreader/Views/Reader/FoliateViewBridge.swift",
+     "vreader/Views/Reader/HighlightCoordinator.swift",
+     "vreader/Views/Reader/HighlightRenderer.swift",
+     "vreader/Views/Reader/ReaderContainerView.swift",
+     "vreader/Views/Reader/ReadiumEPUBHost+Bilingual.swift",
+     "vreader/Views/Reader/ReadiumReaderCoordinator+Replacement.swift",
+     "vreader/Views/Reader/ReadiumReaderCoordinator+SelectionStyle.swift",
+     "vreader/Views/Reader/ReadiumReaderCoordinator+Transparency.swift",
+     "vreader/Views/Reader/ReadiumReaderCoordinator.swift"
+    ]
+   },
+   "dossier": null,
+   "verdict": "superseded-by-precise-pairs",
+   "note": "Decomposed into precise per-file conformer/producer pairs by Phase-3 C3b; see rows with audit_batch=c3b and supersedes_aggregate_row=true."
+  },
+  {
+   "class": "contract-surface",
+   "from": "contracts/identity/cache-key.md",
+   "to": "iOS + Android implementations",
+   "evidence": {
+    "from_loc": [],
+    "to_loc": []
+   },
+   "dossier": "Module — cross-platform contracts",
+   "verdict": "represented",
+   "audit_evidence": "Swift ChapterTranslationRecord.lookupKey joins exactly bookFingerprintKey, unitStorageKey, targetLanguage, and promptVersion with '|' at vreader/Models/ChapterTranslationRecord.swift:93-104. Kotlin implements the same four-field rule in android/identity/src/main/kotlin/vreader/contracts/Identity.kt:52-61 and tests contracts/vectors/cache-key.json in IdentityConformanceTest.kt:146-161.",
+   "audit_batch": "c3b"
+  },
+  {
+   "class": "contract-surface",
+   "from": "contracts/identity/backup-format.md",
+   "to": "iOS + Android implementations",
+   "evidence": {
+    "from_loc": [],
+    "to_loc": []
+   },
+   "dossier": "Module — cross-platform contracts",
+   "verdict": "represented",
+   "audit_evidence": "Swift declares schema version 3 in vreader/Services/Backup/BackupSectionDTOs.swift:17 and encodes sorted-key section envelopes in BackupDataCollector.swift:301-307. Kotlin mirrors section envelopes under android/identity/.../backup, configures omitted nulls and defaults in BackupJson.kt:60-73, and exercises the shared backup-sections vector in BackupConformanceTest.kt. The conformance comparison is semantic JSON equality, so the contract's 'stable key order' wording is stronger than what interoperability actually tests.",
+   "audit_batch": "c3b"
+  },
+  {
+   "class": "contract-surface",
+   "from": "contracts/identity/DECISION.md",
+   "to": "iOS + Android implementations",
+   "evidence": {
+    "from_loc": [
+     "vreader/Models/Book.swift",
+     "vreader/Models/Migration/SchemaV10.swift",
+     "vreader/Models/Migration/SchemaV1.swift"
+    ],
+    "to_loc": []
+   },
+   "dossier": "Module — cross-platform contracts",
+   "verdict": "represented",
+   "audit_evidence": "iOS preserves converted-EPUB local identity while persisting sourceCanonicalKey for converted Kindle imports: vreader/Services/BookImporter.swift:162-202 and vreader/Models/Book.swift:57-65. Android hashes the imported source stream directly and maps azw/azw3/mobi/prc to azw3 at android/identity/src/main/kotlin/vreader/contracts/DocumentFingerprint.kt:35-67. This matches the decision's source-byte cross-platform identity plus iOS-local converted artifact seam.",
+   "audit_batch": "c3b"
+  },
+  {
+   "class": "contract-surface",
+   "from": "contracts/identity/locator.md",
+   "to": "iOS + Android implementations",
+   "evidence": {
+    "from_loc": [
+     "vreader/Models/ChatSessionPayload.swift",
+     "vreader/Models/LibraryBookItem.swift",
+     "vreader/Models/AnnotationNote.swift",
+     "vreader/Models/Highlight.swift",
+     "vreader/Models/ReadingSession.swift",
+     "vreader/Models/ReadingPosition.swift",
+     "vreader/Models/Bookmark.swift",
+     "vreader/Models/AnnotationAnchor.swift",
+     "vreader/Models/Locator.swift",
+     "vreader/Models/VReaderLocator.swift",
+     "vreader/Models/TokenSpan.swift",
+     "vreader/Models/Migration/SchemaV8.swift",
+     "vreader/Models/Migration/LocatorKeyBackfillMigration.swift",
+     "vreader/Models/Migration/SchemaV1.swift"
+    ],
+    "to_loc": [
+     "android/identity/src/main/kotlin/vreader/contracts/VReaderLocator.kt",
+     "android/identity/src/main/kotlin/vreader/contracts/Locator.kt"
+    ]
+   },
+   "dossier": "Module — cross-platform contracts",
+   "verdict": "inconsistent-implementation",
+   "audit_evidence": "NFC and sorted canonical fields agree: Swift normalizes at vreader/Models/Locator.swift:116-140,183-185; Kotlin normalizes in android/identity/src/main/kotlin/vreader/contracts/Identity.kt:116. Validation rejects non-finite values on both sides. However, direct Swift canonicalJSON() silently omits non-finite progression values at Locator.swift:128-136, while Kotlin CanonicalLocator.canonicalJson throws via require at Identity.kt:90-91. The contract explicitly requires rejection rather than omission, so the public canonicalization behavior diverges.",
+   "audit_batch": "c3b"
+  },
+  {
+   "class": "contract-surface",
+   "from": "contracts/identity/fingerprint.md",
+   "to": "iOS + Android implementations",
+   "evidence": {
+    "from_loc": [
+     "vreader/Models/LibraryBookItem.swift",
+     "vreader/Models/ReadingSession.swift",
+     "vreader/Models/ReadingStats.swift",
+     "vreader/Models/ChatSession.swift",
+     "vreader/Models/ContentReplacementRule.swift",
+     "vreader/Models/BookFileState.swift",
+     "vreader/Models/GenerativeCoverStyle.swift",
+     "vreader/Models/Book.swift",
+     "vreader/Models/VReaderLocator.swift",
+     "vreader/Models/ImportedBookFileURL.swift",
+     "vreader/Models/DocumentFingerprint.swift",
+     "vreader/Models/Migration/SchemaV1.swift"
+    ],
+    "to_loc": [
+     "android/identity/src/main/kotlin/vreader/contracts/DocumentFingerprint.kt"
+    ]
+   },
+   "dossier": "Module — cross-platform contracts",
+   "verdict": "represented",
+   "audit_evidence": "Swift validates 64-character lowercase hex and non-negative byte count at vreader/Models/DocumentFingerprint.swift:29-45 and composes format:sha:size at lines 23-27. Kotlin hashes to lowercase hex and composes the same key at android/identity/src/main/kotlin/vreader/contracts/DocumentFingerprint.kt:23-48. Kindle extensions canonicalize to azw3 at lines 59-66; iOS's sourceCanonicalKey seam is implemented in BookImporter.swift:162-202.",
+   "audit_batch": "c3b"
+  },
+  {
+   "class": "contract-surface",
+   "from": "contracts/README.md",
+   "to": "iOS + Android implementations",
+   "evidence": {
+    "from_loc": [],
+    "to_loc": []
+   },
+   "dossier": "Module — cross-platform contracts",
+   "verdict": "represented",
+   "audit_evidence": "This is the contract index/governance surface rather than an independently implementable wire format. Its referenced fingerprint, locator, cache-key, and backup surfaces all have Swift and Kotlin implementations and shared vectors.",
+   "audit_batch": "c3b"
+  },
+  {
+   "class": "contract-surface",
+   "from": "contracts/conformance/README.md",
+   "to": "iOS + Android implementations",
+   "evidence": {
+    "from_loc": [],
+    "to_loc": []
+   },
+   "dossier": "Module — cross-platform contracts",
+   "verdict": "represented",
+   "audit_evidence": "The conformance lane is implemented by contracts/conformance/run.sh, Swift tests under vreaderTests/Contracts, and Kotlin tests under android/identity/src/test/kotlin/vreader/contracts. It is a test-orchestration contract, not a runtime serialization implementation.",
+   "audit_batch": "c3b"
+  },
+  {
+   "class": "build-dependency",
+   "from": "project.yml",
+   "to": "vreader target + SPM (Readium 3.9.0) + libmobi vendored C",
+   "evidence": {
+    "from_loc": [
+     "project.yml"
+    ],
+    "to_loc": [
+     "vreader/Services/Libmobi/",
+     "vreader/SupportingFiles/Libmobi-Bridging-Header.h"
+    ]
+   },
+   "dossier": "Architecture — app layer and concurrency model",
+   "verdict": "represented",
+   "audit_evidence": "project.yml declares the vreader target, Readium 3.9.0 package products, vendored Services/Libmobi/src C sources, USE_LIBXML2, header search paths, -lxml2, and SWIFT_OBJC_BRIDGING_HEADER; Libmobi-Bridging-Header.h includes mobi.h.",
+   "audit_batch": "c3a"
+  },
+  {
+   "class": "build-dependency",
+   "from": "android/settings.gradle.kts",
+   "to": "android modules (:app, :identity)",
+   "evidence": {
+    "from_loc": [
+     "android/settings.gradle.kts"
+    ],
+    "to_loc": [
+     "android/build.gradle.kts"
+    ]
+   },
+   "dossier": "Module — Android port",
+   "verdict": "represented",
+   "audit_evidence": "android/settings.gradle.kts directly includes only :app and :identity and defines the self-contained vreader-android Gradle root; canon/modules/android-port.md accurately states the same graph.",
+   "audit_batch": "c3a"
+  },
+  {
+   "class": "js-bridge",
+   "from": "vreader/Views/Reader/EPUBWebViewBridgeCoordinator.swift",
+   "to": "vreader/Views/Reader/EPUBWebViewBridge.swift; vreader/Views/Reader/EPUBWebViewEvaluatorHandle.swift; vreader/Views/Reader/EPUBReaderContainerView+DebugBridgeHighlight.swift",
+   "evidence": {
+    "from_loc": [
+     "EPUBWebViewBridge.Coordinator is the real WKScriptMessageHandler (line 12); EPUBWebViewBridge registers its weak proxy for progress/tap/swipe/selection/footnote/highlight/continuous-scroll channels at lines 230-296 and evaluates into that same WKWebView at lines 420-597. The evaluator handle and debug-highlight path retain/evaluate that owned web view."
+    ],
+    "to_loc": []
+   },
+   "dossier": "Add an EPUB reader JS-channel section mapping EPUBWebViewBridge.Coordinator and its handler names to EPUBWebViewBridge, EPUBWebViewEvaluatorHandle, and the debug-highlight evaluator.",
+   "verdict": "missing-from-canon",
+   "audit_evidence": "EPUBWebViewBridge.Coordinator is the real WKScriptMessageHandler (line 12); EPUBWebViewBridge registers its weak proxy for progress/tap/swipe/selection/footnote/highlight/continuous-scroll channels at lines 230-296 and evaluates into that same WKWebView at lines 420-597. The evaluator handle and debug-highlight path retain/evaluate that owned web view.",
+   "audit_batch": "c3b",
+   "supersedes_aggregate_row": true
+  },
+  {
+   "class": "js-bridge",
+   "from": "vreader/Views/Reader/EPUBWebViewBridge.swift",
+   "to": "vreader/Views/Reader/EPUBWebViewBridgeCoordinator.swift",
+   "evidence": {
+    "from_loc": [
+     "The only conformer declared in EPUBWebViewBridge.swift is WeakScriptMessageHandler at line 30; it is a retention proxy that forwards messages to EPUBWebViewBridge.Coordinator at lines 37-41, not an independent bridge endpoint."
+    ],
+    "to_loc": []
+   },
+   "dossier": "Add one sentence identifying WeakScriptMessageHandler as a proxy edge rather than a separate JS bridge.",
+   "verdict": "represented",
+   "audit_evidence": "The only conformer declared in EPUBWebViewBridge.swift is WeakScriptMessageHandler at line 30; it is a retention proxy that forwards messages to EPUBWebViewBridge.Coordinator at lines 37-41, not an independent bridge endpoint.",
+   "audit_batch": "c3b",
+   "supersedes_aggregate_row": true
+  },
+  {
+   "class": "js-bridge",
+   "from": "vreader/Views/Reader/EPUBWebViewBridgeJS.swift",
+   "to": "vreader/Views/Reader/EPUBWebViewBridge.swift",
+   "evidence": {
+    "from_loc": [
+     "This file does not conform to WKScriptMessageHandler. It contains bridge lifecycle/cleanup helpers, including removal of handlers from the bridge-owned WKWebView at lines 193-221."
+    ],
+    "to_loc": []
+   },
+   "dossier": "Correct the JS ledger/dossier classification",
+   "verdict": "missing-from-canon",
+   "audit_evidence": "This file does not conform to WKScriptMessageHandler. It contains bridge lifecycle/cleanup helpers, including removal of handlers from the bridge-owned WKWebView at lines 193-221.",
+   "audit_batch": "c3b",
+   "supersedes_aggregate_row": true
+  },
+  {
+   "class": "js-bridge",
+   "from": "vreader/Views/Reader/FoliateViewCoordinator.swift",
+   "to": "vreader/Views/Reader/FoliateViewBridge.swift",
+   "evidence": {
+    "from_loc": [
+     "FoliateViewCoordinator is the actual handler at line 20. FoliateViewBridge registers it through WeakScriptMessageHandler at lines 115-118, creates the WKWebView at line 118, and evaluates into that same instance at lines 132,227,240."
+    ],
+    "to_loc": []
+   },
+   "dossier": "Add a FoliateViewBridge ownership edge pairing FoliateViewCoordinator with FoliateViewBridge's registered channels and evaluation calls.",
+   "verdict": "missing-from-canon",
+   "audit_evidence": "FoliateViewCoordinator is the actual handler at line 20. FoliateViewBridge registers it through WeakScriptMessageHandler at lines 115-118, creates the WKWebView at line 118, and evaluates into that same instance at lines 132,227,240.",
+   "audit_batch": "c3b",
+   "supersedes_aggregate_row": true
+  },
+  {
+   "class": "js-bridge",
+   "from": "vreader/Views/Reader/FoliateViewBridge.swift",
+   "to": "vreader/Views/Reader/FoliateViewCoordinator.swift",
+   "evidence": {
+    "from_loc": [
+     "WeakScriptMessageHandler at lines 254-265 only forwards to FoliateViewCoordinator and exists to break WKUserContentController's strong retention; it is not an independent message consumer."
+    ],
+    "to_loc": []
+   },
+   "dossier": "Document the weak-proxy relationship as part of the Foliate bridge edge.",
+   "verdict": "represented",
+   "audit_evidence": "WeakScriptMessageHandler at lines 254-265 only forwards to FoliateViewCoordinator and exists to break WKUserContentController's strong retention; it is not an independent message consumer.",
+   "audit_batch": "c3b",
+   "supersedes_aggregate_row": true
+  },
+  {
+   "class": "js-bridge",
+   "from": "vreader/Views/Reader/FoliateSpikeView.swift",
+   "to": "vreader/Views/Reader/FoliateSpikeView.swift; vreader/Views/Reader/FoliateSpikeView+SectionExtracting.swift; vreader/Views/Reader/FoliateSpikeView+SectionExtracting.swift",
+   "evidence": {
+    "from_loc": [
+     "FoliateSpikeView.Coordinator is a real handler at line 456, registered through the weak proxy at line 285. It evaluates into its owned webView throughout lines 604-708 and 850-1227. FoliateSpikeView+SectionExtracting.swift evaluates the same coordinator-owned webView with callAsyncJavaScript at lines 55 and 87. WeakScriptMessageHandler at line 1259 is only a forwarding proxy."
+    ],
+    "to_loc": []
+   },
+   "dossier": "Add the Foliate spike coordinator-to-owned-WKWebView edge, including the section-extraction callAsyncJavaScript extension.",
+   "verdict": "missing-from-canon",
+   "audit_evidence": "FoliateSpikeView.Coordinator is a real handler at line 456, registered through the weak proxy at line 285. It evaluates into its owned webView throughout lines 604-708 and 850-1227. FoliateSpikeView+SectionExtracting.swift evaluates the same coordinator-owned webView with callAsyncJavaScript at lines 55 and 87. WeakScriptMessageHandler at line 1259 is only a forwarding proxy.",
+   "audit_batch": "c3b",
+   "supersedes_aggregate_row": true
+  },
+  {
+   "class": "js-bridge",
+   "from": "vreader/Views/Reader/ReadiumEPUBHost+ContinuousScroll.swift",
+   "to": "vreader/Views/Reader/ReadiumReaderCoordinator.swift; vreader/Views/Reader/ReadiumReaderCoordinator+Transparency.swift; vreader/Views/Reader/ReadiumReaderCoordinator+SelectionStyle.swift; vreader/Views/Reader/ReadiumReaderCoordinator+Replacement.swift",
+   "evidence": {
+    "from_loc": [
+     "ReadiumBoundaryScrollProxy is the conformer at line 113 and is registered on Readium's WKUserContentController at lines 62-68. JavaScript is evaluated through the owning Readium navigator rather than a directly exposed WKWebView: ReadiumReaderCoordinator.swift:201,305; Transparency.swift:129; SelectionStyle.swift:76; Replacement.swift:41."
+    ],
+    "to_loc": []
+   },
+   "dossier": "Add a Readium JS-channel edge explaining that the handler is installed on navigator-managed web views while evaluation uses navigator.evaluateJavaScript.",
+   "verdict": "missing-from-canon",
+   "audit_evidence": "ReadiumBoundaryScrollProxy is the conformer at line 113 and is registered on Readium's WKUserContentController at lines 62-68. JavaScript is evaluated through the owning Readium navigator rather than a directly exposed WKWebView: ReadiumReaderCoordinator.swift:201,305; Transparency.swift:129; SelectionStyle.swift:76; Replacement.swift:41.",
+   "audit_batch": "c3b",
+   "supersedes_aggregate_row": true
+  },
+  {
+   "class": "js-bridge",
+   "from": "vreader/Views/Reader/Bilingual/EPUBBilingualJS.swift",
+   "to": "vreader/Views/Reader/EPUBWebViewBridge.swift; vreader/Views/Reader/EPUBWebViewBridgeCoordinator.swift",
+   "evidence": {
+    "from_loc": [
+     "EPUBBilingualJS is not a WKScriptMessageHandler conformer; it generates scripts that post to a named handler (documented near line 97). Those scripts execute through the legacy EPUB bridge-owned WKWebView and are consumed by EPUBWebViewBridge.Coordinator."
+    ],
+    "to_loc": []
+   },
+   "dossier": "Correct the classification to JS producer and pair it with EPUBWebViewBridge.Coordinator/EPUBWebViewBridge.",
+   "verdict": "missing-from-canon",
+   "audit_evidence": "EPUBBilingualJS is not a WKScriptMessageHandler conformer; it generates scripts that post to a named handler (documented near line 97). Those scripts execute through the legacy EPUB bridge-owned WKWebView and are consumed by EPUBWebViewBridge.Coordinator.",
+   "audit_batch": "c3b",
+   "supersedes_aggregate_row": true
+  },
+  {
+   "class": "js-bridge",
+   "from": "vreader/Views/Reader/Bilingual/FoliateBilingualJS.swift",
+   "to": "vreader/Views/Reader/FoliateSpikeView.swift",
+   "evidence": {
+    "from_loc": [
+     "FoliateBilingualJS is a script generator, not a conformer; its handler-name contract is declared near line 84. FoliateSpikeView.Coordinator owns the handler and evaluates the generated scripts into its webView."
+    ],
+    "to_loc": []
+   },
+   "dossier": "Correct the classification to JS producer and pair it with FoliateSpikeView.Coordinator.",
+   "verdict": "missing-from-canon",
+   "audit_evidence": "FoliateBilingualJS is a script generator, not a conformer; its handler-name contract is declared near line 84. FoliateSpikeView.Coordinator owns the handler and evaluates the generated scripts into its webView.",
+   "audit_batch": "c3b",
+   "supersedes_aggregate_row": true
+  },
+  {
+   "class": "js-bridge",
+   "from": "vreader/Views/Reader/Bilingual/ReadiumBilingualCommander.swift",
+   "to": "vreader/Views/Reader/ReadiumEPUBHost+Bilingual.swift; vreader/Views/Reader/ReadiumReaderCoordinator.swift",
+   "evidence": {
+    "from_loc": [
+     "The file explicitly says it is not a WKScriptMessageHandler at lines 9-14. It is an eval-channel commander used by the Readium bilingual host, with scripts executed through the navigator evaluation surface."
+    ],
+    "to_loc": []
+   },
+   "dossier": "Remove it from the conformer set and document it as a Readium evaluation command object.",
+   "verdict": "missing-from-canon",
+   "audit_evidence": "The file explicitly says it is not a WKScriptMessageHandler at lines 9-14. It is an eval-channel commander used by the Readium bilingual host, with scripts executed through the navigator evaluation surface.",
+   "audit_batch": "c3b",
+   "supersedes_aggregate_row": true
+  },
+  {
+   "class": "js-bridge",
+   "from": "vreader/Views/Reader/Bilingual/ReadiumBilingualEvalAdapter.swift",
+   "to": "vreader/Views/Reader/ReadiumBilingualCommander.swift; vreader/Views/Reader/ReadiumReaderCoordinator.swift",
+   "evidence": {
+    "from_loc": [
+     "This file is a script/result adapter and contains only explanatory references to WKScriptMessageHandler. Its generated scripts are executed by ReadiumBilingualCommander through navigator.evaluateJavaScript."
+    ],
+    "to_loc": []
+   },
+   "dossier": "Remove it from the conformer set and describe it as the Readium bilingual script adapter.",
+   "verdict": "missing-from-canon",
+   "audit_evidence": "This file is a script/result adapter and contains only explanatory references to WKScriptMessageHandler. Its generated scripts are executed by ReadiumBilingualCommander through navigator.evaluateJavaScript.",
+   "audit_batch": "c3b",
+   "supersedes_aggregate_row": true
+  },
+  {
+   "class": "protocol-seam",
+   "from": "EPUBParserProtocol is implemented by the EPUBParser actor and injected across EPUB loading, reading, search, bilingual e",
+   "to": "(newly discovered — see description)",
+   "evidence": {
+    "from_loc": [
+     "vreader/Services/EPUB/EPUBParserProtocol.swift:28; vreader/Services/EPUB/EPUBParser.swift:28; vreader/Services/EPUB/EPUBFileLoader.swift:28"
+    ],
+    "to_loc": []
+   },
+   "dossier": null,
+   "verdict": "documented",
+   "description": "EPUBParserProtocol is implemented by the EPUBParser actor and injected across EPUB loading, reading, search, bilingual extraction, and TTS-follow mapping; it is absent from the edge ledger.",
+   "audit_batch": "c3a",
+   "dossier_fix_needed": null
+  },
+  {
+   "class": "protocol-seam",
+   "from": "ReadingStatsAggregating is implemented by ReadingStatsAggregator and injected into ReadingDashboardViewModel; it is abse",
+   "to": "(newly discovered — see description)",
+   "evidence": {
+    "from_loc": [
+     "vreader/Services/Stats/ReadingStatsAggregator.swift:26,57; vreader/ViewModels/ReadingDashboardViewModel.swift:59"
+    ],
+    "to_loc": []
+   },
+   "dossier": null,
+   "verdict": "newly-documented-in-fix-round",
+   "description": "ReadingStatsAggregating is implemented by ReadingStatsAggregator and injected into ReadingDashboardViewModel; it is absent from the edge ledger.",
+   "audit_batch": "c3a",
+   "dossier_fix_needed": "Module — reading stats: add that ReadingDashboardViewModel depends on any ReadingStatsAggregating and ReadingStatsAggregator is the production actor conformer."
+  },
+  {
+   "class": "protocol-seam",
+   "from": "BackgroundTaskRequesting is conformed to by UIApplication and injected into long-running translation/retranslation work;",
+   "to": "(newly discovered — see description)",
+   "evidence": {
+    "from_loc": [
+     "vreader/Services/BackgroundExecutionToken.swift:31,40; vreader/Services/AI/BookTranslationCoordinator.swift:64; vreader/ViewModels/ChapterReTranslateViewModel.swift:141"
+    ],
+    "to_loc": []
+   },
+   "dossier": null,
+   "verdict": "newly-documented-in-fix-round",
+   "description": "BackgroundTaskRequesting is conformed to by UIApplication and injected into long-running translation/retranslation work; it is absent from the edge ledger.",
+   "audit_batch": "c3a",
+   "dossier_fix_needed": "Module — bilingual translation: mention the BackgroundTaskRequesting seam, UIApplication production conformance, and its use by BookTranslationCoordinator/ChapterReTranslateViewModel."
+  },
+  {
+   "class": "protocol-seam",
+   "from": "BookImporting is implemented by BookImporter and injected into library, DebugBridge, URL-import, and WebDAV restore/mate",
+   "to": "(newly discovered — see description)",
+   "evidence": {
+    "from_loc": [
+     "vreader/Services/BookImporting.swift:9; vreader/Services/BookImporter.swift:48; vreader/Services/Import/FileURLImportRouter.swift:26; vreader/Services/Backup/BookFileMaterializer.swift:63"
+    ],
+    "to_loc": []
+   },
+   "dossier": null,
+   "verdict": "documented",
+   "description": "BookImporting is implemented by BookImporter and injected into library, DebugBridge, URL-import, and WebDAV restore/materialization paths; it is absent from the edge ledger.",
+   "audit_batch": "c3a",
+   "dossier_fix_needed": null
+  },
+  {
+   "class": "protocol-seam",
+   "from": "ReflowableTextSource has TXTReflowableTextSource and MDReflowableTextSource conformers and is consumed generically by TT",
+   "to": "(newly discovered — see description)",
+   "evidence": {
+    "from_loc": [
+     "vreader/Services/ReflowableTextSource.swift:28; vreader/Services/TXT/TXTReflowableTextSource.swift:17; vreader/Services/MD/MDReflowableTextSource.swift:17; vreader/Services/TTS/TTSService.swift:238"
+    ],
+    "to_loc": []
+   },
+   "dossier": null,
+   "verdict": "newly-documented-in-fix-round",
+   "description": "ReflowableTextSource has TXTReflowableTextSource and MDReflowableTextSource conformers and is consumed generically by TTSService; it is absent from the edge ledger.",
+   "audit_batch": "c3a",
+   "dossier_fix_needed": "Module — TTS: add the ReflowableTextSource boundary and name the TXT/MD production conformers used by TTSService.extractText."
+  },
+  {
+   "class": "persistence-access",
+   "from": "Numerous production SwiftUI reader/library files instantiate PersistenceActor directly and invoke it through feature pro",
+   "to": "(newly discovered — see description)",
+   "evidence": {
+    "from_loc": [
+     "vreader/Views/Reader/ReaderFormatHosts.swift:35"
+    ],
+    "to_loc": []
+   },
+   "dossier": null,
+   "verdict": "documented",
+   "description": "Numerous production SwiftUI reader/library files instantiate PersistenceActor directly and invoke it through feature protocols, but the ledger's caller set largely omits the Views layer.",
+   "audit_batch": "c3b",
+   "dossier_fix_needed": "Module — persistence and data model already describes independently constructed view actors, but should add a representative caller inventory so the relationship is auditable."
+  },
+  {
+   "class": "persistence-access",
+   "from": "SwiftDataSessionStore is an independent @MainActor SwiftData writer for ReadingSession rather than a PersistenceActor ca",
+   "to": "(newly discovered — see description)",
+   "evidence": {
+    "from_loc": [
+     "vreader/Services/SwiftDataSessionStore.swift"
+    ],
+    "to_loc": []
+   },
+   "dossier": null,
+   "verdict": "documented",
+   "description": "SwiftDataSessionStore is an independent @MainActor SwiftData writer for ReadingSession rather than a PersistenceActor caller.",
+   "audit_batch": "c3b",
+   "dossier_fix_needed": null
+  },
+  {
+   "class": "persistence-access",
+   "from": "BookSourceListView and ReplacementRulesView mutate SwiftData directly through the environment ModelContext, bypassing Pe",
+   "to": "(newly discovered — see description)",
+   "evidence": {
+    "from_loc": [
+     "vreader/Views/BookSource/BookSourceListView.swift; vreader/Views/Settings/ReplacementRulesView.swift"
+    ],
+    "to_loc": []
+   },
+   "dossier": null,
+   "verdict": "documented",
+   "description": "BookSourceListView and ReplacementRulesView mutate SwiftData directly through the environment ModelContext, bypassing PersistenceActor.",
+   "audit_batch": "c3b",
+   "dossier_fix_needed": null
+  },
+  {
+   "class": "persistence-access",
+   "from": "Other actors serialize durable state outside the two mechanically tracked actors, including SyncOutboundQueue and Durabl",
+   "to": "(newly discovered — see description)",
+   "evidence": {
+    "from_loc": [
+     "vreader/Services/Sync/SyncOutboundQueue.swift:48; vreader/Services/Sync/DurableTombstoneStore.swift:56"
+    ],
+    "to_loc": []
+   },
+   "dossier": null,
+   "verdict": "newly-documented-in-fix-round",
+   "description": "Other actors serialize durable state outside the two mechanically tracked actors, including SyncOutboundQueue and DurableTombstoneStore.",
+   "audit_batch": "c3b",
+   "dossier_fix_needed": "Module — sync: explicitly identify SyncOutboundQueue and DurableTombstoneStore as independent serialized persistence boundaries and state what backing store each owns."
+  },
+  {
+   "class": "persistence-access",
+   "from": "ProviderProfileStore and WebDAVServerProfileStore are actor-isolated durable configuration stores not represented by the",
+   "to": "(newly discovered — see description)",
+   "evidence": {
+    "from_loc": [
+     "vreader/Services/AI/ProviderProfileStore.swift:31; vreader/Services/Backup/WebDAVServerProfileStore.swift:44"
+    ],
+    "to_loc": []
+   },
+   "dossier": null,
+   "verdict": "newly-documented-in-fix-round",
+   "description": "ProviderProfileStore and WebDAVServerProfileStore are actor-isolated durable configuration stores not represented by the persistence-access ledger.",
+   "audit_batch": "c3b",
+   "dossier_fix_needed": "Module — AI providers and Module — backup and WebDAV: add explicit persistence-boundary edges for their actor-owned profile stores."
+  },
+  {
+   "class": "js-bridge",
+   "from": "Foliate section extraction uses callAsyncJavaScript on the FoliateSpikeView.Coordinator-owned WKWebView and is a real ev",
+   "to": "(newly discovered — see description)",
+   "evidence": {
+    "from_loc": [
+     "vreader/Views/Reader/FoliateSpikeView+SectionExtracting.swift:55"
+    ],
+    "to_loc": []
+   },
+   "dossier": null,
+   "verdict": "newly-documented-in-fix-round",
+   "description": "Foliate section extraction uses callAsyncJavaScript on the FoliateSpikeView.Coordinator-owned WKWebView and is a real evaluation edge absent from explicit pairing.",
+   "audit_batch": "c3b",
+   "dossier_fix_needed": "Module — foliate AZW3 reader: pair section extraction with FoliateSpikeView.Coordinator's webView ownership."
+  },
+  {
+   "class": "js-bridge",
+   "from": "Readium's JS bridge is indirect: handlers are registered on navigator-managed WKUserContentController instances while ev",
+   "to": "(newly discovered — see description)",
+   "evidence": {
+    "from_loc": [
+     "vreader/Views/Reader/ReadiumEPUBHost+ContinuousScroll.swift:62; vreader/Views/Reader/ReadiumReaderCoordinator.swift:201"
+    ],
+    "to_loc": []
+   },
+   "dossier": null,
+   "verdict": "newly-documented-in-fix-round",
+   "description": "Readium's JS bridge is indirect: handlers are registered on navigator-managed WKUserContentController instances while evaluations go through navigator.evaluateJavaScript, so a simple WKWebView grep cannot close the edge.",
+   "audit_batch": "c3b",
+   "dossier_fix_needed": "Module — EPUB reader: add the navigator-mediated handler/evaluator ownership relationship."
+  },
+  {
+   "class": "js-bridge",
+   "from": "The mechanical conformer set contains five false positives: EPUBBilingualJS, FoliateBilingualJS, ReadiumBilingualCommand",
+   "to": "(newly discovered — see description)",
+   "evidence": {
+    "from_loc": [
+     "Only comments/constants/extensions occur in those files; actual conformers are declared in EPUBWebViewBridgeCoordinator.swift:12, FoliateViewCoordinator.swift:20, FoliateSpikeView.swift:456, and ReadiumEPUBHost+ContinuousScroll.swift:113, plus weak forwarding proxies."
+    ],
+    "to_loc": []
+   },
+   "dossier": null,
+   "verdict": "newly-documented-in-fix-round",
+   "description": "The mechanical conformer set contains five false positives: EPUBBilingualJS, FoliateBilingualJS, ReadiumBilingualCommander, ReadiumBilingualEvalAdapter, and EPUBWebViewBridgeJS do not conform to WKScriptMessageHandler.",
+   "audit_batch": "c3b",
+   "dossier_fix_needed": "Replace the grep-derived conformer list with an explicit table separating message consumers, weak forwarding proxies, script producers, and evaluator adapters."
+  },
+  {
+   "class": "contract-surface",
+   "from": "Swift and Kotlin locator canonicalizers disagree when called directly with non-finite progressions: Swift omits the inva",
+   "to": "(newly discovered — see description)",
+   "evidence": {
+    "from_loc": [
+     "vreader/Models/Locator.swift:128-136; android/identity/src/main/kotlin/vreader/contracts/Identity.kt:90-91"
+    ],
+    "to_loc": []
+   },
+   "dossier": null,
+   "verdict": "newly-documented-in-fix-round",
+   "description": "Swift and Kotlin locator canonicalizers disagree when called directly with non-finite progressions: Swift omits the invalid field, Kotlin throws.",
+   "audit_batch": "c3b",
+   "dossier_fix_needed": "Module — cross-platform contracts: add this known divergence and require Swift canonicalJSON to reject invalid input or make validation a checked prerequisite."
+  }
+ ]
+}
