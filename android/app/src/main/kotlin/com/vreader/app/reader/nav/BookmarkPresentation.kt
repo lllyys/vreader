@@ -1,11 +1,13 @@
 // Purpose: feature #135 WI-4 — the PURE, read-time per-format bookmark presentation projection. Turns
 // a stored BookmarkRecord into a display row (BookmarkRowUi) DERIVED every call (Risk-7: preview/chapter
-// are NEVER stored). Per format: EPUB/AZW3 = nearest-at-or-above TOC entry via an O(log n) binary search
-// over the ordered TOC (huge-book safe) + that entry's page label; PDF = "p. N" (one-based); TXT/MD = a
-// host-supplied snippet, clamped <=120 single-line ellipsized. Date is deterministic (injected
-// zone+formatter — no now()/default-locale). No Android/Compose deps, no I/O (rule 50 boundary): every
-// absence path (no TOC / no provider / null offset / offset out of range) returns null fields, never a
-// crash. Feeds WI-6's Bookmarks surface + WI-7's host wiring (TXT supplies the provider).
+// are NEVER stored). Per format: EPUB/AZW3 = nearest-at-or-above TOC chapter via a PREVALIDATED
+// BookmarkTocIndex (built once, O(n); each lookup is O(log n) when the TOC is complete+monotonic in
+// totalProgression — the Readium/EPUB norm/huge-book path — else an href-exact fallback) + that entry's
+// page label; PDF = "p. N" (one-based); TXT/MD = a host-supplied snippet, clamped <=120 single-line
+// ellipsized. Date is deterministic (injected zone+formatter — no now()/default-locale). No
+// Android/Compose deps, no I/O (rule 50 boundary): every absence path (no TOC / no provider / null
+// offset / invalid page) returns null fields, never a crash. Feeds WI-6's Bookmarks surface + WI-7's
+// host wiring (TXT supplies the provider; the host builds the BookmarkTocIndex once per TOC).
 package com.vreader.app.reader.nav
 
 import com.vreader.app.annotations.BookmarkRecord
@@ -40,6 +42,97 @@ class BookmarkDateRenderer(
         formatter.format(Instant.ofEpochMilli(epochMillis).atZone(zone))
 }
 
+/**
+ * A prevalidated, searchable view of a book's reading-ordered TOC for EPUB/AZW3 bookmark-chapter lookup.
+ *
+ * Built ONCE per TOC via [build] (O(n)) — the caller (WI-6/WI-7 host) constructs it when the TOC loads
+ * and reuses it across every bookmark row, so a list of `m` bookmarks costs `O(n + m·log n)`, never
+ * `O(n·m)`. Building validates the invariant the fast lookup needs — that EVERY entry carries a
+ * book-wide `totalProgression` AND the sequence is non-decreasing (the Readium/EPUB norm) — so
+ * [nearest] can trust it and binary-search in O(log n). When the TOC violates that invariant (a
+ * partially-populated / out-of-order TOC), [nearest] degrades to an href-exact match, which is correct
+ * for those degraded cases (and bounded by the few same-href entries). This is exactly the "validate
+ * once, then a trusted searchable structure" shape the auditor required, instead of trying to prove
+ * global completeness+monotonicity inside every O(log n) lookup.
+ */
+class BookmarkTocIndex private constructor(
+    private val entries: List<TocEntry>,
+    /** True iff every entry has a non-null totalProgression AND the sequence is non-decreasing. */
+    private val monotonicByTotalProgression: Boolean,
+) {
+    /**
+     * The nearest chapter at or before [target]:
+     *  - **complete+monotonic TOC** → O(log n) binary search on `totalProgression` for the rightmost
+     *    entry `<=` the target's `totalProgression` (null target key → href fallback, no fabrication);
+     *  - **degraded TOC** → href-exact fallback (last same-href entry at/before the in-chapter
+     *    `progression`).
+     * Returns null (never a fabricated chapter) when the target can't be placed / the TOC is empty.
+     */
+    fun nearest(target: Locator): TocEntry? {
+        if (entries.isEmpty()) return null
+        val targetTotal = target.totalProgression
+        if (monotonicByTotalProgression && targetTotal != null) {
+            return binarySearchAtOrBelow(targetTotal)
+        }
+        return hrefFallback(target)
+    }
+
+    /** Rightmost entry whose `totalProgression <= [targetTotal]` (O(log n)); null before the first entry. */
+    private fun binarySearchAtOrBelow(targetTotal: Double): TocEntry? {
+        var lo = 0
+        var hi = entries.size - 1
+        var found = -1
+        while (lo <= hi) {
+            val mid = (lo + hi) ushr 1
+            // Non-null by the build-time invariant (monotonicByTotalProgression implies all present).
+            val key = entries[mid].canonicalLocator.totalProgression!!
+            if (key <= targetTotal) {
+                found = mid
+                lo = mid + 1
+            } else {
+                hi = mid - 1
+            }
+        }
+        return if (found >= 0) entries[found] else null
+    }
+
+    /**
+     * The last TOC entry whose `href` matches the target's and whose in-chapter `progression` is at or
+     * before the target's — the chapter the bookmark lives in. Null when no entry shares the href.
+     */
+    private fun hrefFallback(target: Locator): TocEntry? {
+        val href = target.href ?: return null
+        val targetProg = target.progression ?: 0.0
+        var best: TocEntry? = null
+        for (entry in entries) {
+            val loc = entry.canonicalLocator
+            if (loc.href != href) continue
+            if ((loc.progression ?: 0.0) <= targetProg) best = entry
+        }
+        return best
+    }
+
+    companion object {
+        /**
+         * Build the index from a reading-ordered TOC, validating the fast-path invariant in a SINGLE
+         * O(n) pass. The caller owns the TOC's immutability (it is loaded once and not mutated), so the
+         * list is retained by reference rather than defensively copied — a copy would double the O(n)
+         * build cost for a huge book to no benefit given the ownership contract.
+         */
+        fun build(entries: List<TocEntry>): BookmarkTocIndex {
+            var monotonic = true
+            var prev: Double? = null
+            for (entry in entries) {
+                val tp = entry.canonicalLocator.totalProgression
+                if (tp == null) { monotonic = false; break }
+                if (prev != null && tp < prev) { monotonic = false; break }
+                prev = tp
+            }
+            return BookmarkTocIndex(entries, monotonic)
+        }
+    }
+}
+
 /** The pure per-format bookmark → display-row projection. */
 object BookmarkPresentation {
 
@@ -49,8 +142,8 @@ object BookmarkPresentation {
     /**
      * Project [record] to its display row for [format].
      *
-     * @param tocEntries the ordered (reading-order) TOC for EPUB/AZW3 chapter lookup; null/empty degrades
-     *   to a null chapter. MUST be indexable in O(1) — the lookup binary-searches it (O(log n)).
+     * @param tocIndex a PREVALIDATED [BookmarkTocIndex] for EPUB/AZW3 chapter lookup (built once from the
+     *   TOC and reused across rows — see [BookmarkTocIndex]); null degrades to a null chapter.
      * @param previewProvider the TXT/MD host's snippet source; null (or a null return) degrades to a null
      *   preview.
      * @param dateRenderer the deterministic date formatter (injected zone+formatter).
@@ -58,7 +151,7 @@ object BookmarkPresentation {
     fun bookmarkRow(
         record: BookmarkRecord,
         format: BookFormat,
-        tocEntries: List<TocEntry>?,
+        tocIndex: BookmarkTocIndex?,
         previewProvider: BookmarkPreviewProvider?,
         dateRenderer: BookmarkDateRenderer,
     ): BookmarkRowUi {
@@ -67,7 +160,7 @@ object BookmarkPresentation {
 
         return when (format) {
             BookFormat.epub, BookFormat.azw3 -> {
-                val entry = tocEntries?.let { nearestTocEntryAtOrAbove(it, locator) }
+                val entry = tocIndex?.nearest(locator)
                 BookmarkRowUi(
                     preview = null,
                     chapter = entry?.title,
@@ -99,80 +192,6 @@ object BookmarkPresentation {
                 )
             }
         }
-    }
-
-    /**
-     * The nearest TOC chapter at or before [target] — the row's chapter. Two strategies, both safe:
-     *
-     * 1. **Fast path (huge-book O(log n)):** when the target carries a book-wide `totalProgression` (the
-     *    Readium/EPUB norm — the only key guaranteed monotonic across chapters), binary-search the
-     *    reading-ordered TOC for the rightmost entry whose `totalProgression <=` the target's. The
-     *    monotonic-ness precondition is checked WHILE searching (never via an O(n) prescan, which would
-     *    defeat the huge-book bound): if any entry visited by the search lacks `totalProgression`, the
-     *    TOC is not reliably monotonic under that key, so the search aborts to strategy 2. A fully
-     *    populated Readium TOC never aborts, so this stays O(log n) for huge books.
-     * 2. **Href fallback (correctness for partially-populated TOCs):** match on the target's `href` — the
-     *    chapter file the bookmark points into — picking the last same-href entry at or before the
-     *    target's in-chapter `progression`. This is what keeps a partial TOC correct: mixing book-wide
-     *    `totalProgression` with chapter-local `progression` would break the binary search's monotonicity
-     *    invariant and return the wrong chapter. Same-href entries are few (typically one).
-     *
-     * Returns null (no fabricated chapter) when the target precedes the first entry, the TOC is empty,
-     * or no strategy can place it.
-     */
-    private fun nearestTocEntryAtOrAbove(entries: List<TocEntry>, target: Locator): TocEntry? {
-        if (entries.isEmpty()) return null
-        val targetTotal = target.totalProgression
-        if (targetTotal != null) {
-            binarySearchAtOrBelow(entries, targetTotal)?.let { return it.entryOrNull }
-            // Search aborted (a visited entry lacked totalProgression) -> fall through.
-        }
-        return hrefFallback(entries, target)
-    }
-
-    /**
-     * Wraps a binary-search outcome so an *aborted* search (a visited entry lacked `totalProgression`)
-     * is distinguishable from a completed search that legitimately found nothing.
-     */
-    private data class SearchOutcome(val entryOrNull: TocEntry?)
-
-    /**
-     * Rightmost entry whose `totalProgression <= [targetTotal]`, via binary search (O(log n)). Returns
-     * null (an ABORT) the moment a visited entry lacks `totalProgression` — the caller then degrades to
-     * the href fallback; a completed search returns a [SearchOutcome] (whose [entryOrNull] may itself be
-     * null when the target precedes the first entry).
-     */
-    private fun binarySearchAtOrBelow(entries: List<TocEntry>, targetTotal: Double): SearchOutcome? {
-        var lo = 0
-        var hi = entries.size - 1
-        var found = -1
-        while (lo <= hi) {
-            val mid = (lo + hi) ushr 1
-            val key = entries[mid].canonicalLocator.totalProgression ?: return null // abort: not monotonic
-            if (key <= targetTotal) {
-                found = mid
-                lo = mid + 1
-            } else {
-                hi = mid - 1
-            }
-        }
-        return SearchOutcome(if (found >= 0) entries[found] else null)
-    }
-
-    /**
-     * The last TOC entry whose `href` matches the target's and whose in-chapter `progression` is at or
-     * before the target's — the chapter the bookmark lives in. Null when no entry shares the href.
-     */
-    private fun hrefFallback(entries: List<TocEntry>, target: Locator): TocEntry? {
-        val href = target.href ?: return null
-        val targetProg = target.progression ?: 0.0
-        var best: TocEntry? = null
-        for (entry in entries) {
-            val loc = entry.canonicalLocator
-            if (loc.href != href) continue
-            if ((loc.progression ?: 0.0) <= targetProg) best = entry
-        }
-        return best
     }
 
     /** Clamp a raw snippet to a single line, at most [maxLen] chars, ellipsized when truncated. */

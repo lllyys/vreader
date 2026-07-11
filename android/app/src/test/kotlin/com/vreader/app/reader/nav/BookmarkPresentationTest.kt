@@ -83,8 +83,11 @@ class BookmarkPresentationTest {
 
     // ---- EPUB: chapter + page from the TOC (nearest at/above) ----
 
+    private fun index(vararg entries: TocEntry): BookmarkTocIndex =
+        BookmarkTocIndex.build(entries.toList())
+
     @Test fun epub_chapterIsNearestTocEntryAtOrAbove() {
-        val toc = listOf(
+        val toc = index(
             tocEntry("Chapter 1", "ch1.xhtml", totalProgression = 0.0, pageLabel = "1"),
             tocEntry("Chapter 2", "ch2.xhtml", totalProgression = 0.3, pageLabel = "17"),
             tocEntry("Chapter 3", "ch3.xhtml", totalProgression = 0.6, pageLabel = "42"),
@@ -100,7 +103,7 @@ class BookmarkPresentationTest {
     }
 
     @Test fun epub_exactBoundaryPicksThatEntry() {
-        val toc = listOf(
+        val toc = index(
             tocEntry("Chapter 1", "ch1.xhtml", totalProgression = 0.0),
             tocEntry("Chapter 2", "ch2.xhtml", totalProgression = 0.3),
         )
@@ -113,7 +116,7 @@ class BookmarkPresentationTest {
     }
 
     @Test fun epub_beforeFirstEntryHasNullChapter() {
-        val toc = listOf(
+        val toc = index(
             tocEntry("Chapter 1", "ch1.xhtml", totalProgression = 0.2),
             tocEntry("Chapter 2", "ch2.xhtml", totalProgression = 0.6),
         )
@@ -138,16 +141,16 @@ class BookmarkPresentationTest {
     @Test fun epub_emptyTocDegradesToNullChapter() {
         val row = BookmarkPresentation.bookmarkRow(
             record(BookFormat.epub, href = "ch2.xhtml", totalProgression = 0.45),
-            BookFormat.epub, emptyList(), null, dateRenderer,
+            BookFormat.epub, index(), null, dateRenderer,
         )
         assertNull(row.chapter)
     }
 
     @Test fun epub_partialTocMissingTotalProgressionUsesHrefFallback() {
         // Not every entry carries totalProgression (a partially-populated TOC): totalProgression is
-        // NOT a reliable cross-chapter key here, so the lookup must fall back to href matching and
-        // still return the correct chapter — NOT a wrong one from a broken progression search.
-        val toc = listOf(
+        // NOT a reliable cross-chapter key here, so build-time validation flags it non-monotonic and
+        // the lookup falls back to href matching — returning the correct chapter, not a wrong one.
+        val toc = index(
             TocEntry("Chapter 1", 0, "1",
                 Locator(sha, 1234L, "epub", href = "ch1.xhtml", progression = 0.0), null),
             // Chapter 2 lacks totalProgression.
@@ -165,28 +168,30 @@ class BookmarkPresentationTest {
         assertEquals("17", row.pageLabel)
     }
 
-    @Test fun epub_targetHasTotalProgressionButEntryMissingItAbortsToHrefFallback() {
-        // Target carries totalProgression, but a TOC entry lacks it (not monotonic). The fast path
-        // must abort to the href fallback rather than binary-search a non-monotonic key.
-        val toc = listOf(
-            TocEntry("Chapter 1", 0, "1",
-                Locator(sha, 1234L, "epub", href = "ch1.xhtml", progression = 0.0,
-                    totalProgression = 0.0), null),
-            // Chapter 2 lacks totalProgression.
-            TocEntry("Chapter 2", 0, "17",
-                Locator(sha, 1234L, "epub", href = "ch2.xhtml", progression = 0.0), null),
-        )
+    @Test fun epub_soleMissingTotalProgressionOutsideProbePathStillDetected() {
+        // The auditor's targeted case: a large ODD-sized TOC whose SOLE null totalProgression lies
+        // OUTSIDE the binary-search probe path. Build-time validation (a full single O(n) pass) flags
+        // the TOC non-monotonic regardless of where the null sits, so the lookup uses the href fallback
+        // and returns the right chapter instead of a fabricated one from a broken binary search.
+        val n = 1023 // odd size
+        val entries = (0 until n).map { i ->
+            val tp = if (i == 0) null else i.toDouble() / n // the null is at index 0 (skipped by a right-leaning probe)
+            TocEntry("C$i", 0, "$i",
+                Locator(sha, 1234L, "epub", href = "c$i.xhtml", progression = 0.0, totalProgression = tp),
+                null)
+        }
+        val toc = BookmarkTocIndex.build(entries)
+        // Target has totalProgression + a matching href.
         val row = BookmarkPresentation.bookmarkRow(
-            record(BookFormat.epub, href = "ch2.xhtml", progression = 0.5, totalProgression = 0.5),
+            record(BookFormat.epub, href = "c700.xhtml", progression = 0.0, totalProgression = 700.0 / n),
             BookFormat.epub, toc, null, dateRenderer,
         )
-        assertEquals("Chapter 2", row.chapter)
-        assertEquals("17", row.pageLabel)
+        assertEquals("C700", row.chapter)
     }
 
     @Test fun epub_targetWithoutTotalProgressionAndUnknownHrefYieldsNullChapter() {
         // The target has neither totalProgression nor a matching href -> no fabricated chapter.
-        val toc = listOf(
+        val toc = index(
             TocEntry("Chapter 1", 0, "1",
                 Locator(sha, 1234L, "epub", href = "ch1.xhtml", progression = 0.0), null),
         )
@@ -199,7 +204,7 @@ class BookmarkPresentationTest {
     }
 
     @Test fun azw3_usesTocLikeEpub() {
-        val toc = listOf(
+        val toc = index(
             tocEntry("Part One", "p1", totalProgression = 0.0),
             tocEntry("Part Two", "p2", totalProgression = 0.5),
         )
@@ -210,13 +215,15 @@ class BookmarkPresentationTest {
         assertEquals("Part Two", row.chapter)
     }
 
-    // ---- huge book: correct nearest entry + bounded (O(log n)) cost ----
+    // ---- huge book: correct nearest entry + bounded (O(log n)) LOOKUP cost ----
 
     @Test fun epub_hugeBookFindsCorrectNearestEntry() {
         val n = 100_000
-        val toc = (0 until n).map { i ->
-            tocEntry("C$i", "c$i.xhtml", totalProgression = i.toDouble() / n, pageLabel = "$i")
-        }
+        val toc = BookmarkTocIndex.build(
+            (0 until n).map { i ->
+                tocEntry("C$i", "c$i.xhtml", totalProgression = i.toDouble() / n, pageLabel = "$i")
+            }
+        )
         // A bookmark at totalProgression just past entry 73_456's start.
         val target = 73_456
         val tp = target.toDouble() / n + 0.0000005 // strictly inside entry `target`
@@ -229,26 +236,29 @@ class BookmarkPresentationTest {
     }
 
     @Test fun epub_hugeBookLookupIsBounded() {
-        // Bounds the comparison count via an instrumented list; a linear scan over 1M entries
-        // would perform ~1M comparisons, binary search ~<=21. Assert well under a linear bound.
+        // The LOOKUP (post-build) is O(log n): a linear scan over 1M entries would touch ~1M entries,
+        // binary search ~<=20. The index retains the given list by reference, so a counting list sees
+        // both the build pass and each lookup; we reset the counter AFTER build to isolate the lookup.
         val n = 1_000_000
         val base = (0 until n).map { i ->
             tocEntry("C$i", "c$i.xhtml", totalProgression = i.toDouble() / n)
         }
-        var comparisons = 0
+        var accesses = 0
         val counting = object : AbstractList<TocEntry>() {
             override val size: Int get() = base.size
             override fun get(index: Int): TocEntry {
-                comparisons++
+                accesses++
                 return base[index]
             }
         }
+        val toc = BookmarkTocIndex.build(counting)
+        accesses = 0 // isolate the lookup from the O(n) build validation pass
         BookmarkPresentation.bookmarkRow(
             record(BookFormat.epub, href = "c999999.xhtml", totalProgression = 0.9999995),
-            BookFormat.epub, counting, null, dateRenderer,
+            BookFormat.epub, toc, null, dateRenderer,
         )
-        // O(log2 1_000_000) ~= 20; allow generous slack but assert far below linear.
-        assertTrue("expected bounded (O(log n)) access, got $comparisons", comparisons <= 64)
+        // O(log2 1_000_000) ~= 20; assert far below the linear (1M) bound.
+        assertTrue("expected bounded (O(log n)) lookup, got $accesses", accesses <= 64)
     }
 
     // ---- PDF: p.N ----
