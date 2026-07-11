@@ -45,6 +45,9 @@ class WebDavBackupService(
     // feature #127 WI-6 — passed to RestoreImporter so a restore re-creates collections + membership.
     // The matching backup-side wiring is on the injected [collector] (constructed with the same dao).
     private val collectionDao: com.vreader.app.data.CollectionDao? = null,
+    // feature #132 WI-8 — passed to RestoreImporter so a restore re-creates highlights/notes/bookmarks.
+    // The matching backup-side wiring is on the injected [collector] (constructed with the same repo).
+    private val annotationsRepository: com.vreader.app.annotations.AnnotationsRepository? = null,
 ) : BackupService {
 
     override suspend fun listServers(): List<ServerSummary> = serverStore.list().map {
@@ -156,7 +159,7 @@ class WebDavBackupService(
         val reader = BackupArchiveReader.read(client.get(zipPath))
         val sel = selection.ifEmpty { null }  // empty selection = restore all
         val books = reader.manifest.books.filter { sel == null || it.fingerprintKey in sel }
-        val importer = RestoreImporter(bookImporter, repository, client::getStream, ioDispatcher, collectionDao)
+        val importer = RestoreImporter(bookImporter, repository, client::getStream, ioDispatcher, collectionDao, annotationsRepository)
         val result = importer.restore(reader, selection = sel) { done, t ->
             val title = books.getOrNull(done - 1)?.let { it.title ?: it.fingerprintKey } ?: ""
             send(RestoreProgress.InProgress(done, t, title))  // suspending send — no dropped events
@@ -174,7 +177,7 @@ class WebDavBackupService(
         val (serverId, zipPath) = decodeBackupId(backupId)
         val client = clientFor(serverId)
         val reader = BackupArchiveReader.read(client.get(zipPath))
-        val importer = RestoreImporter(bookImporter, repository, client::getStream, ioDispatcher, collectionDao)
+        val importer = RestoreImporter(bookImporter, repository, client::getStream, ioDispatcher, collectionDao, annotationsRepository)
         val result = importer.restore(reader, selection = setOf(bookId))
         return if (bookId in result.restored) BookRestoreResult.restored else BookRestoreResult.failed
     }
