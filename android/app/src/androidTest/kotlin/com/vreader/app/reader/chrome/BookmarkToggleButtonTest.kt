@@ -1,8 +1,13 @@
 package com.vreader.app.reader.chrome
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assertWidthIsAtLeast
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.dp
@@ -50,17 +55,25 @@ class BookmarkToggleButtonTest {
     }
 
     @Test fun contentDescription_flipsWithState() {
-        // The same button announces the OTHER action once the bookmarked flag flips — so the a11y label
-        // reflects what the NEXT tap will do (add vs remove), matching the filled/outline icon swap.
+        // The SAME button announces the OTHER action once the bookmarked flag flips — so the a11y label
+        // reflects what the NEXT tap will do (add vs remove), matching the filled/outline icon swap. This
+        // proves the flip on ONE live node (a hoisted state the recomposition reads), not two independent
+        // static snapshots — so setContent is called EXACTLY ONCE (a second call throws
+        // IllegalStateException: has already set content).
+        var isBookmarked by mutableStateOf(false)
         compose.setContent {
-            BookmarkToggleButton(theme = ReaderTheme.Dark, isBookmarked = false, onToggle = {})
+            BookmarkToggleButton(theme = ReaderTheme.Dark, isBookmarked = isBookmarked, onToggle = {})
         }
+        // Outline state: the a11y label announces the create action.
         compose.onNodeWithContentDescription("Add bookmark").assertExists()
 
-        compose.setContent {
-            BookmarkToggleButton(theme = ReaderTheme.Dark, isBookmarked = true, onToggle = {})
-        }
+        // Flip the hoisted state → the same button recomposes into the filled state.
+        compose.runOnIdle { isBookmarked = true }
+        compose.waitForIdle()
+
+        // The label FLIPPED on the same node: "Add bookmark" is gone, "Remove bookmark" is now present.
         compose.onNodeWithContentDescription("Remove bookmark").assertExists()
+        compose.onAllNodesWithContentDescription("Add bookmark").assertCountEquals(0)
     }
 
     @Test fun meetsMinimumTouchTarget_unfilled() {
