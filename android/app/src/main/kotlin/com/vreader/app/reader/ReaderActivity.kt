@@ -49,6 +49,7 @@ import com.vreader.app.VReaderApp
 import com.vreader.app.annotations.AnnotationColor
 import com.vreader.app.annotations.AnnotationsRepository
 import com.vreader.app.annotations.AnnotationsSnapshot
+import com.vreader.app.annotations.BookmarkRecord
 import com.vreader.app.annotations.EpubAnnotationMapper
 import com.vreader.app.annotations.PopoverMode
 import com.vreader.app.annotations.SelectionPopover
@@ -58,6 +59,12 @@ import com.vreader.app.data.Book
 import com.vreader.app.data.LibraryRepository
 import com.vreader.app.reader.chrome.ReaderChromeState
 import com.vreader.app.reader.chrome.ReaderSheet
+import com.vreader.app.reader.nav.BookmarkDateRenderer
+import com.vreader.app.reader.nav.BookmarkPresentation
+import com.vreader.app.reader.nav.BookmarkPreviewProvider
+import com.vreader.app.reader.nav.BookmarkRowItem
+import com.vreader.app.reader.nav.BookmarkTocIndex
+import com.vreader.app.reader.nav.JumpResult
 import com.vreader.app.reader.nav.ReadiumTocProvider
 import com.vreader.app.reader.settings.ReaderTheme
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -72,7 +79,11 @@ import org.readium.r2.shared.ExperimentalReadiumApi
 import org.readium.r2.shared.publication.Locator
 import org.readium.r2.shared.publication.Publication
 import org.readium.r2.shared.util.AbsoluteUrl
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 import java.io.File
+import vreader.contracts.Locator as CanonicalLocator
 
 @OptIn(ExperimentalReadiumApi::class)
 class ReaderActivity : AppCompatActivity() {
@@ -105,6 +116,21 @@ class ReaderActivity : AppCompatActivity() {
     // feature #134 WI-5 — the More menu's Book-details model (null until the book loads AND its collection
     // names are read → the More button is omitted until then; no dead control). Rebuilt on collection change.
     private val chromeBookDetails = mutableStateOf<com.vreader.app.reader.details.BookDetailsUiModel?>(null)
+
+    // feature #135 WI-7 — the top-bar bookmark toggle state + the Bookmarks-tab rows the chrome bands read.
+    // isCurrentBookmarked drives the filled/outline glyph; it is refreshed on every position change AND right
+    // after a toggle. currentCanonical is the live reading position mapped to canonical (the equality basis
+    // for presence/create). bookmarkRows is the projected List<BookmarkRowItem> (observeBookmarks → WI-4
+    // projection with a BookmarkTocIndex built ONCE per TOC). All in-memory for the reader's lifetime.
+    private val isCurrentBookmarked = mutableStateOf(false)
+    private val bookmarkRows = mutableStateOf<List<BookmarkRowItem>>(emptyList())
+    // The live reading position as a canonical Locator (null until the navigator has a locator). Read on the
+    // main thread; the toggle/presence reads snapshot it.
+    @Volatile private var currentCanonical: CanonicalLocator? = null
+    // The bookmark TOC index, built ONCE from the flattened TOC when the publication opens (WI-4 design —
+    // the host owns index construction), reused across every projected row.
+    @Volatile private var bookmarkTocIndex: BookmarkTocIndex? = null
+    private val bookmarkDate = bookmarkDateRenderer()
 
     // feature #123 — in-reader highlighting
     private var highlightController: ReaderHighlightController? = null
@@ -181,6 +207,10 @@ class ReaderActivity : AppCompatActivity() {
             // TOC (each entry retaining its native Readium locator for the jump), the Notes snapshot, and
             // the initial highlighted-chapter index for the current reading position.
             populateChromeModel(pub, loaded, nav)
+            // feature #135 WI-7 — build the bookmark TOC index ONCE from the flattened TOC (WI-4 design),
+            // then observe this book's bookmarks (project → rows) + keep the top-bar presence in sync.
+            bookmarkTocIndex = BookmarkTocIndex.build(chromeModel.value.tocEntries)
+            observeBookmarks(loaded)
             observePosition(nav, loaded)
             observeDisplaySettings(nav)
             observeHighlights(loaded, controller)
@@ -429,8 +459,79 @@ class ReaderActivity : AppCompatActivity() {
                     chromeModel.value = chromeModel.value.copy(currentTocIndex = index)
                 }
                 chromeProgress.value = (locator.locations.totalProgression ?: 0.0).toFloat().coerceIn(0f, 1f)
+                // feature #135 WI-7 — map the live Readium position to canonical (the toggle's equality
+                // basis) + refresh the top-bar filled/outline presence as the reader scrolls.
+                val canonical = canonicalForCurrent(locator, current)
+                currentCanonical = canonical
+                isCurrentBookmarked.value = canonical != null &&
+                    runCatching { annotations.isBookmarked(current.fingerprintKey, canonical) }.getOrDefault(false)
             }
         }
+    }
+
+    /** feature #135 WI-7 — the live Readium position → canonical [CanonicalLocator] (the bookmark equality
+     *  basis). Extracts the plain values (href + progression + totalProgression + cfi) off the Readium
+     *  locator here (the thin Readium hop) and hands them to the pure [epubBookmarkLocator]. */
+    private fun canonicalForCurrent(locator: Locator, current: Book): CanonicalLocator? {
+        val href = locator.href.toString().takeIf { it.isNotBlank() } ?: return null
+        val cfi = locator.locations.fragments.firstOrNull { it.startsWith("epubcfi(") }
+        return runCatching {
+            epubBookmarkLocator(
+                href = href,
+                progression = locator.locations.progression,
+                totalProgression = locator.locations.totalProgression,
+                cfi = cfi,
+                contentSHA256 = current.contentSHA256,
+                fileByteCount = current.fileByteCount,
+                format = current.originalFormat.name,
+            ).validatedOrNull()
+        }.getOrNull()
+    }
+
+    /** feature #135 WI-7 — observe this book's bookmarks and project them to the Bookmarks-tab rows (WI-4
+     *  projection over the once-built [bookmarkTocIndex]). EPUB has no preview provider (no arbitrary body
+     *  extraction — chapter/page come from the TOC). Lifecycle-scoped so the collector is cancelled with
+     *  the reader (no leak). */
+    private fun observeBookmarks(current: Book) {
+        lifecycleScope.launch {
+            annotations.bookmarks(current.fingerprintKey).collect { records ->
+                bookmarkRows.value = bookmarkRowItems(
+                    records = records,
+                    format = current.originalFormat,
+                    tocIndex = bookmarkTocIndex,
+                    previewProvider = null,
+                    dateRenderer = bookmarkDate,
+                )
+            }
+        }
+    }
+
+    /** feature #135 WI-7 — the top-bar bookmark toggle: create-or-remove the bookmark at the live reading
+     *  position (the canonical equality basis), then refresh the filled/outline presence. A no-op when the
+     *  navigator has no locator yet (currentCanonical null → no dead toggle). */
+    private fun toggleCurrentBookmark() {
+        val current = book ?: return
+        val canonical = currentCanonical ?: return
+        lifecycleScope.launch {
+            runCatching { annotations.toggleBookmark(current.fingerprintKey, title = null, locator = canonical) }
+            isCurrentBookmarked.value =
+                runCatching { annotations.isBookmarked(current.fingerprintKey, canonical) }.getOrDefault(false)
+        }
+    }
+
+    /** feature #135 WI-7 — jump to a persisted bookmark. A bookmark carries ONLY a canonical [CanonicalLocator]
+     *  (no precise Readium JSON), so reconstruct a Readium locator via [ReadiumLocatorReconstructor] then
+     *  `navigator.go`. A null reconstruction (malformed/unresolvable/renamed href, or a different-book
+     *  locator) OR a false `go` → [JumpResult.Failed] (the sheet stays open, NO invented error surface —
+     *  rule 51). This is exactly the fresh-process / backup-restored canonical-only jump path. */
+    private fun jumpToBookmark(record: BookmarkRecord): JumpResult {
+        val nav = navigator ?: return JumpResult.Failed
+        val pub = publication ?: return JumpResult.Failed
+        val current = book ?: return JumpResult.Failed
+        val readium = ReadiumLocatorReconstructor(current.fingerprintKey, pub).toReadium(record.locator)
+            ?: return JumpResult.Failed
+        val landed = runCatching { nav.go(readium) }.getOrDefault(false)
+        return if (landed) JumpResult.Succeeded else JumpResult.Failed
     }
 
     private suspend fun persist(locator: Locator, current: Book) {
@@ -476,6 +577,9 @@ class ReaderActivity : AppCompatActivity() {
                     bookDetails = chromeBookDetails.value,
                     onShareBook = ::shareBookFile,
                     onCopyFingerprint = ::copyFingerprint,
+                    // feature #135 WI-7 — the Bookmarks-tab rows + the per-bookmark jump (canonical → Readium).
+                    bookmarks = bookmarkRows.value,
+                    onJumpBookmark = ::jumpToBookmark,
                 )
             }
         }
@@ -490,6 +594,9 @@ class ReaderActivity : AppCompatActivity() {
                     chromeState = chromeState,
                     bookDetails = chromeBookDetails.value,
                     onShareBook = ::shareBookFile,
+                    // feature #135 WI-7 — the top-bar bookmark toggle (filled/outline by presence).
+                    isCurrentBookmarked = isCurrentBookmarked.value,
+                    onToggleBookmark = ::toggleCurrentBookmark,
                 )
             }
         }
@@ -657,6 +764,26 @@ class ReaderActivity : AppCompatActivity() {
     @androidx.annotation.VisibleForTesting
     fun jumpToTocEntryForTest(index: Int): Boolean = jumpToTocEntry(index)
 
+    // feature #135 WI-7 test hooks — assert the bookmark wiring against the live host without driving Compose
+    // gestures (the live toggle-tap + list-tap + fresh-process reopen ride WI-9 acceptance).
+    /** Whether the current reading position is bookmarked (the top-bar filled/outline state). */
+    @androidx.annotation.VisibleForTesting
+    fun isCurrentBookmarkedForTest(): Boolean = isCurrentBookmarked.value
+
+    /** The projected Bookmarks-tab rows the sheet renders. */
+    @androidx.annotation.VisibleForTesting
+    fun bookmarkRowsForTest(): List<BookmarkRowItem> = bookmarkRows.value
+
+    /** Toggle the bookmark at the current position through the SAME seam the top-bar button uses. */
+    @androidx.annotation.VisibleForTesting
+    fun toggleCurrentBookmarkForTest() = toggleCurrentBookmark()
+
+    /** Jump to a bookmark through the SAME canonical-reconstruction seam the sheet uses; returns the
+     *  JumpResult so a connected test can assert the fresh-process reconstruction landed (Succeeded) and,
+     *  with an unresolvable canonical, that a Failed leaves the sheet open. */
+    @androidx.annotation.VisibleForTesting
+    fun jumpToBookmarkForTest(record: BookmarkRecord): JumpResult = jumpToBookmark(record)
+
     /** Test hook (feature #129 WI-5): the background ARGB the live navigator has *accepted/computed*
      *  for its EpubSettings (the applied theme background), or null before the navigator/settings exist.
      *  Proves the Display setting reached and was resolved by the live EpubNavigatorFragment — it does
@@ -671,4 +798,65 @@ class ReaderActivity : AppCompatActivity() {
         fun intent(context: android.content.Context, fingerprintKey: String): Intent =
             Intent(context, ReaderActivity::class.java).putExtra(EXTRA_FINGERPRINT_KEY, fingerprintKey)
     }
+}
+
+// ---- feature #135 WI-7 — shared pure host wiring helpers (package-shared across the 5 reader hosts) ----
+
+/**
+ * feature #135 WI-7 — the deterministic date renderer every host uses for its bookmark rows. A fixed
+ * medium-date format in the device's default zone (a bookmark's date is a user-facing "when did I mark
+ * this" label — day-precision, locale-formatted). Extracted here so it is built ONCE per host and shared
+ * across every projected row (and is the same shape the WI-4 [BookmarkPresentation] projection consumes).
+ */
+fun bookmarkDateRenderer(): BookmarkDateRenderer =
+    BookmarkDateRenderer(
+        ZoneId.systemDefault(),
+        DateTimeFormatter.ofLocalizedDate(java.time.format.FormatStyle.MEDIUM).withLocale(Locale.getDefault()),
+    )
+
+/**
+ * feature #135 WI-7 — map an EPUB reader's LIVE reading position (extracted from the navigator's Readium
+ * `currentLocator` as plain values so this stays pure/JVM-testable — the same thin-Readium-hop posture as
+ * [tocPositions]) to a canonical vreader [CanonicalLocator]. This is the equality basis for the top-bar
+ * toggle's presence read + create (via `profileKeyFor`), and the canonical the reconstructor turns back
+ * into a Readium locator on jump. A bookmark is a POSITION, not a selection → NO text quote is carried
+ * (distinct from a highlight, which the [EpubAnnotationMapper] fills). Mirrors that mapper's canonical
+ * construction (href + progression + totalProgression + cfi), minus the text.
+ */
+fun epubBookmarkLocator(
+    href: String,
+    progression: Double?,
+    totalProgression: Double?,
+    cfi: String?,
+    contentSHA256: String,
+    fileByteCount: Long,
+    format: String,
+): CanonicalLocator = CanonicalLocator(
+    contentSHA256 = contentSHA256,
+    fileByteCount = fileByteCount,
+    format = format,
+    href = href,
+    progression = progression,
+    totalProgression = totalProgression,
+    cfi = cfi?.takeUnless { it.isBlank() },
+)
+
+/**
+ * feature #135 WI-7 — project a host's stored [BookmarkRecord] list into the WI-6 sheet's
+ * `List<BookmarkRowItem>`. Each record is paired with its per-format [BookmarkPresentation.bookmarkRow]
+ * projection: EPUB/AZW3 chapter/page from the prevalidated [tocIndex] (built ONCE per host from its TOC),
+ * PDF `p. N`, TXT/MD a bounded snippet via the host-supplied [previewProvider]. Order is preserved from the
+ * DAO (createdAt-ordered `observeBookmarks`). Pure/JVM-testable — no Android/Compose/IO.
+ */
+fun bookmarkRowItems(
+    records: List<BookmarkRecord>,
+    format: vreader.contracts.BookFormat,
+    tocIndex: BookmarkTocIndex?,
+    previewProvider: BookmarkPreviewProvider?,
+    dateRenderer: BookmarkDateRenderer,
+): List<BookmarkRowItem> = records.map { record ->
+    BookmarkRowItem(
+        record = record,
+        ui = BookmarkPresentation.bookmarkRow(record, format, tocIndex, previewProvider, dateRenderer),
+    )
 }

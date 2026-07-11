@@ -112,10 +112,14 @@ import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.saveable.rememberSaveable
 import com.vreader.app.annotations.AnnotationItem
 import com.vreader.app.annotations.AnnotationsSnapshot
+import com.vreader.app.annotations.BookmarkRecord
 import com.vreader.app.reader.chrome.ReaderBottomChrome
 import com.vreader.app.reader.chrome.ReaderChromeScaffold
 import com.vreader.app.reader.chrome.ReaderChromeState
 import com.vreader.app.reader.chrome.ReaderChromeStateSaver
+import com.vreader.app.reader.nav.BookmarkPreviewProvider
+import com.vreader.app.reader.nav.BookmarkRowItem
+import com.vreader.app.reader.nav.JumpResult
 import com.vreader.app.reader.settings.ReaderSettings
 import com.vreader.app.reader.settings.ReaderSettingsSheet
 import com.vreader.app.reader.settings.ReaderTheme
@@ -328,6 +332,27 @@ class TxtReaderActivity : ComponentActivity() {
                             com.vreader.app.reader.details.BookDetailsMapper.map(s.book, collectionNames, pageCount = null)
                         }
 
+                        // feature #135 WI-7 — the bookmark wiring. TXT/MD has no TOC (null tocIndex → the WI-4
+                        // projection degrades chapter/page to null) but DOES supply a preview provider (a bounded
+                        // snippet around the stored char offset — the host owns the decoded text). The current
+                        // position is the top-visible chunk's char offset → a plain canonical Locator.
+                        val previewProvider = remember(s.document) { txtBookmarkPreviewProvider(s.document) }
+                        val dateRenderer = remember { bookmarkDateRenderer() }
+                        val currentCanonical = remember(s.book) {
+                            { off: Int -> txtBookmarkLocator(s.book, off) }
+                        }
+                        val bookmarkRecords by remember(bookKey) { container.annotationsRepository.bookmarks(bookKey) }
+                            .collectAsStateWithLifecycle(emptyList())
+                        val bookmarkRows = remember(bookmarkRecords, s.book) {
+                            bookmarkRowItems(bookmarkRecords, s.book.originalFormat, tocIndex = null, previewProvider = previewProvider, dateRenderer = dateRenderer)
+                        }
+                        // The live top-visible offset → canonical (recomputed on scroll; the toggle/presence read it).
+                        val liveOffset = s.document.offsetForChunk(listState.firstVisibleItemIndex)
+                        val liveCanonical = remember(s.book, liveOffset) { txtBookmarkLocator(s.book, liveOffset) }
+                        val isBookmarked by produceState(false, liveCanonical, bookmarkRecords) {
+                            value = runCatching { container.annotationsRepository.isBookmarked(bookKey, liveCanonical) }.getOrDefault(false)
+                        }
+
                         TxtReaderChrome(
                             theme = displaySettings.theme,
                             title = s.title,
@@ -337,6 +362,26 @@ class TxtReaderActivity : ComponentActivity() {
                             bookDetails = bookDetails,
                             onShareBook = { com.vreader.app.reader.share.shareBook(this@TxtReaderActivity, s.book) },
                             onCopyFingerprint = { copyFingerprint(it) },
+                            // feature #135 WI-7 — the top-bar bookmark toggle + Bookmarks-tab rows + TXT jump.
+                            isCurrentBookmarked = isBookmarked,
+                            onToggleBookmark = {
+                                container.appScope.launch {
+                                    runCatching { container.annotationsRepository.toggleBookmark(bookKey, title = null, locator = liveCanonical) }
+                                }
+                            },
+                            currentLocator = liveCanonical,
+                            bookmarks = bookmarkRows,
+                            // TXT jump: scroll to the bookmark's char offset via the existing chunk scroll seam
+                            // (the same path resume + the annotation jump use). Out-of-range → Failed (sheet stays open).
+                            onJumpBookmark = { record ->
+                                val target = txtBookmarkScrollTarget(record.locator.charOffsetUTF16, s.document.text.length)
+                                if (target == null) {
+                                    JumpResult.Failed
+                                } else {
+                                    ttsScope.launch { listState.scrollToItem(s.document.chunkForOffset(target)) }
+                                    JumpResult.Succeeded
+                                }
+                            },
                             // TXT/MD jump: scroll to the annotation's UTF-16 offset via the existing chunk
                             // scroll seam (the same path used by resume + scrubber).
                             onJumpToAnnotation = { item ->
@@ -722,6 +767,13 @@ internal fun TxtReaderChrome(
     bookDetails: com.vreader.app.reader.details.BookDetailsUiModel? = null,
     onShareBook: () -> Unit = {},
     onCopyFingerprint: (String) -> Unit = {},
+    // feature #135 WI-7 — the top-bar bookmark toggle + Bookmarks-tab rows + TXT/MD jump (all nullable/default
+    // so #132/#134 callers stay valid). TXT supplies a preview provider (the Bookmarks-tab snippet).
+    isCurrentBookmarked: Boolean = false,
+    onToggleBookmark: (() -> Unit)? = null,
+    currentLocator: vreader.contracts.Locator? = null,
+    bookmarks: List<BookmarkRowItem> = emptyList(),
+    onJumpBookmark: ((BookmarkRecord) -> JumpResult)? = null,
 ) {
     Column(Modifier.fillMaxSize().background(theme.background).systemBarsPadding()) {
         ReaderChromeScaffold(
@@ -735,16 +787,65 @@ internal fun TxtReaderChrome(
             onJumpToc = { false },              // unreachable: Contents is hidden with an empty TOC
             onJumpToAnnotation = onJumpToAnnotation,
             onShareAnnotations = onShareAnnotations,
-            // Search/bookmark top-bar slots stay null (#133/#135 — no dead controls). feature #134 WI-5:
+            // Search top-bar slot stays null (#133 — no dead control). feature #134 WI-5:
             // the More button + Book Details / Share are wired through the scaffold's More menu below.
             bottomChrome = { onOpenContents, onOpenNotes -> bottomBar(onOpenContents to onOpenNotes) },
             body = body,
             bookDetails = bookDetails,
             onShareBook = onShareBook,
             onCopyFingerprint = onCopyFingerprint,
+            // feature #135 WI-7 — the bookmark toggle + Bookmarks tab, now lit up for TXT/MD.
+            isCurrentBookmarked = isCurrentBookmarked,
+            onToggleBookmark = onToggleBookmark,
+            currentLocator = currentLocator,
+            bookmarks = bookmarks,
+            onJumpBookmark = onJumpBookmark,
         )
     }
 }
+
+// ---- feature #135 WI-7 — TXT/MD pure host wiring helpers ----
+
+/**
+ * feature #135 WI-7 — the current TXT/MD reading position (a top-visible char offset) as a plain canonical
+ * [vreader.contracts.Locator] (the bookmark equality basis + create/jump anchor). Mirrors the host's
+ * save-position construction (identity triple + `charOffsetUTF16`), so a bookmark's position lines up with
+ * the resume seam. Pure/JVM-testable.
+ */
+fun txtBookmarkLocator(book: com.vreader.app.data.Book, charOffsetUTF16: Int): vreader.contracts.Locator =
+    vreader.contracts.Locator(
+        contentSHA256 = book.contentSHA256,
+        fileByteCount = book.fileByteCount,
+        format = book.originalFormat.name,
+        charOffsetUTF16 = charOffsetUTF16.coerceAtLeast(0),
+    )
+
+/**
+ * feature #135 WI-7 — the TXT/MD bookmark jump target: the char offset to scroll to, or null when it is out
+ * of range (→ [JumpResult.Failed], the sheet stays open — rule 51). A null/negative offset, an offset AT or
+ * PAST EOF ([offset] >= [textLength] — a corrupt/cross-file-restored anchor), or an empty document
+ * ([textLength] == 0) is out of range; a valid in-range offset is returned as-is (the PDF-page analog —
+ * [pdfBookmarkPageTarget] — rejects the same way). Pure/JVM-testable.
+ */
+fun txtBookmarkScrollTarget(offset: Int?, textLength: Int): Int? {
+    if (textLength <= 0) return null
+    if (offset == null || offset < 0 || offset >= textLength) return null
+    return offset
+}
+
+/**
+ * feature #135 WI-7 — build the TXT/MD host's [BookmarkPreviewProvider] over the ALREADY-DECODED document
+ * text (Risk-7: a plain read against the immutable buffer — no I/O). Returns a snippet starting at the
+ * bookmark's char offset, at most `maxLen` chars (the WI-4 projection then single-lines + ellipsizes it);
+ * null when the offset is at/past EOF (no meaningful snippet). Pure/JVM-testable (the document is the buffer).
+ */
+fun txtBookmarkPreviewProvider(document: TxtDocument): BookmarkPreviewProvider =
+    BookmarkPreviewProvider { charOffsetUTF16, maxLen ->
+        val text = document.text
+        val start = charOffsetUTF16.coerceAtLeast(0)
+        if (text.isEmpty() || start >= text.length) return@BookmarkPreviewProvider null
+        text.substring(start, (start + maxLen).coerceAtMost(text.length))
+    }
 
 /** The pre-emission loading surface — a bare theme-colored full-screen fill while the Display settings +
  *  document load (the only pre-emission surface; the reader body is withheld until settings emit — Gate-4
