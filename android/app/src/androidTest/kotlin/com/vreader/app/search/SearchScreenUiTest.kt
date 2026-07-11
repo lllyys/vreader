@@ -1,8 +1,10 @@
 package com.vreader.app.search
 
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -179,7 +181,10 @@ class SearchScreenUiTest {
     @Test fun noResults_definitiveCopy_shown_whenIndexCompleteAndEmpty() {
         render(SearchUiState(query = "thermodynamics", results = emptyList(), searched = true, indexComplete = true))
         compose.onNodeWithText("No matches for", substring = true).assertIsDisplayed()
-        compose.onNodeWithText("thermodynamics", substring = true).assertIsDisplayed()
+        // The query is echoed in the no-results heading, but it ALSO appears in the
+        // search input field — so match BOTH nodes (input + heading) rather than a single
+        // ambiguous one. Count == 2 proves the heading echoes the query without a locator clash.
+        compose.onAllNodesWithText("thermodynamics", substring = true).assertCountEquals(2)
         compose.onNodeWithText("Search looks across titles, authors, and the text of downloaded books. Try a different term.")
             .assertIsDisplayed()
     }
