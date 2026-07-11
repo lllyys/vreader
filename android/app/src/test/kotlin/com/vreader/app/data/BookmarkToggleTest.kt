@@ -121,6 +121,32 @@ class BookmarkToggleTest {
         assertEquals("concurrent repeat-add collapses to exactly one row", 1, dao.bookmarksForBook(key).size)
     }
 
+    @Test fun toggle_dao_sameBookmarkIdAtDifferentPosition_addsTruthfully_noPhantom() = runBlocking {
+        // Regression (Gate-4 finding): @Insert(IGNORE) returns -1 on EITHER a (bookKey, profileKey)
+        // conflict OR a bookmarkId PK collision. A toggle at a DIFFERENT, unoccupied position whose
+        // insert is ignored ONLY because the id collides must (a) NOT report a phantom Removed and
+        // (b) report a TRUTHFUL Added — the row must actually persist (re-keyed on the collision).
+        assertEquals(BookmarkToggleResult.Added, dao.toggleBookmark(entity("shared-id", "/2:0")))
+        assertEquals(
+            "id-collision at an unoccupied position reports Added, not a phantom Removed",
+            BookmarkToggleResult.Added,
+            dao.toggleBookmark(entity("shared-id", "/6:1")),
+        )
+        // BOTH positions are truly bookmarked: /2:0 survived, /6:1 was actually created (re-keyed).
+        assertEquals("the original position is still bookmarked", 1, dao.isBookmarked(key, profileKeyFor(key, loc("/2:0"))))
+        assertEquals("the id-colliding position was truthfully added", 1, dao.isBookmarked(key, profileKeyFor(key, loc("/6:1"))))
+        assertEquals("two distinct bookmarks now exist", 2, dao.bookmarksForBook(key).size)
+    }
+
+    @Test fun toggle_dao_occupiedPosition_reportsRemoved_andDeletes() = runBlocking {
+        dao.toggleBookmark(entity("id-a", "/2:0"))
+        val pk = profileKeyFor(key, loc("/2:0"))
+        assertEquals("present after add", 1, dao.isBookmarked(key, pk))
+        // A toggle at the SAME position (any id) reports Removed and clears the row.
+        assertEquals(BookmarkToggleResult.Removed, dao.toggleBookmark(entity("id-z", "/2:0")))
+        assertEquals("absent after toggle-off", 0, dao.isBookmarked(key, pk))
+    }
+
     @Test fun findAndDeleteByProfile_roundTrip() = runBlocking {
         val pk = profileKeyFor(key, loc("/2:0"))
         assertEquals("nothing found before add", 0, dao.isBookmarked(key, pk))

@@ -95,11 +95,13 @@ class AnnotationsRepository(
     suspend fun removeBookmark(id: String) = dao.deleteBookmark(id)
 
     /**
-     * Atomic idempotent bookmark toggle at `locator`'s position (feature #135 WI-3 — the top-bar
-     * toggle's create/remove). Builds the entity via [BookmarkRecord.toEntity] (which derives the
-     * `profileKey`) and delegates to the DAO's `@Transaction` toggle on the unique `(bookKey,
-     * profileKey)` index: no bookmark there yet → `Added`; one already there → `Removed`. Re-firing
-     * (a rapid double-tap) is idempotent — the unique index guarantees exactly one row per position.
+     * Atomic bookmark toggle at `locator`'s position (feature #135 WI-3 — the top-bar toggle's
+     * create/remove). Builds the entity via [BookmarkRecord.toEntity] (which derives the `profileKey`)
+     * and delegates to the DAO's `@Transaction` toggle on the unique `(bookKey, profileKey)` index: no
+     * bookmark there yet → `Added`; one already there → `Removed`. A toggle intentionally ALTERNATES
+     * state — two serialized calls Add then Remove (they do not converge). The unique index guarantees
+     * at most ONE row per position, so a concurrent repeat CREATE never produces a duplicate; whether
+     * a rapid double-tap should leave a bookmark is a UI tap-coalescing concern (WI-5), not this seam.
      */
     suspend fun toggleBookmark(bookKey: String, title: String?, locator: Locator): BookmarkToggleResult {
         requireSameBook(bookKey, locator)

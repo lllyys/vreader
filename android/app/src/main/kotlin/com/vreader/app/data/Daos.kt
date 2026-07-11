@@ -265,8 +265,9 @@ abstract class AnnotationDao {
 
     // ---- feature #135 WI-3: atomic toggle + presence on the unique (bookKey, profileKey) ----
     // insertBookmarkIfAbsent (@Insert(IGNORE)) already exists below (added by #132 WI-6b for
-    // restore); the toggle REUSES it — a re-bookmark of the same position is rejected by the unique
-    // index (returns -1), which the transaction reads as "already bookmarked → remove".
+    // restore); the toggle REUSES it as the create primitive. The toggle DECIDES add-vs-remove by the
+    // position's actual presence (findBookmarkByProfile), NOT by the insert's -1 — because -1 is
+    // ambiguous (unique-index conflict OR a bookmarkId PK collision at another position).
 
     @Query("SELECT * FROM bookmarks WHERE bookKey = :bookKey AND profileKey = :profileKey")
     abstract suspend fun findBookmarkByProfile(bookKey: String, profileKey: String): BookmarkEntity?
@@ -279,21 +280,42 @@ abstract class AnnotationDao {
     abstract suspend fun isBookmarked(bookKey: String, profileKey: String): Int
 
     /**
-     * Atomically toggle a bookmark at the entity's `(bookKey, profileKey)` position: insert-if-absent
-     * (reusing [insertBookmarkIfAbsent] on the unique index) → [BookmarkToggleResult.Added]; if the
-     * insert is IGNOREd (a bookmark already exists at this position) → DELETE by profile →
-     * [BookmarkToggleResult.Removed]. Wrapped in @Transaction so a concurrent/repeat toggle can't
-     * race insert-vs-delete (the highlights `upsertHighlight` transactional-toggle precedent). The
-     * caller supplies the entity via `BookmarkRecord.toEntity()`, which derives the `profileKey`.
+     * Atomically toggle a bookmark at the entity's `(bookKey, profileKey)` position. The outcome is
+     * decided by the POSITION's actual presence, not by an insert return code: if a row already
+     * occupies `(bookKey, profileKey)` → DELETE it → [BookmarkToggleResult.Removed]; else INSERT the
+     * entity → [BookmarkToggleResult.Added]. Wrapped in @Transaction so a concurrent toggle can't race
+     * the presence-check-vs-mutate (the highlights `upsertHighlight` transactional-toggle precedent);
+     * the unique `(bookKey, profileKey)` index is the hard backstop guaranteeing at most one row per
+     * position even under interleaving. The caller supplies the entity via `BookmarkRecord.toEntity()`,
+     * which derives the `profileKey`.
+     *
+     * Deciding by position presence (not by `@Insert(IGNORE)`'s -1) closes the phantom-`Removed` class:
+     * -1 can also mean a `bookmarkId` primary-key collision at a DIFFERENT position (a caller passed a
+     * colliding id — vanishingly rare via `newAnnotationId()`, but the DAO is a public boundary). On the
+     * `Added` branch the insert is therefore VERIFIED: if the row didn't land (an ignored PK collision at
+     * a free position), the bookmark is re-keyed with a fresh id and re-inserted so `Added` is truthful
+     * — never a claimed create that didn't persist. (A concurrent insert-at-the-same-position that won
+     * the race between the presence check and this insert is absorbed by the unique index: the ignore is
+     * then correct — the position IS occupied — so no re-key happens; the position ends up bookmarked,
+     * which is the intended `Added` outcome.)
      */
     @Transaction
     open suspend fun toggleBookmark(bookmark: BookmarkEntity): com.vreader.app.annotations.BookmarkToggleResult {
-        return if (insertBookmarkIfAbsent(bookmark) != -1L) {
-            com.vreader.app.annotations.BookmarkToggleResult.Added
-        } else {
+        if (findBookmarkByProfile(bookmark.bookKey, bookmark.profileKey) != null) {
             deleteBookmarkByProfile(bookmark.bookKey, bookmark.profileKey)
-            com.vreader.app.annotations.BookmarkToggleResult.Removed
+            return com.vreader.app.annotations.BookmarkToggleResult.Removed
         }
+        // Position free → add. If the insert is ignored while the position is STILL free, the -1 was a
+        // bookmarkId PK collision (not a position conflict): re-key and re-insert so `Added` truly
+        // persists. (Accepted Low, Gate-4 round 3: a SECOND collision on a fresh v4 UUID is a ~1-in-2^122
+        // event — not a reachable branch — so the single re-key is not itself re-verified; a bounded
+        // retry loop would add complexity for an unreachable path.)
+        if (insertBookmarkIfAbsent(bookmark) == -1L &&
+            findBookmarkByProfile(bookmark.bookKey, bookmark.profileKey) == null
+        ) {
+            insertBookmarkIfAbsent(bookmark.copy(bookmarkId = java.util.UUID.randomUUID().toString()))
+        }
+        return com.vreader.app.annotations.BookmarkToggleResult.Added
     }
 
     // ---- feature #132 WI-6b: UUID-preserving restore (insert-if-absent per kind) ----
