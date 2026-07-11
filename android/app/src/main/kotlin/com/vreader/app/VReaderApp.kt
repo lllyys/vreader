@@ -22,6 +22,7 @@ import com.vreader.app.stats.clock.SystemElapsedClock
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.map
 import vreader.contracts.BookFormat
 import java.io.File
 
@@ -102,6 +103,36 @@ class AppContainer(context: Context) {
     /** Idempotent — starts the single search-index collector (the coordinator's own AtomicBoolean
      *  makes a repeat call a no-op). Called once from [VReaderApp.onCreate]. */
     fun startSearchIndexing() = searchIndexCoordinator.startSearchIndexing()
+
+    // feature #128 WI-6 — the query pipeline. SearchRepository turns a raw query into an observable
+    // Flow of first-hit-per-book text hits (grows as indexing completes); RecentSearchesStore is a
+    // device-local DataStore under noBackupFilesDir (the readerSettingsStore precedent — recents are
+    // per-device, NOT in the backup contract). The SearchViewModel factory wires the metadata filter,
+    // the text-hit Flow, the completeness gate, and recent-recording for the WI-7 screen.
+    val searchRepository: com.vreader.app.search.SearchRepository by lazy {
+        com.vreader.app.search.SearchRepository(database.searchDao())
+    }
+    private val recentSearchesDataStore: androidx.datastore.core.DataStore<androidx.datastore.preferences.core.Preferences> by lazy {
+        androidx.datastore.preferences.core.PreferenceDataStoreFactory.create {
+            File(appContext.noBackupFilesDir, "recent_searches.preferences_pb")
+        }
+    }
+    val recentSearchesStore: com.vreader.app.search.RecentSearchesStore by lazy {
+        com.vreader.app.search.RecentSearchesStore(recentSearchesDataStore)
+    }
+
+    /** Builds a [com.vreader.app.search.SearchViewModel] wired to the live library, in-text repository,
+     *  recents, collections, and the settled-completeness gate. */
+    fun searchViewModel(): com.vreader.app.search.SearchViewModel =
+        com.vreader.app.search.SearchViewModel(
+            libraryFlow = repository.observeLibrary(),
+            textHitsFor = { q -> searchRepository.textHits(q) },
+            recentsFlow = recentSearchesStore.recents(),
+            collectionsFlow = collectionRepository.observeCollections(),
+            indexCompleteFlow = database.searchDao().observeUnsettledIndexableCount()
+                .map { it == 0 },
+            recordQuery = { q -> recentSearchesStore.record(q) },
+        )
 
     /** In-memory last reading char-offset per fingerprintKey. Written synchronously on
      *  save so a fast rotation / reopen restores the LATEST position without waiting for

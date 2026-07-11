@@ -63,21 +63,30 @@ object SearchQueryBuilder {
         }
 
         for (t in tokens) {
-            if (isCjkToken(t)) {
-                cjkRun.add(t)
-            } else {
-                flushCjkRun()
-                parts.add(t)
+            when {
+                isCjkToken(t) -> cjkRun.add(t)
+                // A bareword equal to an FTS4 boolean keyword (and/or/not/near) is CASE-INSENSITIVE in
+                // FTS4, so the case-fold to lowercase does NOT neutralize it — it would still act as an
+                // operator. Quote it so it matches the LITERAL word instead (fix #3 — FTS keyword
+                // injection). A quoted term never gets the trailing `*` (see lastIdx below).
+                isFtsKeyword(t) -> { flushCjkRun(); parts.add("\"" + t + "\"") }
+                else -> { flushCjkRun(); parts.add(t) }
             }
         }
         flushCjkRun()
 
-        // Prefix-star the final bareword term only (never a quoted CJK phrase — a prefix on a CJK
-        // ideograph is meaningless and the phrase must stay exact).
+        // Prefix-star the final bareword term only (never a quoted CJK phrase OR a quoted keyword — a
+        // prefix on a phrase/keyword is meaningless and the quoted term must stay exact).
         val lastIdx = parts.indexOfLast { !it.startsWith("\"") }
         if (lastIdx >= 0) parts[lastIdx] = parts[lastIdx] + "*"
         return parts
     }
+
+    /** True for a bareword equal (case-insensitively) to an FTS4 boolean-operator keyword. Tokens are
+     *  already case-folded to lowercase by the normalizer, so an ASCII lowercase compare suffices; the
+     *  ASCII compare is intentional (FTS4 keyword recognition is ASCII, so only these exact spellings
+     *  are operators). */
+    private fun isFtsKeyword(token: String): Boolean = token in FTS_KEYWORDS
 
     /** A token is CJK when it is a single code point classified CJK by the normalizer. */
     private fun isCjkToken(token: String): Boolean {
@@ -87,10 +96,11 @@ object SearchQueryBuilder {
     }
 
     /**
-     * Strips FTS4 operator/special characters from a token so it cannot error the MATCH or act as an
-     * operator. Removes: `" * ( ) - : ^`. Barewords AND/OR/NOT/NEAR are only operators when unquoted
-     * and uppercase; after normalization tokens are already case-folded to lowercase, so `and`/`or`/…
-     * are no longer FTS keywords — nothing extra to do beyond the character strip.
+     * Strips FTS4 operator/special characters from a token so it cannot error the MATCH. Removes:
+     * `" * ( ) - : ^`. The bareword boolean keywords AND/OR/NOT/NEAR are NOT handled here — FTS4
+     * keyword matching is CASE-INSENSITIVE, so the normalizer's case-fold to lowercase does NOT strip
+     * their operator meaning (a bareword `and` is still the boolean AND). They are neutralized at
+     * emission time by quoting (see [isFtsKeyword] in [buildFtsParts]).
      */
     private fun sanitizeToken(token: String): String =
         token.filter { it !in FTS_SPECIAL_CHARS }
@@ -98,3 +108,7 @@ object SearchQueryBuilder {
 
 private val WHITESPACE = Regex("\\s+")
 private val FTS_SPECIAL_CHARS = setOf('"', '*', '(', ')', '-', ':', '^')
+
+/** FTS4 boolean-operator keywords (case-INSENSITIVE in SQLite). Tokens arrive already case-folded to
+ *  lowercase, so these lowercase spellings are the ones to guard. */
+private val FTS_KEYWORDS = setOf("and", "or", "not", "near")

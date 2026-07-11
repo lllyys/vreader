@@ -265,6 +265,18 @@ class SearchDaoTest {
         dao.markIndexed(SearchIndexStateEntity(bookA, 1, 1L, "indexed"))
         assertEquals("settles to 0 after indexing", 0, dao.observeUnsettledIndexableCount().first())
     }
+
+    // ---- fix #1: observable published-sections count (the index-generation signal) ----
+
+    @Test fun observeSearchSectionsCount_reflectsPublishedSections() = runBlocking {
+        seedBook(bookA)
+        seedBook(bookB)
+        assertEquals("no sections yet", 0, dao.observeSearchSectionsCount().first())
+        db.searchDaoInsertPublishedSection(section(bookA, 0, 0, "first section"))
+        assertEquals("one published section", 1, dao.observeSearchSectionsCount().first())
+        db.searchDaoInsertPublishedSection(section(bookB, 0, 1, "second book section"))
+        assertEquals("grows as more books publish", 2, dao.observeSearchSectionsCount().first())
+    }
 }
 
 /** Test-only helper: insert a section straight into the published content table (bypassing staging). */
