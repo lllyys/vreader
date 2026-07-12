@@ -154,10 +154,20 @@ class ReaderAiProvidersSheetUiTest {
     // ── (a) reused editor + (c) save-result seam: Add → Save → setActive → pop ──────────────────
 
     @Test fun add_opensReusedEditor_thenSave_activatesAndPops_noRace() {
+        // Seed an EXISTING active provider so the store's first-provider-active default does NOT mask a
+        // missing setActive — the sheet must EXPLICITLY activate the newly-saved provider (Gate-4 M1).
+        seed("existing", "Claude", "claude-sonnet-4-6")
+        // Capture the store's active id AT the exact onDone callback time — proves activate-before-pop.
+        var activeIdAtDone: String? = null
         var done = false
         val vm = vm()
         compose.setContent {
-            BackupSurface(darkOverride = false) { ReaderAiProvidersSheet(vm = vm, onDone = { done = true }) }
+            BackupSurface(darkOverride = false) {
+                ReaderAiProvidersSheet(vm = vm, onDone = {
+                    activeIdAtDone = runBlocking { store.snapshot().activeId }
+                    done = true
+                })
+            }
         }
         compose.onNodeWithTag("reader-ai-add").performClick()
         // (a) The REUSED AiProviderEditSheet — its verbatim "Add Provider" header + sections.
@@ -174,13 +184,15 @@ class ReaderAiProvidersSheetUiTest {
         compose.onNodeWithTag("field-Enter API Key").performTextInput("sk-test")
         compose.onNodeWithTag("ai-save").performClick()
 
-        // (c) Save → saved id → setActive(savedId) → onDone. All AFTER the upsert commits (no race).
+        // (c) Save → saved id → setActiveAndAwait(savedId) → onDone. Activation is JOINED before the
+        // pop, so the newly-saved provider is ALREADY the active engine at onDone time (no race).
         compose.waitUntil(5_000) { done }
         assertTrue("save pops the whole stack back to bilingual", done)
         val saved = runBlocking { store.snapshot() }
-        assertEquals(1, saved.profiles.size)                 // the provider persisted
-        assertEquals("OpenRouter", saved.profiles.single().name)
-        assertEquals(saved.profiles.single().id, saved.activeId)  // and is the active engine
+        assertEquals(2, saved.profiles.size)                 // existing + the new one persisted
+        val newId = saved.profiles.first { it.name == "OpenRouter" }.id
+        assertEquals("the new provider was activated BEFORE the pop", newId, activeIdAtDone)
+        assertEquals(newId, saved.activeId)                  // and stays the active engine
         assertNull(vm.editState.value)                       // editor closed
     }
 

@@ -17,16 +17,20 @@
 package com.vreader.app.bilingual
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -44,6 +48,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -74,37 +80,48 @@ fun ReaderAiProvidersList(
     onSelect: (String) -> Unit,
 ) {
     val t = LocalBackupTokens.current
-    Column(
-        Modifier.fillMaxWidth()
-            .background(t.sheetBg)
-            .systemBarsPadding()
-            .testTag("reader-ai-providers-list"),
+    // The design's NavSheet frame (jsx:34–45): a full-screen dim scrim with a bottom-aligned,
+    // top-rounded sheet + drag grabber (the "push within the sheet" presentation).
+    Box(
+        Modifier.fillMaxSize().background(Color(0x59000000)),  // rgba(0,0,0,0.35)
+        contentAlignment = Alignment.BottomCenter,
     ) {
-        // NavSheet nav bar: ‹ Bilingual back (leading, accent) + absolutely-centered serif title.
-        Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
-            Row(
-                Modifier.align(Alignment.CenterStart)
-                    .clip(RoundedCornerShape(8.dp))
-                    .clickable(onClickLabel = "Bilingual", onClick = onBack)
-                    .testTag("reader-ai-back")
-                    .padding(4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBackIos, contentDescription = null, tint = t.tint, modifier = Modifier.size(15.dp))
-                Text("Bilingual", color = t.tint, fontFamily = BackupFonts.Sans, fontSize = 15.sp, fontWeight = FontWeight.Medium)
-            }
-            Text(
-                "AI Providers",
-                Modifier.align(Alignment.Center),
-                color = t.ink, fontFamily = BackupFonts.Serif, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
-            )
-        }
-        Box(Modifier.fillMaxWidth().height(0.5.dp).background(t.sep))
-
         Column(
-            Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
-                .padding(horizontal = 18.dp).padding(top = 14.dp, bottom = 28.dp),
+            Modifier.fillMaxWidth().fillMaxHeight(0.86f)
+                .clip(RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp))
+                .background(t.sheetBg)
+                .systemBarsPadding()
+                .testTag("reader-ai-providers-list"),
         ) {
+            // Drag grabber (jsx:46–51).
+            Box(Modifier.fillMaxWidth().padding(top = 8.dp), contentAlignment = Alignment.Center) {
+                Box(Modifier.width(36.dp).height(5.dp).clip(RoundedCornerShape(3.dp)).background(t.sep))
+            }
+            // NavSheet nav bar: ‹ Bilingual back (leading, accent) + absolutely-centered serif title.
+            Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
+                Row(
+                    Modifier.align(Alignment.CenterStart)
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable(onClickLabel = "Bilingual", onClick = onBack)
+                        .testTag("reader-ai-back")
+                        .padding(4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBackIos, contentDescription = null, tint = t.tint, modifier = Modifier.size(15.dp))
+                    Text("Bilingual", color = t.tint, fontFamily = BackupFonts.Sans, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                }
+                Text(
+                    "AI Providers",
+                    Modifier.align(Alignment.Center),
+                    color = t.ink, fontFamily = BackupFonts.Serif, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
+                )
+            }
+            Box(Modifier.fillMaxWidth().height(0.5.dp).background(t.sep))
+
+            Column(
+                Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
+                    .padding(horizontal = 18.dp).padding(top = 14.dp, bottom = 28.dp),
+            ) {
             // The why-you're-here context — the bilingual thread, kept visible (jsx:167–183).
             ContextStrip()
 
@@ -128,8 +145,9 @@ fun ReaderAiProvidersList(
                     modifier = Modifier.padding(horizontal = 4.dp).padding(top = 10.dp),
                 )
             }
-        }
-    }
+            } // end scrollable body Column
+        } // end sheet frame Column
+    } // end scrim Box
 }
 
 /** The bilingual-context strip (jsx:167–183): translate glyph + "Choose the provider bilingual mode…". */
@@ -140,6 +158,7 @@ private fun ContextStrip() {
         Modifier.fillMaxWidth()
             .clip(RoundedCornerShape(10.dp))
             .background(t.chipBg)
+            .border(0.5.dp, t.tint.copy(alpha = 0.20f), RoundedCornerShape(10.dp))  // jsx:171 accent33
             .padding(horizontal = 12.dp, vertical = 10.dp)
             .testTag("reader-ai-context"),
         verticalAlignment = Alignment.CenterVertically,
@@ -164,7 +183,14 @@ private fun EmptyState(onAdd: () -> Unit) {
         Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 8.dp).testTag("reader-ai-empty"),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Box(Modifier.size(54.dp).clip(CircleShape).background(t.tint), contentAlignment = Alignment.Center) {
+        // jsx:187–192: gradient sparkle disc (accent → accent aa) with a soft accent shadow.
+        Box(
+            Modifier.size(54.dp)
+                .shadow(elevation = 18.dp, shape = CircleShape, ambientColor = t.tint, spotColor = t.tint)
+                .clip(CircleShape)
+                .background(Brush.linearGradient(listOf(t.tint, t.tint.copy(alpha = 0.67f)))),
+            contentAlignment = Alignment.Center,
+        ) {
             Icon(Icons.Filled.AutoAwesome, contentDescription = null, tint = Color.White, modifier = Modifier.size(26.dp))
         }
         VSpace(14)

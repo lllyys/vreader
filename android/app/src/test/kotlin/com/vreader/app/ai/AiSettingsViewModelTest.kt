@@ -151,4 +151,36 @@ class AiSettingsViewModelTest {
         assertEquals("Claude Pro", store.list().single().name)
         collector.cancel()
     }
+
+    @Test fun rapidDoubleSave_persistsOneProfile_emitsOneResult() = runTest(dispatcher) {
+        // Gate-4 High-2: a double-tap Save must NOT create two providers or emit two results (which
+        // would double-pop the in-reader sheet). The single-flight guard collapses the second call.
+        val vm = vm()
+        val ids = mutableListOf<String>()
+        val collector = launch { vm.saveResult.collect { ids.add(it) } }
+        advanceUntilIdle()
+
+        vm.openAdd()
+        vm.update { it.copy(name = "OpenRouter", apiKey = "sk-test") }
+        vm.save()   // both fire synchronously before the launched upsert runs
+        vm.save()
+        advanceUntilIdle()
+
+        assertEquals(1, store.list().size)                   // exactly ONE provider persisted
+        assertEquals(1, ids.size)                            // exactly ONE save-result emitted
+        collector.cancel()
+    }
+
+    @Test fun setActiveAndAwait_commitsBeforeReturning() = runTest(dispatcher) {
+        // Gate-4 High-1: the await variant JOINs the setActive commit, so the caller can pop only
+        // after the active id is durably the saved one (no race with the async persist).
+        store.upsert("p1", "Claude", AiProviderKind.anthropicNative, "", "claude-sonnet-4-6", 0.7, 2048, "k")
+        store.upsert("p2", "DeepSeek", AiProviderKind.openAiCompatible, "", "deepseek-chat", 0.7, 2048, "k")
+        advanceUntilIdle()
+        val vm = vm()
+        assertEquals("p1", store.snapshot().activeId)        // p1 is active initially
+
+        launch { vm.setActiveAndAwait("p2") }; advanceUntilIdle()
+        assertEquals("p2", store.snapshot().activeId)        // committed by the time await returned
+    }
 }

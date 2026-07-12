@@ -50,12 +50,14 @@ fun ReaderAiProvidersSheet(
     val editState by vm.editState.collectAsStateWithLifecycle()
 
     // (c) The save-result seam: first Save → the saved id arrives AFTER the upsert commits → make it
-    // the active engine, then pop the whole stack back to bilingual. `rememberUpdatedState` keeps the
-    // effect keyed on `Unit` (one long-lived collector) while always calling the latest onDone.
+    // the active engine, then pop the whole stack back to bilingual. `setActiveAndAwait` JOINs the
+    // activation before we pop, so "activate then pop" is deterministic — the engine is committed
+    // before bilingual re-reads it (Gate-4 High-1). `rememberUpdatedState` keeps the effect keyed on
+    // `Unit` (one long-lived collector) while always calling the latest onDone.
     val currentOnDone by rememberUpdatedState(onDone)
     LaunchedEffect(Unit) {
         vm.saveResult.collect { savedId ->
-            vm.setActive(savedId)
+            vm.setActiveAndAwait(savedId)
             currentOnDone()
         }
     }

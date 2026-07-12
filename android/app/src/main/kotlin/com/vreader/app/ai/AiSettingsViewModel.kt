@@ -92,22 +92,32 @@ class AiSettingsViewModel(
         }
     }
 
+    // Single-flight guard for save(): a rapid double-tap (Gate-4 High-2) must persist ONE profile and
+    // emit ONE saveResult — otherwise the in-reader sheet could double-pop and create two providers.
+    // Set synchronously (before the launch) and cleared when the launched upsert finishes.
+    private var saving = false
+
     fun save() {
         val s = _edit.value ?: return
-        if (!s.canSave) return
+        if (!s.canSave || saving) return
+        saving = true
         // Compute the id BEFORE the launch so the save-result signal carries the actual persisted id
         // (a new provider mints one; an edit keeps s.id). The store also RETURNS the saved profile.
         val id = s.id ?: UUID.randomUUID().toString()
         viewModelScope.launch {
-            val saved = store.upsert(
-                id = id,
-                name = s.name, kind = s.kind, baseUrl = s.baseUrl, model = s.model,
-                temperature = s.temperature, maxTokens = s.maxTokens,
-                apiKey = s.apiKey.ifBlank { null },  // blank on edit = keep existing
-            )
-            _edit.value = null
-            // Emit AFTER the upsert commits — deterministic, no race with the async persist.
-            _saveResult.emit(saved.id)
+            try {
+                val saved = store.upsert(
+                    id = id,
+                    name = s.name, kind = s.kind, baseUrl = s.baseUrl, model = s.model,
+                    temperature = s.temperature, maxTokens = s.maxTokens,
+                    apiKey = s.apiKey.ifBlank { null },  // blank on edit = keep existing
+                )
+                _edit.value = null
+                // Emit AFTER the upsert commits — deterministic, no race with the async persist.
+                _saveResult.emit(saved.id)
+            } finally {
+                saving = false
+            }
         }
     }
 
@@ -117,4 +127,14 @@ class AiSettingsViewModel(
     }
 
     fun setActive(id: String) = viewModelScope.launch { store.setActive(id) }
+
+    /**
+     * Await the active-provider commit before returning (Gate-4 High-1). The in-reader AI Providers
+     * sheet uses THIS on save-success so `setActive(savedId)` has DEFINITELY committed before it pops
+     * back to bilingual — the "activate then pop" ordering is then deterministic, not a race. Runs on
+     * the SAME `viewModelScope` as the fire-and-forget [setActive] so both serialize through the store.
+     */
+    suspend fun setActiveAndAwait(id: String) {
+        viewModelScope.launch { store.setActive(id) }.join()
+    }
 }
