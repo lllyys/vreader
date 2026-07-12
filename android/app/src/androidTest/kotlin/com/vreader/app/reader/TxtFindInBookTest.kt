@@ -13,7 +13,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
@@ -207,6 +206,18 @@ class TxtFindInBookTest {
         )
     }
 
+    /** Poll (bounded 5 s) until the first result row is composed. The VM debounces the typed query 250 ms then
+     *  runs the (fake) search; `compose.waitForIdle()` does NOT await that wall-clock `delay` (the injected
+     *  Dispatchers.Main.immediate executes the collector but does not skip the debounce), so an immediate assert
+     *  fires before the hit row lands. The poll returns the instant the row appears, so the generous cap only
+     *  guards slow scheduling — it never slows the happy path (and never masks a real product defect: if the
+     *  row genuinely never comes the poll times out → the test fails). */
+    private fun awaitResultRowPresent() {
+        compose.waitUntil(timeoutMillis = 5_000L) {
+            compose.onAllNodesWithTag("inbook-result-0-0", useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
+        }
+    }
+
     @Test fun searchIcon_present_onTxtTopBar() {
         val searcher = FakeSearcher(zeroHitQuery = "zzz", hitLocator = locator(100, "txt"))
         compose.setContent { host(BookFormat.txt, searcher) }
@@ -222,9 +233,11 @@ class TxtFindInBookTest {
         compose.onNodeWithTag("inbook-search-sheet-content", useUnmergedTree = true).assertExists()
 
         compose.onNodeWithTag("inbook-search-field", useUnmergedTree = true).performTextInput("chapter")
-        compose.waitForIdle()
+        // The VM debounces the query 250 ms then runs the search; waitForIdle does NOT await that wall-clock
+        // delay (the injected Dispatchers.Main.immediate runs the collector but does not skip `delay`). Poll on
+        // the result row appearing — the awaited signal — before tapping it.
+        awaitResultRowPresent()
 
-        compose.onNodeWithTag("inbook-result-0-0", useUnmergedTree = true).assertExists()
         compose.onNodeWithTag("inbook-result-0-0", useUnmergedTree = true).performClick()
         compose.waitForIdle()
 
@@ -241,7 +254,9 @@ class TxtFindInBookTest {
 
         compose.onNodeWithTag("chrome-search", useUnmergedTree = true).performClick()
         compose.onNodeWithTag("inbook-search-field", useUnmergedTree = true).performTextInput("chapter")
-        compose.waitForIdle()
+        // Await the debounced (250 ms) search producing the hit row before tapping it (waitForIdle does not
+        // await the wall-clock debounce).
+        awaitResultRowPresent()
 
         compose.onNodeWithTag("inbook-result-0-0", useUnmergedTree = true).performClick()
         compose.waitForIdle()
@@ -258,7 +273,11 @@ class TxtFindInBookTest {
 
         compose.onNodeWithTag("chrome-search", useUnmergedTree = true).performClick()
         compose.onNodeWithTag("inbook-search-field", useUnmergedTree = true).performTextInput("zzz")
-        compose.waitForIdle()
+        // Await the debounced (250 ms) search settling to the definitive NoResults body (waitForIdle does not
+        // await the wall-clock debounce); the NoResults node is the awaited signal.
+        compose.waitUntil(timeoutMillis = 5_000L) {
+            compose.onAllNodesWithTag("inbook-no-results", useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
+        }
 
         compose.onNodeWithTag("inbook-no-results", useUnmergedTree = true).assertExists()
     }
@@ -266,8 +285,17 @@ class TxtFindInBookTest {
     @Test fun unsupportedGate_hidesSearchIcon() {
         val searcher = FakeSearcher(zeroHitQuery = "zzz", hitLocator = locator(1, "txt"))
         compose.setContent { host(BookFormat.txt, searcher, indexRowStatus = "skipped_unsupported") }
-        // The gate reports Unsupported → the host passes null onOpenSearch → no Search control (no dead control).
-        compose.onAllNodesWithTag("chrome-search", useUnmergedTree = true).assertCountEquals(0)
+        // The index-state gate is consulted only for a NON-EMPTY query (empty query → Idle, the icon is
+        // present); a skipped-unsupported TXT/MD book maps to Unsupported → hidesSearchEntry → the host passes
+        // null onOpenSearch → the Search control disappears. Tap the (initially-present) icon, type a query, and
+        // await the gate recompute (through the 250 ms VM debounce — waitForIdle does not await it) removing the
+        // icon: a no-dead-control invariant.
+        compose.onNodeWithTag("chrome-search", useUnmergedTree = true).performClick()
+        compose.onNodeWithTag("inbook-search-field", useUnmergedTree = true).performTextInput("chapter")
+        compose.waitUntil(timeoutMillis = 5_000L) {
+            compose.onAllNodesWithTag("chrome-search", useUnmergedTree = true).fetchSemanticsNodes().isEmpty()
+        }
+        compose.onNodeWithTag("chrome-search", useUnmergedTree = true).assertDoesNotExist()
     }
 
     @Test fun mdParity_searchIcon_and_hitJump() {
@@ -278,7 +306,9 @@ class TxtFindInBookTest {
         compose.onNodeWithTag("chrome-search", useUnmergedTree = true).assertExists()
         compose.onNodeWithTag("chrome-search", useUnmergedTree = true).performClick()
         compose.onNodeWithTag("inbook-search-field", useUnmergedTree = true).performTextInput("markdown")
-        compose.waitForIdle()
+        // Await the debounced (250 ms) search producing the hit row before tapping it (waitForIdle does not
+        // await the wall-clock debounce).
+        awaitResultRowPresent()
 
         compose.onNodeWithTag("inbook-result-0-0", useUnmergedTree = true).performClick()
         compose.waitForIdle()
