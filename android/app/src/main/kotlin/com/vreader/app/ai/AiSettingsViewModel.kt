@@ -8,7 +8,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
@@ -35,6 +37,14 @@ class AiSettingsViewModel(
 
     private val _edit = MutableStateFlow<AiEditState?>(null)
     val editState: StateFlow<AiEditState?> = _edit
+
+    // WI-AIP save-result seam: emits the saved provider id AFTER `save()`'s upsert commits (the id is
+    // known before the launch and store.upsert() has returned), so the in-reader AI Providers sheet
+    // can deterministically `setActive(savedId)` + pop-on-success without racing the async upsert.
+    // A replay-0/extraBuffer-1 SharedFlow: a one-shot completion signal, not retained state (a late
+    // subscriber must not re-trigger a pop). Existing #118 callers ignore it (they never collect).
+    private val _saveResult = MutableSharedFlow<String>(replay = 0, extraBufferCapacity = 1)
+    val saveResult: SharedFlow<String> = _saveResult
 
     // Bumped whenever the editor opens/closes or a new test starts — an in-flight test result is
     // only applied if its generation still matches, so a stale Ok/Fail can't land on a different
@@ -85,14 +95,19 @@ class AiSettingsViewModel(
     fun save() {
         val s = _edit.value ?: return
         if (!s.canSave) return
+        // Compute the id BEFORE the launch so the save-result signal carries the actual persisted id
+        // (a new provider mints one; an edit keeps s.id). The store also RETURNS the saved profile.
+        val id = s.id ?: UUID.randomUUID().toString()
         viewModelScope.launch {
-            store.upsert(
-                id = s.id ?: UUID.randomUUID().toString(),
+            val saved = store.upsert(
+                id = id,
                 name = s.name, kind = s.kind, baseUrl = s.baseUrl, model = s.model,
                 temperature = s.temperature, maxTokens = s.maxTokens,
                 apiKey = s.apiKey.ifBlank { null },  // blank on edit = keep existing
             )
             _edit.value = null
+            // Emit AFTER the upsert commits — deterministic, no race with the async persist.
+            _saveResult.emit(saved.id)
         }
     }
 

@@ -90,4 +90,65 @@ class AiSettingsViewModelTest {
         assertEquals("claude-sonnet-4-6", rows[0].detail)
         job.cancel()
     }
+
+    // ── WI-AIP save-result seam ─────────────────────────────────────────────────────────────────
+    // The scoped in-reader AI Providers sheet needs the SAVED provider id, surfaced AFTER the upsert
+    // commits, to deterministically `setActive(savedId)` + pop-on-success without racing the async
+    // upsert. The seam is an additive `saveResult` signal; existing `save()` callers are unaffected.
+
+    @Test fun save_emitsSavedProviderId_afterUpsertCommits() = runTest(dispatcher) {
+        val vm = vm()
+        val ids = mutableListOf<String>()
+        val collector = launch { vm.saveResult.collect { ids.add(it) } }
+        advanceUntilIdle()
+
+        vm.openAdd()
+        vm.update { it.copy(name = "OpenRouter", apiKey = "sk-test") }
+        vm.save(); advanceUntilIdle()
+
+        assertEquals(1, ids.size)                            // exactly one save-result emitted
+        val savedId = ids.single()
+        // The emitted id is the one that actually persisted (upsert has committed by emit time).
+        assertEquals(1, store.list().size)
+        assertEquals(savedId, store.list().single().id)
+        assertNull(vm.editState.value)                       // sheet still closes (existing behavior)
+        collector.cancel()
+    }
+
+    @Test fun save_firstProvider_becomesActive_viaSavedId() = runTest(dispatcher) {
+        // A store that already has an (unrelated) active provider, so first-provider-active default
+        // does NOT cover us: the sheet must call setActive(savedId) explicitly. Here we prove the
+        // saved id is the one to activate, and that setActive(savedId) makes it the store's active.
+        val vm = vm()
+        var savedId: String? = null
+        val collector = launch { vm.saveResult.collect { savedId = it } }
+        advanceUntilIdle()
+
+        vm.openAdd()
+        vm.update { it.copy(name = "Claude", apiKey = "k", kind = AiProviderKind.anthropicNative) }
+        vm.save(); advanceUntilIdle()
+
+        val id = savedId!!
+        vm.setActive(id); advanceUntilIdle()
+        assertEquals(id, store.snapshot().activeId)          // the freshly-saved provider is active
+        collector.cancel()
+    }
+
+    @Test fun save_ofEdit_emitsExistingId() = runTest(dispatcher) {
+        store.upsert("existing", "Claude", AiProviderKind.anthropicNative, "", "claude-sonnet-4-6", 0.7, 2048, "k")
+        advanceUntilIdle()
+        val vm = vm()
+        var savedId: String? = null
+        val collector = launch { vm.saveResult.collect { savedId = it } }
+        advanceUntilIdle()
+
+        vm.openEdit("existing"); advanceUntilIdle()
+        vm.update { it.copy(name = "Claude Pro") }
+        vm.save(); advanceUntilIdle()
+
+        assertEquals("existing", savedId)                    // editing keeps the same id
+        assertEquals(1, store.list().size)                   // no duplicate row
+        assertEquals("Claude Pro", store.list().single().name)
+        collector.cancel()
+    }
 }
