@@ -88,6 +88,7 @@ fun ReaderAiProvidersList(
     ) {
         Column(
             Modifier.fillMaxWidth().fillMaxHeight(0.86f)
+                .shadow(elevation = 14.dp, shape = RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp))  // jsx:43 upward sheet shadow
                 .clip(RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp))
                 .background(t.sheetBg)
                 .systemBarsPadding()

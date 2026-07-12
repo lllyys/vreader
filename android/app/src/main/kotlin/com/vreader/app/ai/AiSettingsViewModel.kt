@@ -131,10 +131,12 @@ class AiSettingsViewModel(
     /**
      * Await the active-provider commit before returning (Gate-4 High-1). The in-reader AI Providers
      * sheet uses THIS on save-success so `setActive(savedId)` has DEFINITELY committed before it pops
-     * back to bilingual — the "activate then pop" ordering is then deterministic, not a race. Runs on
-     * the SAME `viewModelScope` as the fire-and-forget [setActive] so both serialize through the store.
+     * back to bilingual — the "activate then pop" ordering is then deterministic, not a race. Calls
+     * the store's suspend `setActive` DIRECTLY (not via a child `launch`) so an activation failure
+     * PROPAGATES to the caller and the pop is skipped, rather than being swallowed by a launched job
+     * (Gate-4 round-2 Medium). Runs in the caller's coroutine (the sheet's saveResult collector).
      */
     suspend fun setActiveAndAwait(id: String) {
-        viewModelScope.launch { store.setActive(id) }.join()
+        store.setActive(id)
     }
 }
