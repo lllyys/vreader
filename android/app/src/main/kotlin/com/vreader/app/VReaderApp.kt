@@ -186,6 +186,60 @@ class AppContainer(context: Context) {
         )
     }
 
+    /**
+     * feature #133 WI-11 — the per-reader-session in-book-search ViewModel for the EPUB host. EPUB search does
+     * NOT use the #128 FTS index at all (a chunk-level, location-less index cannot yield a jumpable position);
+     * instead the WI-6 [InBookSearchRepository]'s EPUB branch runs Readium's OWN `SearchService` over the LIVE
+     * [publication] via the WI-5 [EpubInBookSearchEngine] production constructor (which wraps the real
+     * publication behind the `PublicationSearchSource` seam), returning navigable Readium `Locator`s the host
+     * jumps to with `navigator.go`.
+     *
+     * EPUB bypasses the WI-7 index-state gate entirely: the [indexStateFlow] emits `null` (missing) and
+     * [hasOccurrence] reports Ready, so the gate resolves to Ready and the engine's own `isSearchable` probe
+     * is the real capability check (an un-searchable publication → the repository's [InBookSearchOutcome.Unsupported]
+     * → the WI-8 VM's `hidesSearchEntry`, so the host omits the Search icon). The TXT/MD FTS branch is NEVER
+     * invoked for an EPUB host, so its factories are error-throwing guards (a call would be a wiring bug).
+     *
+     * ONE [InBookSearchRepository] per session (so the live Readium `SearchIterator` behind
+     * `SearchCursor.Epub` is held once and disposed via `closeAllEpubCursors` on dismiss / `onCleared`).
+     * [coroutineScope] is the host's `lifecycleScope` in production (the VM cancels its child collectors on
+     * `onCleared`).
+     */
+    fun epubInBookSearchViewModel(
+        bookKey: String,
+        publication: org.readium.r2.shared.publication.Publication,
+        coroutineScope: CoroutineScope,
+    ): com.vreader.app.search.InBookSearchViewModel {
+        val repository = com.vreader.app.search.InBookSearchRepository(
+            dispatcher = Dispatchers.Default,
+            // The EPUB host never reaches the FTS branch (the repository dispatches only the EPUB branch for
+            // `epub`), so the TXT/MD deps are error-throwing guards — a call here is a wiring bug, fail fast.
+            fts = com.vreader.app.search.InBookFtsDeps(
+                matchingChunksPage = { _, _, _, _, _ -> error("FTS matchingChunksPage requested on an EPUB host") },
+                chunkAtOrAfter = { _, _, _, _ -> error("FTS chunkAtOrAfter requested on an EPUB host") },
+                resolverFor = { error("FTS resolver requested on an EPUB host") },
+            ),
+            // The LIVE wiring: build the WI-5 engine over the real Readium publication (its production
+            // constructor wraps the publication behind the `PublicationSearchSource` seam). One engine per
+            // repository/session; the repository memoizes it per bookKey.
+            epubEngineFor = { com.vreader.app.search.EpubInBookSearchEngine(publication) },
+        )
+        return com.vreader.app.search.InBookSearchViewModel(
+            bookKey = bookKey,
+            format = BookFormat.epub,
+            searcher = repository.asSearcher(),
+            indexStateGate = com.vreader.app.search.IndexStateGate(Dispatchers.Default),
+            // EPUB bypasses the FTS index-state gate: a `null` (missing) row + `hasOccurrence == true` resolve
+            // the gate to Ready, so the engine's own `isSearchable` probe is the capability check.
+            indexStateFlow = kotlinx.coroutines.flow.flowOf(null),
+            hasOccurrence = { true },
+            recentsFlow = recentSearchesStore.recents(),
+            recordQuery = { q -> recentSearchesStore.record(q) },
+            dispatcher = Dispatchers.Default,
+            coroutineScope = coroutineScope,
+        )
+    }
+
     /** Builds a [com.vreader.app.search.SearchViewModel] wired to the live library, in-text repository,
      *  recents, collections, and the settled-completeness gate. */
     fun searchViewModel(): com.vreader.app.search.SearchViewModel =

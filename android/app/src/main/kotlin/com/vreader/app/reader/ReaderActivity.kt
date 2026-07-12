@@ -16,6 +16,15 @@
 // invented error surface). Notes → the review sheet with jump-to-annotation null (EPUB review-only until
 // #135). The #129 Display settings, the selection popover, highlight decorations, position save, and the
 // publication close are all preserved.
+//
+// feature #133 WI-11: in-book search reachable from the top bar. A per-session InBookSearchViewModel is built
+// over the LIVE Readium publication (Readium's own SearchService — NOT the #128 FTS index), its state feeds
+// the top band's Search-icon presence (hidden when the publication is not searchable → hidesSearchEntry), and
+// the InBookSearchSheet renders in the sheetLayer ComposeView (open-only → touch-through preserved). A tapped
+// hit jumps via Locator.fromJSON(readiumLocatorJson) → navigator.go (Succeeded dismisses / Failed keeps open,
+// no invented error surface); a null/malformed locator is un-jumpable (Failed, not a crash). The VM is
+// disposed in onDestroy (onCleared → closeAllEpubCursors) BEFORE the publication closes, so the live Readium
+// SearchIterator never leaks.
 package com.vreader.app.reader
 
 import android.content.ClipData
@@ -67,6 +76,9 @@ import com.vreader.app.reader.nav.BookmarkTocIndex
 import com.vreader.app.reader.nav.JumpResult
 import com.vreader.app.reader.nav.ReadiumTocProvider
 import com.vreader.app.reader.settings.ReaderTheme
+import com.vreader.app.search.InBookHit
+import com.vreader.app.search.InBookSearchSheet
+import com.vreader.app.search.InBookSearchViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.drop
@@ -131,6 +143,17 @@ class ReaderActivity : AppCompatActivity() {
     // the host owns index construction), reused across every projected row.
     @Volatile private var bookmarkTocIndex: BookmarkTocIndex? = null
     private val bookmarkDate = bookmarkDateRenderer()
+
+    // feature #133 WI-11 — the in-book search VM (ONE per reader session), built once the publication opens
+    // over the LIVE Readium publication (Readium's own SearchService — NOT the FTS index). Disposed in
+    // onDestroy (`onCleared` → closeAllEpubCursors, so the live Readium SearchIterator never leaks). The sheet
+    // renders in the sheetLayer ComposeView; the Search-icon presence follows the VM's `hidesSearchEntry`.
+    private var inBookSearchVm: InBookSearchViewModel? = null
+    private val inBookSearchState = mutableStateOf<com.vreader.app.search.InBookSearchScreenState?>(null)
+    private val showSearchSheet = mutableStateOf(false)
+    // How many times the per-session search VM has been constructed — a test seam proving exactly ONE is
+    // built per reader open (never a fresh one per query/recomposition — the WI-8 one-per-session contract).
+    @Volatile private var inBookSearchVmBuildCount: Int = 0
 
     // feature #123 — in-reader highlighting
     private var highlightController: ReaderHighlightController? = null
@@ -217,7 +240,26 @@ class ReaderActivity : AppCompatActivity() {
             observeAnnotationsSnapshot(loaded)
             observeBookDetails(loaded)
             controller.observeActivations { id, rect -> onHighlightTapped(id, rect) }
+            // feature #133 WI-11 — build the per-session in-book search VM over the LIVE publication (Readium
+            // SearchService) + observe its state for the top-bar Search-icon presence + the sheet.
+            buildInBookSearch(key, pub)
         }
+    }
+
+    /** feature #133 WI-11 — construct the ONE per-session in-book search VM (over the live Readium
+     *  [publication], Readium's own SearchService — NOT the FTS index) and collect its state into
+     *  [inBookSearchState] so the top band knows whether to show the Search icon and the sheet layer can
+     *  render the sheet. The VM's collectors run on [lifecycleScope]; it is disposed in [onDestroy]
+     *  (`onCleared` → closeAllEpubCursors → no leaked Readium SearchIterator). */
+    private fun buildInBookSearch(bookKey: String, publication: Publication) {
+        val vm = container.epubInBookSearchViewModel(
+            bookKey = bookKey,
+            publication = publication,
+            coroutineScope = lifecycleScope,
+        )
+        inBookSearchVm = vm
+        inBookSearchVmBuildCount += 1
+        lifecycleScope.launch { vm.state.collect { inBookSearchState.value = it } }
     }
 
     /** feature #132 WI-7-EPUB — populate the persistent chrome model after open: title + flattened TOC
@@ -412,6 +454,11 @@ class ReaderActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        // feature #133 WI-11 — dispose the in-book search VM (its onCleared disposes the live Readium
+        // SearchIterator via closeAllEpubCursors) BEFORE releasing the publication it searches over — the
+        // iterator is a view over the publication, so it must go first (no leak, no use-after-close).
+        inBookSearchVm?.onCleared()
+        inBookSearchVm = null
         // Host owns the Publication (Readium's navigator does not close it). The
         // fragment is torn down by super.onDestroy() above, then we release it.
         publication?.close()
@@ -534,6 +581,29 @@ class ReaderActivity : AppCompatActivity() {
         return if (landed) JumpResult.Succeeded else JumpResult.Failed
     }
 
+    /** feature #133 WI-11 — jump to a tapped in-book search hit. An EPUB hit carries a NAVIGABLE Readium
+     *  locator serialized to JSON ([InBookHit.readiumLocatorJson]); reconstruct it via
+     *  `Locator.fromJSON(JSONObject(json))` and `navigator.go`. A null/blank/malformed JSON (an un-jumpable
+     *  hit — e.g. a Readium locator that failed to serialize) OR a false `go` → [JumpResult.Failed] (the sheet
+     *  stays open, NO invented error surface — rule 51 §nav-error-presentation), NEVER a crash. On a landed
+     *  jump the query is committed to the GLOBAL recents (the WI-8 commitSearch contract). This mirrors
+     *  [jumpToBookmark]'s Succeeded/Failed contract. */
+    private fun jumpToSearchHit(hit: InBookHit): JumpResult {
+        val nav = navigator ?: return JumpResult.Failed
+        val json = hit.readiumLocatorJson?.takeIf { it.isNotBlank() } ?: return JumpResult.Failed
+        val readium = runCatching { Locator.fromJSON(JSONObject(json)) }.getOrNull() ?: return JumpResult.Failed
+        val landed = runCatching { nav.go(readium) }.getOrDefault(false)
+        if (landed) inBookSearchVm?.commitSearch()
+        return if (landed) JumpResult.Succeeded else JumpResult.Failed
+    }
+
+    /** feature #133 WI-11 — dismiss the in-book search sheet: run the VM's dismiss (invalidates the active
+     *  session + disposes the live Readium SearchIterator via closeAllEpubCursors — no leak) then hide it. */
+    private fun dismissInBookSearch() {
+        inBookSearchVm?.onDismiss()
+        showSearchSheet.value = false
+    }
+
     private suspend fun persist(locator: Locator, current: Book) {
         val envelope = runCatching {
             bridge.toEnvelope(
@@ -581,12 +651,22 @@ class ReaderActivity : AppCompatActivity() {
                     bookmarks = bookmarkRows.value,
                     onJumpBookmark = ::jumpToBookmark,
                 )
+                // feature #133 WI-11 — the in-book search sheet renders in the SAME sheet-layer ComposeView
+                // (open-only, so it does not cover the fragment while closed → touch-through preserved). It is
+                // a ModalBottomSheet (its own window), driven by the per-session VM's live Readium search;
+                // tapping a hit → jumpToSearchHit (Locator.fromJSON → nav.go), dismiss disposes the iterator.
+                InBookSearchLayer()
             }
         }
         val topBand = ComposeView(this).apply {
             setContent {
-                // feature #134 WI-5 — the top-bar More button (shown once chromeBookDetails is populated)
-                // toggles the More popup; Details writes ReaderSheet.Details, Share launches the book share.
+                // feature #133 WI-11 — the Search icon is shown UNLESS the VM reports the entry is hidden (a
+                // non-searchable publication → Unsupported → hidesSearchEntry). A null onSearch omits the icon
+                // (no dead control). feature #134 WI-5 — the top-bar More button (shown once chromeBookDetails
+                // is populated) toggles the More popup; Details writes ReaderSheet.Details, Share launches share.
+                val searchState = inBookSearchState.value
+                val onSearch: (() -> Unit)? =
+                    if (searchState != null && !searchState.hidesSearchEntry) ({ showSearchSheet.value = true }) else null
                 EpubTopBand(
                     model = chromeModel,
                     theme = chromeTheme.value,
@@ -594,6 +674,7 @@ class ReaderActivity : AppCompatActivity() {
                     chromeState = chromeState,
                     bookDetails = chromeBookDetails.value,
                     onShareBook = ::shareBookFile,
+                    onSearch = onSearch,
                     // feature #135 WI-7 — the top-bar bookmark toggle (filled/outline by presence).
                     isCurrentBookmarked = isCurrentBookmarked.value,
                     onToggleBookmark = ::toggleCurrentBookmark,
@@ -685,6 +766,33 @@ class ReaderActivity : AppCompatActivity() {
                 )
             }
         }
+    }
+
+    /** feature #133 WI-11 — the in-book search sheet overlay (a ModalBottomSheet in its own window). Renders
+     *  ONLY while [showSearchSheet] is set (open-only, so the closed state leaves the fragment fully
+     *  touch-through). Driven by the per-session VM's live Readium search state; a tapped hit resolves through
+     *  [jumpToSearchHit] (Locator.fromJSON → nav.go; Succeeded dismisses, Failed keeps it open — no error
+     *  surface). Dismiss disposes the live Readium SearchIterator (closeAllEpubCursors) via the VM's onDismiss. */
+    @androidx.compose.runtime.Composable
+    private fun InBookSearchLayer() {
+        val show by showSearchSheet
+        if (!show) return
+        val vm = inBookSearchVm ?: return
+        val screen by vm.state.collectAsStateWithLifecycle()
+        InBookSearchSheet(
+            theme = chromeTheme.value,
+            bookTitle = chromeModel.value.title,
+            state = screen,
+            query = screen.query,
+            onQueryChange = vm::onQueryChange,
+            onPickRecent = vm::onPickRecent,
+            // The tapped hit → the live Readium-locator jump. The WI-9 sheet's onJump is NON-suspend
+            // (JumpResult returns synchronously), and nav.go itself is synchronous here, so the result is
+            // authoritative (Succeeded dismisses via the sheet's dismiss-on-success; Failed keeps it open).
+            onJump = ::jumpToSearchHit,
+            onLoadMore = vm::loadMore,
+            onDismiss = ::dismissInBookSearch,
+        )
     }
 
     /** The floating selection popover, positioned near the selection's anchor with a viewport clamp
@@ -790,6 +898,34 @@ class ReaderActivity : AppCompatActivity() {
      *  NOT assert the WebView painted that pixel (a CSS/pixel assertion would; that's WI-8 acceptance). */
     @androidx.annotation.VisibleForTesting
     fun appliedBackgroundArgb(): Int? = navigator?.settings?.value?.backgroundColor?.int
+
+    // feature #133 WI-11 test hooks — assert the in-book search wiring against the live host + live Readium
+    // publication without driving Compose gestures (the live Search-icon / sheet taps ride WI-12 acceptance
+    // on the real CJK EPUB).
+    /** The current in-book search screen state (query + recents + the content region), or null until the VM
+     *  is built (which happens once the publication opens). Proves the per-session VM exists for THIS book. */
+    @androidx.annotation.VisibleForTesting
+    fun inBookSearchStateForTest(): com.vreader.app.search.InBookSearchScreenState? = inBookSearchState.value
+
+    /** Drive a live Readium search for [query] through the SAME seam the sheet's field uses. */
+    @androidx.annotation.VisibleForTesting
+    fun runSearchForTest(query: String) { inBookSearchVm?.onQueryChange(query) }
+
+    /** Jump to a search hit through the SAME seam the sheet uses; returns the JumpResult so a connected test
+     *  can assert a Readium-locator hit lands (Succeeded) and a null/malformed-locator hit fails gracefully
+     *  (Failed) without crashing. */
+    @androidx.annotation.VisibleForTesting
+    fun jumpToSearchHitForTest(hit: InBookHit): JumpResult = jumpToSearchHit(hit)
+
+    /** Dismiss the search sheet through the SAME seam (VM.onDismiss → closeAllEpubCursors), so a test can
+     *  assert the VM survives + returns to Idle (the live Readium SearchIterator was disposed, no leak). */
+    @androidx.annotation.VisibleForTesting
+    fun dismissSearchForTest() = dismissInBookSearch()
+
+    /** The number of times the per-session search VM has been constructed — a test seam proving exactly ONE
+     *  is built per reader open (never a fresh one per query/recomposition — the WI-8 one-per-session contract). */
+    @androidx.annotation.VisibleForTesting
+    fun inBookSearchVmBuildCountForTest(): Int = inBookSearchVmBuildCount
 
     companion object {
         const val EXTRA_FINGERPRINT_KEY = "fingerprintKey"
