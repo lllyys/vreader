@@ -37,8 +37,11 @@ import java.io.File
  * runs against the REAL Readium publication (the whole point — a spy repository would replace the live
  * SearchService with a fake, defeating the slice); the `closeAllEpubCursors` invocation on dismiss/onCleared
  * is unit-verified at the WI-8 VM layer (`InBookSearchViewModelTest`) + the WI-6 repository layer. Here the
- * disposal is exercised end-to-end (dismiss → the VM survives + returns to Idle so a re-open still works, no
- * leak/crash) and the onDestroy path runs through `ActivityScenario.use { }`'s close.
+ * disposal path is exercised end-to-end (dismiss → the VM survives — same one-per-session build, its state Flow
+ * still queryable — so a re-open still works, no crash). `onDismiss` deliberately does NOT reset the content to
+ * Idle (it keeps the query so a re-open re-shows results — the VM unit test `dismiss_closesEpubCursors` asserts
+ * only the cursor dispose), so this layer asserts VM survival, not a false Idle. The onDestroy path runs through
+ * `ActivityScenario.use { }`'s close.
  */
 @RunWith(AndroidJUnit4::class)
 class EpubFindInBookTest {
@@ -141,17 +144,30 @@ class EpubFindInBookTest {
         ActivityScenario.launch<ReaderActivity>(ReaderActivity.intent(app.appContext, book.fingerprintKey)).use { scenario ->
             awaitSearchVm(scenario)
             scenario.onActivity { it.runSearchForTest("chapter") }
-            awaitFirstHit(scenario)
-            // Dismiss disposes the live Readium SearchIterator (closeAllEpubCursors); the VM must survive and
-            // return to Idle so a re-open of the sheet still works (no leak, no crash).
+            val firstHit = awaitFirstHit(scenario)
+            assertNotNull("the live Readium search produced a hit before dismiss", firstHit)
+            val vmBuildBefore = intArrayOf(-1)
+            scenario.onActivity { vmBuildBefore[0] = it.inBookSearchVmBuildCountForTest() }
+
+            // Dismiss runs the VM's `onDismiss` end-to-end through the SAME production seam the sheet's Cancel
+            // uses: it disposes the live Readium SearchIterator (`closeAllEpubCursors`) and invalidates the search
+            // session (bumps the generation) — WITHOUT cancelling the VM's scope (that only happens on
+            // `onCleared`). The VM must SURVIVE: the one-per-session build count is unchanged (not rebuilt) and its
+            // state Flow is still exposed/queryable, so the sheet can be re-opened (no crash). (`onDismiss`
+            // deliberately does NOT reset the content to Idle — it keeps the query so a re-open re-shows results;
+            // this is confirmed by the VM unit test `dismiss_closesEpubCursors`, which asserts only the cursor
+            // dispose. So the connected proof of "vmSurvives" is build-count stability + a live queryable state
+            // after the disposal path ran without crashing, NOT a false Idle assertion; the cursor dispose itself
+            // is unit-verified, not re-asserted here.)
             scenario.onActivity { it.dismissSearchForTest() }
-            var state: InBookSearchContent? = null
-            for (i in 0 until 25) {
-                scenario.onActivity { state = it.inBookSearchStateForTest()?.content }
-                if (state is InBookSearchContent.Idle) break
-                Thread.sleep(200)
+            var buildAfter = -1
+            var stateAlive = false
+            scenario.onActivity {
+                buildAfter = it.inBookSearchVmBuildCountForTest()
+                stateAlive = it.inBookSearchStateForTest() != null
             }
-            assertEquals("dismiss returns the VM to Idle (cursors disposed, VM alive)", InBookSearchContent.Idle, state)
+            assertEquals("the VM is NOT rebuilt on dismiss — the one-per-session build count is unchanged", vmBuildBefore[0], buildAfter)
+            assertTrue("dismiss did not crash — the VM survives and its state Flow is still exposed/queryable (cursor dispose itself is unit-verified by dismiss_closesEpubCursors)", stateAlive)
         }
     }
 
