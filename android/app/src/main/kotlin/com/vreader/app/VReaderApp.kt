@@ -16,6 +16,17 @@ import com.vreader.app.search.asSearcher
 import com.vreader.app.search.SearchIndexCoordinator
 import com.vreader.app.search.TxtMdTextExtractor
 import com.vreader.app.annotations.AnnotationsRepository
+import com.vreader.app.ai.AiProviderStore
+import com.vreader.app.ai.AiSettingsViewModel
+import com.vreader.app.backup.net.KeystoreSecretCipher
+import com.vreader.app.backup.net.SecretCipher
+import com.vreader.app.bilingual.BilingualAiReadiness
+import com.vreader.app.bilingual.BilingualServices
+import com.vreader.app.bilingual.BilingualViewModel
+import com.vreader.app.bilingual.ChapterTextProvider
+import com.vreader.app.bilingual.ChapterTranslationPrefetcher
+import com.vreader.app.bilingual.ChapterTranslationStore
+import com.vreader.app.bilingual.PerBookBilingualStore
 import com.vreader.app.stats.ReadingStatsRepository
 import com.vreader.app.stats.ReadingTimeTracker
 import com.vreader.app.stats.clock.SystemDateClock
@@ -27,9 +38,30 @@ import kotlinx.coroutines.flow.map
 import vreader.contracts.BookFormat
 import java.io.File
 
-/** Process-wide singletons, lazily built. */
-class AppContainer(context: Context) {
+/**
+ * Process-wide singletons, lazily built. [secretCipher] protects the AI provider API keys
+ * at rest — the production default is a #116 [KeystoreSecretCipher] under a DISTINCT AI
+ * alias (`vreader.ai.password`, separate from WebDAV/OPDS); it is injectable so the WI-4b
+ * Robolectric wiring test can pass a fake (AndroidKeyStore is unavailable under Robolectric).
+ * [prefsStoreFactory] builds a device-local Preferences DataStore from a backing file NAME;
+ * the production default writes under noBackupFilesDir (the readerSettingsStore convention).
+ * It is injectable so a test can record which file each store is bound to (a name clash would
+ * make two subsystems overwrite each other's prefs).
+ */
+class AppContainer(
+    context: Context,
+    private val secretCipher: SecretCipher = KeystoreSecretCipher(AI_KEY_ALIAS),
+    prefsStoreFactory: ((String) -> androidx.datastore.core.DataStore<androidx.datastore.preferences.core.Preferences>)? = null,
+) {
     private val appContext = context.applicationContext
+
+    /** Resolves the Preferences-DataStore factory: the injected one, or the noBackupFilesDir default. */
+    private val prefsStore: (String) -> androidx.datastore.core.DataStore<androidx.datastore.preferences.core.Preferences> =
+        prefsStoreFactory ?: { fileName ->
+            androidx.datastore.preferences.core.PreferenceDataStoreFactory.create {
+                File(appContext.noBackupFilesDir, fileName)
+            }
+        }
 
     val database: VReaderDatabase by lazy { VReaderDatabase.build(appContext) }
     val repository: LibraryRepository by lazy {
@@ -65,11 +97,7 @@ class AppContainer(context: Context) {
     // AiProviderStore precedent), global (not per-book), process-singleton so a settings change
     // propagates to whatever reader is open. Stored under noBackupFilesDir — display prefs are
     // per-device (NOT in the backup contract), so they must be excluded from Android Auto Backup.
-    private val readerSettingsDataStore: androidx.datastore.core.DataStore<androidx.datastore.preferences.core.Preferences> by lazy {
-        androidx.datastore.preferences.core.PreferenceDataStoreFactory.create {
-            File(appContext.noBackupFilesDir, "reader_settings.preferences_pb")
-        }
-    }
+    internal val readerSettingsDataStore = prefsStore(READER_SETTINGS_PREFS)
     val readerSettingsStore: com.vreader.app.reader.settings.ReaderSettingsStore by lazy {
         com.vreader.app.reader.settings.ReaderSettingsStore(readerSettingsDataStore)
     }
@@ -113,14 +141,60 @@ class AppContainer(context: Context) {
     val searchRepository: com.vreader.app.search.SearchRepository by lazy {
         com.vreader.app.search.SearchRepository(database.searchDao())
     }
-    private val recentSearchesDataStore: androidx.datastore.core.DataStore<androidx.datastore.preferences.core.Preferences> by lazy {
-        androidx.datastore.preferences.core.PreferenceDataStoreFactory.create {
-            File(appContext.noBackupFilesDir, "recent_searches.preferences_pb")
-        }
-    }
+    internal val recentSearchesDataStore = prefsStore(RECENT_SEARCHES_PREFS)
     val recentSearchesStore: com.vreader.app.search.RecentSearchesStore by lazy {
         com.vreader.app.search.RecentSearchesStore(recentSearchesDataStore)
     }
+
+    // ── feature #131 WI-4b — bilingual + AI-config DI graph ──────────────────────────────
+    // AppContainer NOW constructs AiProviderStore (previously not provided — only a comment
+    // named it above, "OpdsSourceStore / AiProviderStore precedent"). Keys are kept ONLY as
+    // SecretCipher tokens; both DataStores follow the readerSettingsStore convention (device-local
+    // under noBackupFilesDir — per-device config, NOT in the backup contract). The bilingual
+    // services (translation cache store, readiness gate, prefetcher + VM factories) live in a
+    // BilingualServices holder to keep this file focused.
+
+    internal val aiProvidersDataStore = prefsStore(AI_PROVIDERS_PREFS)
+    internal val bilingualPerBookDataStore = prefsStore(BILINGUAL_PER_BOOK_PREFS)
+
+    /** Process-singleton AI-provider store (API keys as [secretCipher] tokens, never plaintext). */
+    val aiProviderStore: AiProviderStore by lazy { AiProviderStore(aiProvidersDataStore, secretCipher) }
+
+    /** Process-singleton per-book bilingual-config store (enabled / targetLanguage / granularity). */
+    val perBookBilingualStore: PerBookBilingualStore by lazy { PerBookBilingualStore(bilingualPerBookDataStore) }
+
+    /** The bilingual + AI-config DI holder (stores, readiness gate, and per-session factories). */
+    private val bilingualServices: BilingualServices by lazy {
+        BilingualServices(
+            aiProviderStore = aiProviderStore,
+            chapterTranslationDao = database.chapterTranslationDao(),
+            perBookBilingualStore = perBookBilingualStore,
+        )
+    }
+
+    /** Process-singleton coroutine cache boundary over the translation DAO. */
+    val chapterTranslationStore: ChapterTranslationStore get() = bilingualServices.chapterTranslationStore
+
+    /** Process-singleton provider+key readiness gate (drives the bilingual setup-sheet state). */
+    val bilingualAiReadiness: BilingualAiReadiness get() = bilingualServices.bilingualAiReadiness
+
+    /**
+     * Builds a PER-SESSION [ChapterTranslationPrefetcher] for [bookKey] over [textProvider]
+     * (the prefetcher's injected client factory defaults to `AiProviderFactory::create`).
+     * A fresh instance per open book — never a singleton.
+     */
+    fun chapterTranslationPrefetcher(bookKey: String, textProvider: ChapterTextProvider): ChapterTranslationPrefetcher =
+        bilingualServices.prefetcher(bookKey, textProvider)
+
+    /**
+     * Builds a PER-SESSION [BilingualViewModel] for [bookKey] over [textProvider], wired to the
+     * real prefetcher, the live provider snapshot, and the readiness gate.
+     */
+    fun bilingualViewModel(bookKey: String, textProvider: ChapterTextProvider): BilingualViewModel =
+        bilingualServices.bilingualViewModel(bookKey, textProvider)
+
+    /** Builds a fresh [AiSettingsViewModel] over the shared [aiProviderStore] (the WI-AIP Variant-A sheet). */
+    fun aiSettingsViewModel(): AiSettingsViewModel = AiSettingsViewModel(aiProviderStore)
 
     /**
      * feature #133 WI-10 — the per-reader-session in-book-search ViewModel for a TXT/MD host. Wires the
@@ -265,6 +339,19 @@ class AppContainer(context: Context) {
     private val lastPages = java.util.concurrent.ConcurrentHashMap<String, Int>()
     fun cachePage(fingerprintKey: String, page: Int) { lastPages[fingerprintKey] = page }
     fun cachedPage(fingerprintKey: String): Int? = lastPages[fingerprintKey]
+
+    companion object {
+        /** The AndroidKeyStore alias for AI provider API keys — DISTINCT from WebDAV/OPDS
+         *  (`vreader.webdav.password` / `vreader.opds.password`) so subsystems never share a key. */
+        const val AI_KEY_ALIAS = "vreader.ai.password"
+
+        // DISTINCT device-local Preferences backing files (a clash would make two subsystems
+        // overwrite each other's prefs). All live under noBackupFilesDir (per-device, not backed up).
+        const val READER_SETTINGS_PREFS = "reader_settings.preferences_pb"
+        const val RECENT_SEARCHES_PREFS = "recent_searches.preferences_pb"
+        const val AI_PROVIDERS_PREFS = "ai_providers.preferences_pb"
+        const val BILINGUAL_PER_BOOK_PREFS = "bilingual_per_book.preferences_pb"
+    }
 }
 
 class VReaderApp : Application() {
