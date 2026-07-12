@@ -70,11 +70,12 @@ import kotlinx.coroutines.flow.StateFlow
  * control) and toggles the WI-3 [MorePopup] carrying ONLY the Details + Share rows: Details writes
  * [ReaderSheet.Details] onto [chromeState] (so [EpubReaderSheets] shows the Book Details sheet), Share
  * fires [onShareBook]. The popup renders in its own window (a full-screen backdrop) so the WRAP_CONTENT
- * band height doesn't clip it. The Search top-bar slot stays null (#133 — no dead control). feature #135
- * WI-5 — the top-bar bookmark toggle: when [onToggleBookmark] is non-null the band fills [ReaderTopChrome]'s
- * bookmark slot with the WI-5 [BookmarkToggleButton] (filled/outline by [isCurrentBookmarked]); a null
- * callback leaves the slot empty (no dead control). Host wiring (feeding the callback + presence) lands in
- * WI-7 — until then the EPUB host passes null and the slot stays absent.
+ * band height doesn't clip it. feature #133 WI-11 — the top-bar Search slot is now WIRED: [onSearch] fills
+ * [ReaderTopChrome]'s Search slot (null → the icon is omitted — the #129 no-dead-control rule; a host whose
+ * publication is not searchable / whose index-state gate reports Unsupported passes null so the icon
+ * disappears). feature #135 WI-5 — the top-bar bookmark toggle: when [onToggleBookmark] is non-null the
+ * band fills [ReaderTopChrome]'s bookmark slot with the WI-5 [BookmarkToggleButton] (filled/outline by
+ * [isCurrentBookmarked]); a null callback leaves the slot empty (no dead control).
  */
 @Composable
 fun EpubTopBand(
@@ -84,6 +85,10 @@ fun EpubTopBand(
     chromeState: MutableState<ReaderChromeState>,
     bookDetails: BookDetailsUiModel?,
     onShareBook: () -> Unit,
+    // feature #133 WI-11 — the in-book Search entry. A null [onSearch] omits the top-bar Search icon
+    // (a non-searchable publication / Unsupported gate — no dead control). Nullable/default so #132/#134/#135
+    // callers stay valid.
+    onSearch: (() -> Unit)? = null,
     isCurrentBookmarked: Boolean = false,
     onToggleBookmark: (() -> Unit)? = null,
 ) {
@@ -98,7 +103,7 @@ fun EpubTopBand(
         } else {
             null
         }
-    ReaderTopChrome(theme = theme, title = chrome.title, onBack = onBack, onMore = onMore, bookmarkSlot = bookmarkSlot)
+    ReaderTopChrome(theme = theme, title = chrome.title, onBack = onBack, onSearch = onSearch, onMore = onMore, bookmarkSlot = bookmarkSlot)
     if (showMore && bookDetails != null) {
         MorePopup(
             theme = theme,
