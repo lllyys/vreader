@@ -18,7 +18,14 @@
 // AnnotationsReviewSheet over this book's annotationsForBook snapshot; onJumpToAnnotation is non-null
 // (TXT/MD jump via the plain Locator's charRangeStartUTF16/charOffsetUTF16 → the existing chunk scroll
 // seam). The #129 Display sheet + the #121 TTS bar are preserved unchanged inside the scaffold's bottom
-// slot. Search/More/bookmark top-bar slots are null-omitted (#133/#134/#135), no dead controls.
+// slot. The More/bookmark top-bar slots are wired by #134/#135.
+//
+// feature #133 WI-10: the top-bar Search slot is now WIRED for TXT/MD — the host owns a per-session
+// InBookSearchViewModel (built from the already-decoded reader text; ONE per reader open, disposed via
+// onCleared on reader teardown) and mounts the InBookSearchSheet when the Search icon is tapped. A tapped
+// hit's canonical charOffsetUTF16 resolves to a scroll via the EXISTING chunk-scroll seam
+// (chunkForOffset), returning Succeeded (sheet dismisses) or Failed (out-of-range → sheet stays open). The
+// icon is hidden only when the WI-7 index-state gate reports Unsupported (no dead control).
 package com.vreader.app.reader
 
 import android.os.Bundle
@@ -122,6 +129,7 @@ import com.vreader.app.reader.nav.BookmarkRowItem
 import com.vreader.app.reader.nav.JumpResult
 import com.vreader.app.reader.settings.ReaderSettings
 import com.vreader.app.reader.settings.ReaderSettingsSheet
+import com.vreader.app.search.InBookSearchSheet
 import com.vreader.app.reader.settings.ReaderTheme
 import com.vreader.app.reader.settings.bodyTextStyle
 import com.vreader.app.tts.AndroidTtsEngine
@@ -353,6 +361,28 @@ class TxtReaderActivity : ComponentActivity() {
                             value = runCatching { container.annotationsRepository.isBookmarked(bookKey, liveCanonical) }.getOrDefault(false)
                         }
 
+                        // feature #133 WI-10 — the in-book search VM (ONE per reader session): built from the
+                        // ALREADY-decoded reader text so a search never re-reads the file, scoped to a
+                        // composition-lifetime scope so its collectors stop when the reader leaves. onDispose
+                        // runs the VM's documented lifecycle (closeAllEpubCursors via onCleared) — TXT has no
+                        // EPUB cursors, but the contract holds uniformly. Hidden only when the index-state gate
+                        // reports Unsupported (a TXT/MD book skipped as unsupported); otherwise the Search icon
+                        // is present.
+                        val searchScope = rememberCoroutineScope()
+                        val inBookSearchVm = remember(bookKey, s.book.originalFormat) {
+                            container.inBookSearchViewModel(
+                                bookKey = bookKey,
+                                format = s.book.originalFormat,
+                                decodedText = s.document.text,
+                                contentSHA256 = s.book.contentSHA256,
+                                fileByteCount = s.book.fileByteCount,
+                                coroutineScope = searchScope,
+                            )
+                        }
+                        DisposableEffect(inBookSearchVm) { onDispose { inBookSearchVm.onCleared() } }
+                        val inBookSearchState by inBookSearchVm.state.collectAsStateWithLifecycle()
+                        var showSearch by remember(bookKey) { mutableStateOf(false) }
+
                         TxtReaderChrome(
                             theme = displaySettings.theme,
                             title = s.title,
@@ -392,6 +422,44 @@ class TxtReaderActivity : ComponentActivity() {
                                 }
                             },
                             onShareAnnotations = { shareAnnotations(annotationsSnapshot) },
+                            // feature #133 WI-10 — the Search entry + sheet. The icon is hidden only when the
+                            // index-state gate says Unsupported (a skipped-unsupported TXT/MD book — no dead
+                            // control); otherwise tapping it opens the sheet for THIS book.
+                            onOpenSearch = if (inBookSearchState.hidesSearchEntry) null else { { showSearch = true } },
+                            searchSheet = if (!showSearch) null else {
+                                {
+                                    InBookSearchSheet(
+                                        theme = displaySettings.theme,
+                                        bookTitle = s.title,
+                                        state = inBookSearchState,
+                                        query = inBookSearchState.query,
+                                        onQueryChange = inBookSearchVm::onQueryChange,
+                                        onPickRecent = inBookSearchVm::onPickRecent,
+                                        // Resolve the tapped hit's canonical charOffsetUTF16 → scroll via the
+                                        // EXISTING chunk-scroll seam (the same path resume / annotation / bookmark
+                                        // jumps use). The WI-9 sheet's onJump is NON-suspend (JumpResult returns
+                                        // synchronously), so — like the sibling annotation/bookmark jumps — the
+                                        // range is validated UP FRONT (out-of-range/null → Failed, sheet stays
+                                        // open, rule 51) and a valid target returns Succeeded optimistically while
+                                        // the actual scroll runs on ttsScope; the launch is runCatching-guarded so
+                                        // a scroll cancelled during teardown can't crash. The recent is committed
+                                        // only on a valid result-open (the VM's commitSearch contract).
+                                        onJump = { hit ->
+                                            val off = hit.canonicalLocator?.charOffsetUTF16
+                                            val target = txtBookmarkScrollTarget(off, s.document.text.length)
+                                            if (target == null) {
+                                                JumpResult.Failed
+                                            } else {
+                                                inBookSearchVm.commitSearch()
+                                                ttsScope.launch { runCatching { listState.scrollToItem(s.document.chunkForOffset(target)) } }
+                                                JumpResult.Succeeded
+                                            }
+                                        },
+                                        onLoadMore = inBookSearchVm::loadMore,
+                                        onDismiss = { inBookSearchVm.onDismiss(); showSearch = false },
+                                    )
+                                }
+                            },
                             bottomBar = { (openContents, openNotes) ->
                                 if (active) TtsControlBar(
                                     tts,
@@ -751,6 +819,13 @@ class TxtReaderActivity : ComponentActivity() {
  * slot + read-aloud entry) wired to those callbacks. [onJumpToAnnotation] is NON-null (TXT/MD jump via the
  * Locator offset). Wrapped in a `systemBarsPadding()` Column so the chrome clears the status/nav bars (the
  * former TxtReaderScaffold's behavior). Extracted (internal) so the WI-6 host wiring is directly testable.
+ *
+ * feature #133 WI-10 — the in-book Search entry + sheet: [onOpenSearch] fills [ReaderTopChrome]'s Search
+ * slot (null → the slot is omitted — the #129/#132 no-dead-control rule; a host whose index-state gate says
+ * `Unsupported` passes null so the icon disappears). [searchSheet] is the host-supplied overlay that renders
+ * the in-book search sheet when the host's search-open state is set; it is layered OVER the scaffold (the
+ * sheet is a `ModalBottomSheet`, its own window), null when the sheet is closed. The host owns the
+ * search-open state + the VM (one per reader session) so the scaffold stays a pure signal.
  */
 @Composable
 internal fun TxtReaderChrome(
@@ -763,6 +838,10 @@ internal fun TxtReaderChrome(
     onShareAnnotations: () -> Unit,
     bottomBar: @Composable (Pair<(() -> Unit)?, (() -> Unit)?>) -> Unit,
     body: @Composable () -> Unit,
+    // feature #133 WI-10 — the in-book Search entry + sheet overlay (nullable/default so #132/#134/#135
+    // callers stay valid). A null [onOpenSearch] omits the top-bar Search icon (Unsupported / no-dead-control).
+    onOpenSearch: (() -> Unit)? = null,
+    searchSheet: (@Composable () -> Unit)? = null,
     // feature #134 WI-5 — the More menu's Book-details model + Share/copy actions (null model → no More).
     bookDetails: com.vreader.app.reader.details.BookDetailsUiModel? = null,
     onShareBook: () -> Unit = {},
@@ -787,8 +866,10 @@ internal fun TxtReaderChrome(
             onJumpToc = { false },              // unreachable: Contents is hidden with an empty TOC
             onJumpToAnnotation = onJumpToAnnotation,
             onShareAnnotations = onShareAnnotations,
-            // Search top-bar slot stays null (#133 — no dead control). feature #134 WI-5:
-            // the More button + Book Details / Share are wired through the scaffold's More menu below.
+            // feature #133 WI-10 — the top-bar Search slot is now WIRED (the scaffold forwards it to
+            // ReaderTopChrome(onSearch=…)). A null [onOpenSearch] omits the icon (Unsupported / no-dead-
+            // control). feature #134 WI-5: the More button + Book Details / Share ride the scaffold's More menu.
+            onOpenSearch = onOpenSearch,
             bottomChrome = { onOpenContents, onOpenNotes -> bottomBar(onOpenContents to onOpenNotes) },
             body = body,
             bookDetails = bookDetails,
@@ -802,6 +883,9 @@ internal fun TxtReaderChrome(
             onJumpBookmark = onJumpBookmark,
         )
     }
+    // feature #133 WI-10 — the in-book search sheet overlay (a ModalBottomSheet; the host renders it when
+    // its search-open state is set). Layered outside the chrome Column so it covers the full reader.
+    searchSheet?.invoke()
 }
 
 // ---- feature #135 WI-7 — TXT/MD pure host wiring helpers ----
