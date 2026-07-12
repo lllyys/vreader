@@ -1,8 +1,9 @@
 // Purpose: feature #131 WI-1 — RED-first JVM tests for ChapterSegmenter, the
 // port of iOS ChapterSegmenter.swift + BilingualParagraphRanges.swift. Pure
 // paragraph / sentence segmentation with CJK awareness and half-open UTF-16
-// spans. Span peers satisfy: text.substring(span.start, span.endExclusive) ==
-// the trimmed segment (count-parity with the string peers).
+// spans. Sentence span peers satisfy text.substring(span) == the trimmed
+// sentence exactly; PARAGRAPH span peers are source-coordinate (raw), equal to
+// the string peer only after CRLF/CR->LF normalization. Count-parity always holds.
 package com.vreader.app.bilingual
 
 import org.junit.Assert.assertEquals
