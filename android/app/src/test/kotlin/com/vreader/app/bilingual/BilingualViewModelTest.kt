@@ -126,6 +126,43 @@ class BilingualViewModelTest {
         advanceUntilIdle()
         assertTrue("hydrated as enabled", vm.state.value.enabled)
         assertFalse("hydration does NOT raise the sheet", vm.state.value.needsSetupSheet)
+
+        // And an explicit re-enable AFTER hydration must not raise it either (Gate-4 Low —
+        // the was-off→on transition is computed from the HYDRATED state, not the default).
+        vm.setEnabled(on = true); advanceUntilIdle()
+        assertFalse("re-enabling an already-enabled book does NOT raise the sheet", vm.state.value.needsSetupSheet)
+    }
+
+    // ── a setter racing the initial hydration read still observes the hydrated state (Gate-4 Medium-1) ──
+
+    @Test fun setterRacingHydration_doesNotClobberPersistedState() = runTest(dispatcher) {
+        // Seed the store enabled/French, so hydration would flip a default-constructed state.
+        perBookStore.write(bookKey, PerBookBilingualConfig(enabled = true, targetLanguage = "French", granularity = TranslationGranularity.paragraph))
+
+        val vm = makeVM()
+        // Fire a setter IMMEDIATELY, before draining the dispatcher — it races hydration.
+        vm.setTargetLanguage("German")
+        advanceUntilIdle()
+
+        // The setter must win the FINAL state (it ran after hydration under the mutation lock),
+        // and hydration must NOT have clobbered it back to French.
+        assertTrue("enabled preserved from hydration", vm.state.value.enabled)
+        assertEquals("German", vm.state.value.targetLanguage.key)
+        assertEquals("German", perBookStore.read(bookKey).targetLanguage)
+    }
+
+    // ── rapid setters persist in call order — no older config wins the last DataStore write (Gate-4 Medium-2) ──
+
+    @Test fun rapidSetters_persistInCallOrder() = runTest(dispatcher) {
+        val vm = makeVM()
+        advanceUntilIdle()
+        vm.setEnabled(on = true)
+        vm.setTargetLanguage("French")
+        vm.setTargetLanguage("Russian")            // the LAST call must be the persisted value
+        advanceUntilIdle()
+        assertEquals("Russian", vm.state.value.targetLanguage.key)
+        assertEquals("Russian", perBookStore.read(bookKey).targetLanguage)
+        assertTrue(perBookStore.read(bookKey).enabled)
     }
 
     // ── disable clears shaped translation state + bumps generation ──

@@ -13,6 +13,17 @@
 // render state (translationsByUnit / inFlightUnits / unavailableUnits / errorUnit) and
 // bumps a `generation` counter so any stale WI-6 prefetch result is discarded.
 //
+// Ordering (Gate-4 r1/r2 Mediums): config-mutating setters (setEnabled/setTargetLanguage)
+// SYNCHRONOUSLY enqueue a command into an unlimited Channel at the call site — so the
+// enqueue order == the API-call order (unlike `viewModelScope.launch`, whose start order is
+// not contractual on a multi-worker dispatcher, and unlike a Mutex, whose FIFO only orders
+// contenders that have already reached the lock). A SINGLE consumer coroutine drains the
+// channel serially (serial by construction — one consumer), after `hydration.join()`, so
+// the mutation + its persist land in call order and hydration can never clobber a racing
+// setter. The `generation` bump happens once per drained command. (The transient,
+// non-persisted setters dismissSetupSheet/refreshAiConfigured use atomic StateFlow.update
+// and do NOT participate in the ordered config-write channel.)
+//
 // @coordinates-with: PerBookBilingualStore.kt, BilingualUiState.kt, BilingualAiReadiness.kt,
 //   ChapterTranslationPrefetcher.kt, com.vreader.app.ai.AiProviderSnapshot,
 //   dev-docs/plans/20260710-feature-131-android-bilingual-interlinear.md (WI-5/WI-6)
@@ -23,9 +34,11 @@ import androidx.lifecycle.viewModelScope
 import com.vreader.app.ai.AiProviderSnapshot
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.consumeAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -51,14 +64,28 @@ class BilingualViewModel(
     val state: StateFlow<BilingualUiState> = _state.asStateFlow()
 
     // Bumped on disable / language change / (WI-6) unit change so a stale prefetch result
-    // that lands after the change is discarded. Readable for tests + WI-6's launch guards.
+    // that lands after the change is discarded. Mutated ONLY by the single command consumer
+    // (serial), read from tests + WI-6's launch guards. @Volatile for cross-thread reads.
     @Volatile
     var generation: Int = 0
         private set
 
+    /** An ordered config-mutating command. Enqueued synchronously at the setter call site
+     *  (preserving API-call order) and drained serially by the single consumer. */
+    private sealed interface Command {
+        data class Enable(val on: Boolean) : Command
+        data class SetLanguage(val key: String) : Command
+    }
+
+    // Unlimited so a synchronous trySend at the call site never suspends or drops — the
+    // enqueue order IS the API-call order. A single consumer drains it in FIFO order.
+    private val commands = Channel<Command>(Channel.UNLIMITED)
+
     init {
-        // Hydrate from the persisted per-book config WITHOUT raising the setup sheet
-        // (hydration of an already-enabled book is not a "first enable").
+        // The single serial consumer: hydrate FIRST, then drain commands in enqueue (call)
+        // order. One consumer ⇒ each command's state-update + persist completes before the
+        // next begins ⇒ setter-call order == state order == store-write order. Hydration
+        // running first means a command that raced the initial read still sees hydrated state.
         viewModelScope.launch {
             val cfg = withContext(dispatcher) { store.read(bookKey) }
             _state.update {
@@ -68,6 +95,7 @@ class BilingualViewModel(
                     granularity = cfg.granularity,   // paragraph in v1
                 )
             }
+            commands.consumeAsFlow().collect { apply(it) }
         }
         refreshAiConfigured()
     }
@@ -78,16 +106,7 @@ class BilingualViewModel(
      * shaped render state and bumps [generation] so a stale WI-6 result is discarded.
      */
     fun setEnabled(on: Boolean) {
-        val wasEnabled = _state.value.enabled
-        _state.update { st ->
-            if (on) {
-                st.copy(enabled = true, needsSetupSheet = st.needsSetupSheet || !wasEnabled)
-            } else {
-                generation++
-                st.copy(enabled = false).cleared()
-            }
-        }
-        persistCurrent()
+        commands.trySend(Command.Enable(on))
     }
 
     /**
@@ -96,11 +115,7 @@ class BilingualViewModel(
      * cached/in-flight translation — they are re-keyed by language).
      */
     fun setTargetLanguage(languageKey: String) {
-        generation++
-        _state.update { st ->
-            st.copy(targetLanguage = BilingualLanguages.findOrDefault(languageKey)).cleared()
-        }
-        persistCurrent()
+        commands.trySend(Command.SetLanguage(languageKey))
     }
 
     /** Lower the setup-sheet flag (user dismissed or completed the sheet). */
@@ -114,6 +129,15 @@ class BilingualViewModel(
             val configured = withContext(dispatcher) { readiness.resolve(snapshotProvider()) }
             _state.update { it.copy(aiConfigured = configured) }
         }
+    }
+
+    override fun onCleared() {
+        // Stop accepting commands once the ViewModel is gone so a post-clear setter can't
+        // buffer a command that will never be consumed (Gate-4 r3 Low — lifecycle hardening).
+        // The consumer's collect is already cancelled with viewModelScope; closing the channel
+        // makes a stray post-clear trySend fail-fast instead of silently accumulating.
+        commands.close()
+        super.onCleared()
     }
 
     // ── WI-6 stubs (declared so the type is stable; the real prefetch is WI-6) ──
@@ -138,20 +162,39 @@ class BilingualViewModel(
 
     // ── internals ──
 
-    /** Persist the current config slice to the per-book store (granularity pinned paragraph). */
-    private fun persistCurrent() {
-        val s = _state.value
-        viewModelScope.launch {
-            withContext(dispatcher) {
-                store.write(
-                    bookKey,
-                    PerBookBilingualConfig(
-                        enabled = s.enabled,
-                        targetLanguage = s.targetLanguage.key,
-                        granularity = TranslationGranularity.paragraph,
-                    ),
-                )
+    /** Apply one command: update state + bump generation, then persist — in the consumer,
+     *  so exactly once and in call order. Runs serially (one consumer). */
+    private suspend fun apply(cmd: Command) {
+        when (cmd) {
+            is Command.Enable -> {
+                val wasEnabled = _state.value.enabled
+                if (cmd.on) {
+                    _state.update { st -> st.copy(enabled = true, needsSetupSheet = st.needsSetupSheet || !wasEnabled) }
+                } else {
+                    generation++
+                    _state.update { st -> st.copy(enabled = false).cleared() }
+                }
             }
+            is Command.SetLanguage -> {
+                generation++
+                _state.update { st -> st.copy(targetLanguage = BilingualLanguages.findOrDefault(cmd.key)).cleared() }
+            }
+        }
+        persistCurrent()
+    }
+
+    /** Persist the current config slice to the per-book store (granularity pinned paragraph). */
+    private suspend fun persistCurrent() {
+        val s = _state.value
+        withContext(dispatcher) {
+            store.write(
+                bookKey,
+                PerBookBilingualConfig(
+                    enabled = s.enabled,
+                    targetLanguage = s.targetLanguage.key,
+                    granularity = TranslationGranularity.paragraph,
+                ),
+            )
         }
     }
 

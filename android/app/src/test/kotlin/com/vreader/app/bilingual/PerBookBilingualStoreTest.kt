@@ -11,6 +11,7 @@ import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
+import androidx.datastore.preferences.core.edit
 import androidx.test.core.app.ApplicationProvider
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -73,6 +74,17 @@ class PerBookBilingualStoreTest {
     @Test fun granularityPinnedParagraph_evenIfSentenceRequested() = runBlocking {
         store.write("book-a", PerBookBilingualConfig(enabled = true, targetLanguage = "Chinese", granularity = TranslationGranularity.sentence))
         // The store NEVER persists `sentence` in v1 (round-4 H3): it is normalized to paragraph.
+        assertEquals(TranslationGranularity.paragraph, store.read("book-a").granularity)
+    }
+
+    // ── a raw hand-edited / older on-disk `sentence` value decodes to paragraph (Gate-4 Low) ──
+
+    @Test fun rawSentenceOnDisk_decodesToParagraph() = runBlocking {
+        // Write a legacy/hand-edited JSON blob carrying granularity="sentence" DIRECTLY into
+        // the DataStore key (bypassing the store's write normalization) to prove the READ path
+        // also forces paragraph.
+        val key = androidx.datastore.preferences.core.stringPreferencesKey("bilingual_per_book_json:book-a")
+        dataStore.edit { it[key] = """{"enabled":true,"targetLanguage":"Chinese","granularity":"sentence"}""" }
         assertEquals(TranslationGranularity.paragraph, store.read("book-a").granularity)
     }
 
