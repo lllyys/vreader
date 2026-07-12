@@ -1,17 +1,20 @@
-// Purpose: feature #131 WI-5 — the bilingual reading ViewModel STATE CORE. Owns a
+// Purpose: feature #131 WI-5/WI-6 — the bilingual reading ViewModel. Owns a
 // StateFlow<BilingualUiState>, hydrates it from the per-book store, and handles the
 // enable/disable/language setters, the first-enable setup sheet, and the aiConfigured
-// readiness derivation. It holds an injected ChapterTranslationPrefetcher + an injected
-// AiProviderSnapshot provider (the Medium-4 seams) so WI-6/WI-4b can wire the real ones;
-// WI-5 never invokes the prefetcher. The prefetch trigger, per-unit single-flight, and
-// generation-guarded cancellation are WI-6 — onPositionChanged / retryUnit /
-// onEpubBlocksEnumerated are declared as STUBS here so the type is stable.
+// readiness derivation (WI-5 state core). WI-6 adds the POSITION-DRIVEN PREFETCH:
+// onPositionChanged derives the current TXT/MD unit via the injected text provider,
+// dedupes (same-unit → no-op), and prefetches current+next through the injected
+// BilingualPrefetching seam with per-unit single-flight, a monotonic position-request
+// sequence, and a generation guard. retryUnit re-fetches through the same registry.
+// onEpubBlocksEnumerated is present-but-inert — EPUB prefetch is owned by the WI-7b
+// controller (Medium-1); the position path dispatches TXT/MD units ONLY.
 //
 // State discipline (rule 50 §12): StateFlow, viewModelScope (no GlobalScope), an injected
 // CoroutineDispatcher for store I/O + snapshot reads. Granularity is `paragraph` in v1
 // (round-4 H3); there is NO `style` field. A disable or language change CLEARS the shaped
-// render state (translationsByUnit / inFlightUnits / unavailableUnits / errorUnit) and
-// bumps a `generation` counter so any stale WI-6 prefetch result is discarded.
+// render state (translationsByUnit / inFlightUnits / unavailableUnits / errorUnit), bumps
+// a `generation` counter, and cancels every in-flight prefetch job so any stale result is
+// discarded.
 //
 // Ordering (Gate-4 r1/r2 Mediums): config-mutating setters (setEnabled/setTargetLanguage)
 // SYNCHRONOUSLY enqueue a command into an unlimited Channel at the call site — so the
@@ -24,8 +27,19 @@
 // non-persisted setters dismissSetupSheet/refreshAiConfigured use atomic StateFlow.update
 // and do NOT participate in the ordered config-write channel.)
 //
+// Prefetch guards (WI-6, M2 — owned by BilingualPrefetchController): a SUCCESSFUL result is
+// committed under the GENERATION guard only (a translation is a durable cache entry, valid to
+// commit even for a since-superseded position); the monotonic `positionSeq` gates the FAILURE
+// path — a superseded failure is discarded (no errorUnit) UNLESS the unit is still current.
+// Cancellation is handled BEFORE the generic error mapping: a native CancellationException (job
+// cancelled) is re-thrown to keep the coroutine cancellation-cooperative, and a typed
+// ChapterTranslationError.Cancelled is discarded — neither becomes an errorUnit. Per-unit
+// single-flight (`prefetchTasks: Map<TranslationUnitId, Job>`) joins a re-triggered unit onto
+// its live job so there is no double cache-write. A transient failure clears the current-unit
+// anchor so the same position re-dispatches and retryUnit re-fetches.
+//
 // @coordinates-with: PerBookBilingualStore.kt, BilingualUiState.kt, BilingualAiReadiness.kt,
-//   ChapterTranslationPrefetcher.kt, com.vreader.app.ai.AiProviderSnapshot,
+//   BilingualPrefetching.kt, ChapterTextProvider.kt, com.vreader.app.ai.AiProviderSnapshot,
 //   dev-docs/plans/20260710-feature-131-android-bilingual-interlinear.md (WI-5/WI-6)
 package com.vreader.app.bilingual
 
@@ -46,29 +60,49 @@ import kotlinx.coroutines.withContext
 /**
  * @param bookKey the book's fingerprint key (the per-book store + cache identity).
  * @param store the per-book bilingual config store.
- * @param prefetcher the translation prefetcher — HELD for WI-6, never invoked by WI-5.
+ * @param prefetcher the WI-4a translation prefetcher — the production source of the
+ *   [prefetching] seam (adapted by default). Held so the DI graph (WI-4b) stays unchanged.
  * @param snapshotProvider reads the current AI provider snapshot (injected seam — Medium-4).
  * @param readiness the provider+key readiness gate driving [BilingualUiState.aiConfigured].
  * @param dispatcher the dispatcher for store I/O + snapshot reads (Dispatchers.IO by default).
+ * @param prefetching the WI-6 prefetch seam driven by the position path; defaults to an
+ *   adapter over [prefetcher] (a fake is injected in tests — Medium-4).
+ * @param textProvider the unit resolver ([ChapterTextProvider.unitContaining] /
+ *   [ChapterTextProvider.unitAfter]) for the position-driven prefetch. Defaults to a no-op
+ *   provider so an un-wired VM's position path is inert; the real host provider is wired by
+ *   the reader-integration WI (WI-8) alongside the prefetcher.
  */
 class BilingualViewModel(
     private val bookKey: String,
     private val store: PerBookBilingualStore,
-    @Suppress("unused") private val prefetcher: ChapterTranslationPrefetcher,
+    prefetcher: ChapterTranslationPrefetcher,
     private val snapshotProvider: suspend () -> AiProviderSnapshot,
     private val readiness: BilingualAiReadiness,
     private val dispatcher: CoroutineDispatcher = Dispatchers.IO,
+    private val prefetching: BilingualPrefetching = ChapterTranslationPrefetcherAdapter(prefetcher),
+    private val textProvider: ChapterTextProvider = NoTranslationUnitsProvider,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(BilingualUiState())
     val state: StateFlow<BilingualUiState> = _state.asStateFlow()
 
-    // Bumped on disable / language change / (WI-6) unit change so a stale prefetch result
-    // that lands after the change is discarded. Mutated ONLY by the single command consumer
-    // (serial), read from tests + WI-6's launch guards. @Volatile for cross-thread reads.
+    // Bumped on disable / language change (NOT on unit change — a unit move only supersedes via
+    // positionSeq) so a stale prefetch result that lands after the change is discarded. Mutated
+    // ONLY by the single command consumer (serial), read from tests + the prefetch controller's
+    // launch guards. @Volatile for cross-thread reads.
     @Volatile
     var generation: Int = 0
         private set
+
+    /** The WI-6 position-driven prefetch controller (dedupe + single-flight + generation
+     *  guard + dual-cancellation + failure mapping). Owns the render slice of [_state]. */
+    private val prefetchController = BilingualPrefetchController(
+        scope = viewModelScope,
+        prefetching = prefetching,
+        textProvider = textProvider,
+        state = _state,
+        generationOf = { generation },
+    )
 
     /** An ordered config-mutating command. Enqueued synchronously at the setter call site
      *  (preserving API-call order) and drained serially by the single consumer. */
@@ -140,24 +174,24 @@ class BilingualViewModel(
         super.onCleared()
     }
 
-    // ── WI-6 stubs (declared so the type is stable; the real prefetch is WI-6) ──
+    // ── WI-6 position-driven prefetch (delegated to [prefetchController]) ──
 
-    /** WI-6: derive the current unit + prefetch current/next. Stub in WI-5. */
-    fun onPositionChanged(@Suppress("unused") charOffsetUtf16: Int) {
-        // Implemented in WI-6 (position-driven prefetch + single-flight).
-    }
+    /** The reader moved to [charOffsetUtf16]: derive the current TXT/MD unit, dedupe, and
+     *  prefetch current+next (EPUB is owned by the WI-7b controller — Medium-1). No-op while
+     *  bilingual is disabled. */
+    fun onPositionChanged(charOffsetUtf16: Int) = prefetchController.onPositionChanged(charOffsetUtf16)
 
-    /** WI-6: re-fetch a unit through the single-flight registry. Stub in WI-5. */
-    fun retryUnit(@Suppress("unused") unit: TranslationUnitId) {
-        // Implemented in WI-6.
-    }
+    /** Re-fetch [unit] after a transient failure surfaced it as [BilingualUiState.errorUnit]. */
+    fun retryUnit(unit: TranslationUnitId) = prefetchController.retryUnit(unit)
 
-    /** WI-6/WI-7b: the EPUB controller's entry into VM render state. Stub in WI-5. */
-    fun onEpubBlocksEnumerated(
-        @Suppress("unused") unit: TranslationUnitId,
-        @Suppress("unused") blocks: List<String>,
-    ) {
-        // Implemented in WI-6/WI-7b (the EPUB controller owns the enumerate flow — Medium-1).
+    /**
+     * The EPUB controller's entry into VM render state (WI-7b). Present-but-INERT in WI-6:
+     * the EPUB direct-block enumerate → prefetch → guarded-commit sequence is owned by the
+     * WI-7b controller (Medium-1); the position path dispatches TXT/MD units only.
+     */
+    @Suppress("unused")
+    fun onEpubBlocksEnumerated(unit: TranslationUnitId, blocks: List<String>) {
+        // Inert in WI-6 — the WI-7b controller owns the EPUB enumerate flow (Medium-1).
     }
 
     // ── internals ──
@@ -171,16 +205,25 @@ class BilingualViewModel(
                 if (cmd.on) {
                     _state.update { st -> st.copy(enabled = true, needsSetupSheet = st.needsSetupSheet || !wasEnabled) }
                 } else {
-                    generation++
+                    invalidatePrefetch()
                     _state.update { st -> st.copy(enabled = false).cleared() }
                 }
             }
             is Command.SetLanguage -> {
-                generation++
+                invalidatePrefetch()
                 _state.update { st -> st.copy(targetLanguage = BilingualLanguages.findOrDefault(cmd.key)).cleared() }
             }
         }
         persistCurrent()
+    }
+
+    /** Bump [generation] then invalidate the prefetch controller (cancel in-flight jobs +
+     *  drop the anchor) so a disable / language change discards any stale in-flight result and
+     *  re-arms a fresh dispatch. The generation guard is the belt (a late result is checked
+     *  against it); the controller's cancel is the suspenders (the job never runs its commit). */
+    private fun invalidatePrefetch() {
+        generation++
+        prefetchController.invalidate()
     }
 
     /** Persist the current config slice to the per-book store (granularity pinned paragraph). */
