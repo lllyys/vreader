@@ -6,9 +6,10 @@
 // 6→7 the FTS search index (search_sections + search_sections_fts + search_index_state
 // + search_sections_staging, all #128 WI-4), 7→8 the composite UNIQUE (bookKey, profileKey)
 // index on `bookmarks` — preceded by an in-migration dedupe of pre-existing duplicate rows so
-// the unique index can't fail on a legacy duplicate (feature #135 WI-3). The migration round-trip
-// test (VReaderDatabaseMigrationTest) guards them. Future schema changes append a
-// Migration(n, n+1) to ALL_MIGRATIONS and bump `version`.
+// the unique index can't fail on a legacy duplicate (feature #135 WI-3), 8→9 the additive
+// `chapter_translations` bilingual translation cache (+ bookKey index, FK→books CASCADE;
+// feature #131 WI-2). The migration round-trip test (VReaderDatabaseMigrationTest) guards them.
+// Future schema changes append a Migration(n, n+1) to ALL_MIGRATIONS and bump `version`.
 package com.vreader.app.data
 
 import android.content.Context
@@ -25,8 +26,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         CollectionEntity::class, BookCollectionCrossRef::class,
         SearchSectionEntity::class, SearchSectionFtsEntity::class,
         SearchIndexStateEntity::class, SearchStagingEntity::class,
+        ChapterTranslationEntity::class,
     ],
-    version = 8,
+    version = 9,
     exportSchema = true,
 )
 abstract class VReaderDatabase : RoomDatabase() {
@@ -36,6 +38,7 @@ abstract class VReaderDatabase : RoomDatabase() {
     abstract fun annotationDao(): AnnotationDao
     abstract fun collectionDao(): CollectionDao
     abstract fun searchDao(): SearchDao
+    abstract fun chapterTranslationDao(): ChapterTranslationDao
 
     companion object {
         private const val DB_NAME = "vreader.db"
@@ -220,11 +223,40 @@ abstract class VReaderDatabase : RoomDatabase() {
             }
         }
 
+        /** v8 → v9: feature #131 WI-2 — add the additive `chapter_translations` bilingual
+         *  translation cache (PK `lookupKey`; all columns NOT NULL; a `bookKey` index; FK→books
+         *  ON DELETE CASCADE so a book's cached translations drop with the book). Purely additive,
+         *  no data transform. DDL matches Room's generated v9 schema exactly (the migration test
+         *  opens the real Room DB, whose structural PRAGMA validation catches any drift). Modeled on
+         *  the `search_index_state` shape (MIGRATION_6_7). */
+        val MIGRATION_8_9: Migration = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `chapter_translations` (" +
+                        "`lookupKey` TEXT NOT NULL, " +
+                        "`bookKey` TEXT NOT NULL, " +
+                        "`unitStorageKey` TEXT NOT NULL, " +
+                        "`targetLanguage` TEXT NOT NULL, " +
+                        "`promptVersion` TEXT NOT NULL, " +
+                        "`translatedJson` TEXT NOT NULL, " +
+                        "`sourceParagraphCount` INTEGER NOT NULL, " +
+                        "`createdAt` INTEGER NOT NULL, " +
+                        "PRIMARY KEY(`lookupKey`), " +
+                        "FOREIGN KEY(`bookKey`) REFERENCES `books`(`fingerprintKey`) " +
+                        "ON UPDATE NO ACTION ON DELETE CASCADE )",
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_chapter_translations_bookKey` " +
+                        "ON `chapter_translations` (`bookKey`)",
+                )
+            }
+        }
+
         /** All registered migrations, oldest first. Append future Migration(n,n+1) here. */
         val ALL_MIGRATIONS: Array<Migration> =
             arrayOf(
                 MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5,
-                MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8,
+                MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9,
             )
 
         /** The production on-disk database (app-private storage). */

@@ -695,4 +695,138 @@ class VReaderDatabaseMigrationTest {
             context.deleteDatabase(isoDbName)
         }
     }
+
+    /**
+     * Feature #131 WI-2 — the FULL migration chain 1→…→9 through [VReaderDatabase.ALL_MIGRATIONS]: a
+     * v1 file opens as v9. Opening the REAL Room DB after the v8→v9 migration is the exact-DDL GUARD —
+     * Room's structural PRAGMA validation runs on open and would THROW if MIGRATION_8_9's hand-written
+     * `chapter_translations` DDL diverged from Room's GENERATED 9.json schema (the recurring Android
+     * migration failure mode; cf. #135's stale-version finding). It then asserts: the seeded
+     * book/position survive, a cached translation ROUND-TRIPS through the DAO, and deleting the book
+     * CASCADES the cached translation (FK ON DELETE CASCADE).
+     */
+    @Test
+    fun migrate1To9_throughAllMigrations_addsChapterTranslations_roundTrips_andCascades() {
+        seedVersion1Database()
+
+        // Opening the real Room DB (declared version 9) validates MIGRATION_8_9's DDL against the
+        // generated 9.json schema — a mismatch throws IllegalStateException here.
+        val db = Room.databaseBuilder(context, VReaderDatabase::class.java, dbName)
+            .addMigrations(*VReaderDatabase.ALL_MIGRATIONS)
+            .build()
+        try {
+            assertNotNull("book survived 1→9", runBlocking { db.bookDao().find(key) })
+            assertNotNull("position survived 1→9", runBlocking { db.readingPositionDao().find(key) })
+
+            runBlocking {
+                val dao = db.chapterTranslationDao()
+                val row = ChapterTranslationEntity(
+                    lookupKey = "$key|epubHref:ch1|zh-Hans|bilingual-v1|g=paragraph",
+                    bookKey = key, unitStorageKey = "epubHref:ch1", targetLanguage = "zh-Hans",
+                    promptVersion = "bilingual-v1|g=paragraph", translatedJson = """["你好","世界"]""",
+                    sourceParagraphCount = 2, createdAt = 100L,
+                )
+                dao.upsert(row)
+                assertEquals("cached translation round-trips after migration", row, dao.getByLookupKey(row.lookupKey))
+
+                // deleting the book CASCADES its cached translations.
+                db.bookDao().delete(key)
+                assertNull("chapter_translations cascaded on book delete", dao.getByLookupKey(row.lookupKey))
+                assertEquals("no orphan translations remain", 0, dao.count())
+            }
+        } finally {
+            db.close()
+        }
+    }
+
+    /**
+     * Feature #131 WI-2 — MIGRATION_8_9 in ISOLATION against an AUTHENTIC v8 database. Hand-builds the
+     * v8 `books` shape, seeds a book, applies ONLY the 8→9 DDL via a raw SupportSQLite helper, and
+     * asserts the new `chapter_translations` table + its bookKey index now exist and are writable,
+     * that the FK→books CASCADES on book delete, and that the PK rejects a duplicate `lookupKey` —
+     * validating the migration's SQL directly, not just its full-chain registration.
+     */
+    @Test
+    fun migrate8To9_inIsolation_addsChapterTranslations_cascades_andEnforcesPk() {
+        val isoDbName = "iso-8-to-9.db"
+        context.deleteDatabase(isoDbName)
+        try {
+            // Build the v8 `books` shape directly (v8: …addedAt + lastOpenedAt + author).
+            val v8Callback = object : SupportSQLiteOpenHelper.Callback(8) {
+                override fun onCreate(db: SupportSQLiteDatabase) {
+                    db.execSQL(
+                        "CREATE TABLE IF NOT EXISTS `books` (`fingerprintKey` TEXT NOT NULL, " +
+                            "`title` TEXT NOT NULL, `originalFormat` TEXT NOT NULL, `contentSHA256` TEXT NOT NULL, " +
+                            "`fileByteCount` INTEGER NOT NULL, `localFilePath` TEXT, `sourceUri` TEXT, " +
+                            "`addedAt` INTEGER NOT NULL, `lastOpenedAt` INTEGER, `author` TEXT, " +
+                            "PRIMARY KEY(`fingerprintKey`))",
+                    )
+                }
+                override fun onUpgrade(db: SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+            }
+            FrameworkSQLiteOpenHelperFactory().create(
+                SupportSQLiteOpenHelper.Configuration.builder(context).name(isoDbName).callback(v8Callback).build(),
+            ).writableDatabase.use { db ->
+                db.execSQL(
+                    "INSERT INTO books (fingerprintKey, title, originalFormat, contentSHA256, fileByteCount, " +
+                        "localFilePath, sourceUri, addedAt, lastOpenedAt, author) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                    arrayOf<Any?>("bk", "Book", "epub", "a".repeat(64), 100L, "/p", null, 1L, null, "Author"),
+                )
+            }
+
+            // Apply ONLY MIGRATION_8_9 through a raw helper whose onUpgrade runs the real migration.
+            val migrateCallback = object : SupportSQLiteOpenHelper.Callback(9) {
+                override fun onCreate(db: SupportSQLiteDatabase) = Unit  // never — the file already exists at v8
+                override fun onUpgrade(db: SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) {
+                    assertEquals(8, oldVersion)
+                    assertEquals(9, newVersion)
+                    // FK enforcement is off by default on a raw helper; turn it on so the CASCADE below runs.
+                    db.execSQL("PRAGMA foreign_keys=ON")
+                    VReaderDatabase.MIGRATION_8_9.migrate(db)
+                }
+            }
+            FrameworkSQLiteOpenHelperFactory().create(
+                SupportSQLiteOpenHelper.Configuration.builder(context).name(isoDbName).callback(migrateCallback).build(),
+            ).writableDatabase.use { db ->
+                db.execSQL("PRAGMA foreign_keys=ON")
+                // The new table + its bookKey index exist and are writable (else these throw).
+                db.execSQL(
+                    "INSERT INTO chapter_translations (lookupKey, bookKey, unitStorageKey, targetLanguage, " +
+                        "promptVersion, translatedJson, sourceParagraphCount, createdAt) " +
+                        "VALUES ('bk|epubHref:ch1|zh-Hans|p', 'bk', 'epubHref:ch1', 'zh-Hans', 'p', '[\"你好\"]', 1, 1)",
+                )
+                db.query("SELECT translatedJson, sourceParagraphCount FROM chapter_translations WHERE bookKey = 'bk'").use { c ->
+                    assertTrue(c.moveToFirst())
+                    assertEquals("[\"你好\"]", c.getString(0))
+                    assertEquals(1, c.getInt(1))
+                }
+                // The bookKey index exists (named per Room's generated schema).
+                db.query(
+                    "SELECT name FROM sqlite_master WHERE type='index' AND name='index_chapter_translations_bookKey'",
+                ).use { c ->
+                    assertTrue("the bookKey index was created with the Room-generated name", c.moveToFirst())
+                }
+                // The PK rejects a duplicate lookupKey.
+                var pkThrew = false
+                try {
+                    db.execSQL(
+                        "INSERT INTO chapter_translations (lookupKey, bookKey, unitStorageKey, targetLanguage, " +
+                            "promptVersion, translatedJson, sourceParagraphCount, createdAt) " +
+                            "VALUES ('bk|epubHref:ch1|zh-Hans|p', 'bk', 'u2', 'zh-Hans', 'p', '[]', 0, 2)",
+                    )
+                } catch (e: android.database.sqlite.SQLiteConstraintException) {
+                    pkThrew = true
+                }
+                assertTrue("the PK rejects a duplicate lookupKey", pkThrew)
+                // Deleting the book CASCADES its cached translations (FK ON DELETE CASCADE).
+                db.execSQL("DELETE FROM books WHERE fingerprintKey = 'bk'")
+                db.query("SELECT COUNT(*) FROM chapter_translations").use { c ->
+                    assertTrue(c.moveToFirst())
+                    assertEquals("chapter_translations cascaded on book delete", 0, c.getInt(0))
+                }
+            }
+        } finally {
+            context.deleteDatabase(isoDbName)
+        }
+    }
 }
