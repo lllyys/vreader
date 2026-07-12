@@ -122,6 +122,22 @@ class ChapterSegmenterTest {
         assertEquals("Hi 😀 there.", text.substring(ranges[0].start, ranges[0].endExclusive))
     }
 
+    @Test fun paragraphRanges_softWrapCrlf_substringEqualsPeerAfterNormalization() {
+        // For a soft-wrapped paragraph the RAW span retains \r\n; it equals the
+        // string peer only after the same CRLF/CR->LF normalization paragraphs()
+        // applies. Count-parity always holds.
+        val text = "Line A\r\nLine B\r\n\r\nNext"
+        val ranges = ChapterSegmenter.paragraphRanges(text)
+        val paras = ChapterSegmenter.paragraphs(text)
+        assertEquals(paras.size, ranges.size)
+        ranges.forEachIndexed { i, span ->
+            val raw = text.substring(span.start, span.endExclusive)
+            assertEquals(paras[i], raw.replace("\r\n", "\n").replace("\r", "\n"))
+        }
+        // And the raw span for the soft-wrapped paragraph really does retain \r\n.
+        assertEquals("Line A\r\nLine B", text.substring(ranges[0].start, ranges[0].endExclusive))
+    }
+
     // ---- sentenceRanges ----
 
     @Test fun sentenceRanges_countMatchesSentences() {

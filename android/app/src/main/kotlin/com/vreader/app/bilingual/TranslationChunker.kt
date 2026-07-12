@@ -7,20 +7,26 @@
 // - A segment is NEVER split across chunks (the response<->source mapping needs a
 //   1:1 segment correspondence within a chunk). One over-budget segment occupies
 //   its own chunk; recombination is the caller's job.
-// - The budget is a CHARACTER count (grapheme clusters, matching Swift's
-//   String.count), not a byte or UTF-16-unit count.
+// - The budget is a CHARACTER count (EXTENDED grapheme clusters, matching
+//   Swift's String.count), not a byte or UTF-16-unit count.
 // - subSplit (Bug #330 parity) is GRAPHEME-cluster-safe: it never splits a
-//   surrogate pair or a combining sequence. It splits on the last whitespace
-//   within each budget window when one exists (keeps words intact for
+//   surrogate pair, a combining sequence, a ZWJ emoji family, a regional-
+//   indicator flag, or an emoji-modifier sequence. It splits on the last
+//   whitespace within each budget window when one exists (keeps words intact for
 //   space-delimited languages), else hard-splits at a grapheme boundary for a
 //   long unbroken run (e.g. CJK, no inter-word whitespace).
+// - Grapheme boundaries come from android.icu.text.BreakIterator (ICU
+//   extended-grapheme-cluster boundaries — the true Swift `Character` analog),
+//   NOT java.text.BreakIterator (which does not guarantee ZWJ/flag/modifier
+//   indivisibility). android.icu is bundled from API 24 (< minSdk 26). JVM unit
+//   tests run under Robolectric so the bundled ICU impl is present.
 //
 // @coordinates-with: ChapterSegmenter.kt,
 //   dev-docs/plans/20260710-feature-131-android-bilingual.md (WI-1),
 //   iOS vreader/Services/AI/ChapterTranslationChunker.swift
 package com.vreader.app.bilingual
 
-import java.text.BreakIterator
+import android.icu.text.BreakIterator
 
 /** Pure segment-boundary chunker for chapter translation. */
 object TranslationChunker {
@@ -121,8 +127,9 @@ object TranslationChunker {
     private fun graphemeCount(text: String): Int = graphemeBoundaries(text).size - 1
 
     /**
-     * UTF-16 offsets of every grapheme-cluster boundary, from 0 to text.length
-     * inclusive. An empty string yields [0]; N graphemes yield N+1 offsets.
+     * UTF-16 offsets of every EXTENDED-grapheme-cluster boundary (via ICU), from
+     * 0 to text.length inclusive. An empty string yields [0]; N graphemes yield
+     * N+1 offsets.
      */
     private fun graphemeBoundaries(text: String): List<Int> {
         val boundaries = ArrayList<Int>()

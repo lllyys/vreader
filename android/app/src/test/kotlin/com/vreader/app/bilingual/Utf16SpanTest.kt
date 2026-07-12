@@ -31,6 +31,11 @@ class Utf16SpanTest {
         Utf16Span(8, 3)
     }
 
+    @Test(expected = IllegalArgumentException::class)
+    fun requireThrowsOnNegativeStart() {
+        Utf16Span(-1, 2)
+    }
+
     @Test fun substringRoundTrips() {
         val text = "Hello world"
         val span = Utf16Span(6, 11)

@@ -1,12 +1,18 @@
 // Purpose: feature #131 WI-1 — RED-first JVM tests for TranslationChunker, the
 // port of iOS ChapterTranslationChunker.swift. Index-group packing to a char
 // budget (oversize → own chunk) + grapheme-safe subSplit (Bug #330 parity).
+// Robolectric-run so the bundled android.icu extended-grapheme BreakIterator
+// (API 24+) is present under the JVM — the plain stub android.jar throws "not
+// mocked" (same pattern as SearchTextNormalizerTest).
 package com.vreader.app.bilingual
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
 
+@RunWith(RobolectricTestRunner::class)
 class TranslationChunkerTest {
 
     // ---- chunk ----
@@ -98,18 +104,63 @@ class TranslationChunkerTest {
     }
 
     @Test fun subSplit_combiningSequence_notSplit() {
-        // "é" as e + U+0301 combining acute is one grapheme (2 chars). Repeat it
-        // past the budget; a grapheme-safe splitter never separates the base
-        // from its combining mark.
-        val g = "é"  // é (1 grapheme, 2 UTF-16 units)
+        // "e" + U+0301 combining acute is one grapheme (2 UTF-16 units). Repeat it
+        // past the budget; a grapheme-safe splitter never separates the base from
+        // its combining mark. Built from code points to avoid literal ambiguity.
+        val combiningAcute = '́'
+        val g = "e$combiningAcute"  // é as base + combining mark (1 grapheme)
         val text = g.repeat(6)
         val pieces = TranslationChunker.subSplit(text, 3)
         assertEquals(text, pieces.joinToString(""))
         // No piece may start with a combining mark (would mean a grapheme was split).
         pieces.forEach { piece ->
             if (piece.isNotEmpty()) {
-                assertTrue("piece must not begin with a combining mark", piece[0] != '́')
+                assertTrue("piece must not begin with a combining mark", piece[0] != combiningAcute)
             }
         }
+    }
+
+    // ---- extended grapheme cluster parity (ICU; requires Robolectric) ----
+
+    @Test fun subSplit_zwjEmojiFamily_neverSplit() {
+        // A ZWJ family emoji is ONE extended grapheme cluster (11 UTF-16 units).
+        // A splitter that only guarded surrogate pairs (java.text.BreakIterator)
+        // would cut it apart; the ICU iterator keeps it whole.
+        val family = "👨‍👩‍👧‍👦"
+        val text = family.repeat(4)
+        val pieces = TranslationChunker.subSplit(text, 2)
+        assertEquals(text, pieces.joinToString(""))
+        // Each piece must be a whole number of family clusters (no ZWJ orphaned).
+        pieces.forEach { piece ->
+            assertTrue("piece is whole family cluster(s)", piece.length % family.length == 0)
+        }
+    }
+
+    @Test fun subSplit_regionalIndicatorFlag_neverSplit() {
+        val flag = "🇨🇳"  // two regional indicators, one cluster
+        val text = flag.repeat(4)
+        val pieces = TranslationChunker.subSplit(text, 2)
+        assertEquals(text, pieces.joinToString(""))
+        pieces.forEach { piece ->
+            assertTrue("piece is whole flag cluster(s)", piece.length % flag.length == 0)
+        }
+    }
+
+    @Test fun subSplit_emojiModifier_neverSplit() {
+        val thumbs = "👍🏽"  // base + skin-tone modifier, one cluster
+        val text = thumbs.repeat(4)
+        val pieces = TranslationChunker.subSplit(text, 2)
+        assertEquals(text, pieces.joinToString(""))
+        pieces.forEach { piece ->
+            assertTrue("piece is whole modifier cluster(s)", piece.length % thumbs.length == 0)
+        }
+    }
+
+    @Test fun chunk_countsExtendedGraphemesNotUtf16Units() {
+        // A family emoji is 1 grapheme but 11 UTF-16 units. A budget of 2 graphemes
+        // packs two families into one chunk (would overflow if counted by units).
+        val family = "👨‍👩‍👧‍👦"
+        val chunks = TranslationChunker.chunk(listOf(family, family), 2)
+        assertEquals(listOf(listOf(0, 1)), chunks)
     }
 }

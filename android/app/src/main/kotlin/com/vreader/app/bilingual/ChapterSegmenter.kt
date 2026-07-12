@@ -15,10 +15,13 @@
 //   fullwidth terminators (. ! ? full-width) as well as Latin punctuation, with
 //   no manual punctuation table.
 // - Span peers (paragraphRanges / sentenceRanges) return half-open UTF-16
-//   Utf16Spans shrunk to trimmed bounds, so text.substring(span.start,
-//   span.endExclusive) reproduces the segment (count-parity with the string
-//   peers). Surrogate halves are never whitespace, so per-code-unit trimming is
-//   surrogate-safe.
+//   Utf16Spans shrunk to trimmed bounds, with count-parity with the string
+//   peers. For sentences, text.substring(span) == the string peer exactly. For
+//   PARAGRAPHS, spans are SOURCE-coordinate (raw), so text.substring(span)
+//   equals the string peer only AFTER applying the same soft-wrap CRLF/CR->LF
+//   normalization the string peer applies (a soft-wrapped paragraph's raw span
+//   contains the original \r\n / \r); count-parity always holds. Surrogate
+//   halves are never whitespace, so per-code-unit trimming is surrogate-safe.
 //
 // @coordinates-with: Utf16Span.kt, TranslationChunker.kt,
 //   dev-docs/plans/20260710-feature-131-android-bilingual.md (WI-1),
@@ -49,10 +52,12 @@ object ChapterSegmenter {
         }
 
     /**
-     * Half-open UTF-16 spans of each paragraph, trimmed to its visible bounds,
-     * in source order. paragraphRanges(t).size == paragraphs(t).size. Spans are
-     * against the RAW text (no soft-wrap normalization) - substringing a span
-     * yields the paragraph's raw content.
+     * Half-open UTF-16 spans of each paragraph, trimmed to its visible bounds, in
+     * source order. paragraphRanges(t).size == paragraphs(t).size. Spans are
+     * SOURCE-coordinate (RAW text, no soft-wrap normalization): substringing a
+     * span yields the paragraph's raw content, which equals the string peer only
+     * after the same CRLF/CR->LF normalization paragraphs() applies (a
+     * soft-wrapped paragraph's raw span retains its original \r\n / \r).
      */
     fun paragraphRanges(text: String): List<Utf16Span> =
         scanParagraphRanges(text).map { range ->
