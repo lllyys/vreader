@@ -574,6 +574,28 @@ xcodegen/`project.yml` at the repo root; the two builds never overlap).
   with `ResumeTarget.Precise` carrying the canonical fallback so the host can
   degrade if the Readium anchor won't reapply.
 
+### In-book search (`com.vreader.app.search`) — feature #133
+
+A per-reader-session `InBookSearchViewModel` + `InBookSearchRepository` unify
+two position engines behind one format-neutral seam: **TXT/MD** use the #128
+FTS index (`SearchDao` book-scoped chunk pages → `RawOffsetMatcher` raw UTF-16
+occurrences → `TxtMdInBookHitResolver` canonical `Locator`); **EPUB** uses
+Readium 3.3.0's own `SearchService` over the live `Publication`
+(`EpubInBookSearchEngine` wraps `publication.search` behind a mockable
+`PublicationSearchSource` seam, returning navigable Readium `Locator`s — the
+FTS index is NOT consulted for EPUB). An `IndexStateGate` maps the #128 index
+state (missing / indexing / indexed / skipped / failed) to a UI state so a
+held TXT/MD query re-runs once indexing settles; EPUB bypasses it. Reachable
+from the #132 reader top-bar Search icon across TXT/MD/EPUB; the
+`InBookSearchSheet` (designed `vreader-search.jsx` "This book" scope, rule 51)
+renders over the host, hits grouped by chapter/section; a tapped hit jumps via
+the host chunk-scroll seam (`chunkForOffset(charOffsetUTF16)`, TXT/MD) or
+`Locator.fromJSON(readiumLocatorJson)` → `navigator.go` (EPUB). PDF/AZW3 have
+no in-book search (the Search icon is hidden via the gate's `Unsupported`
+state). The EPUB path holds ONE live Readium `SearchIterator` per session,
+disposed via `closeAllEpubCursors()` on sheet dismiss and reader `onDestroy`
+before `publication.close()`.
+
 ### Backup/restore backend (`com.vreader.app.backup`) — feature #116
 
 The WebDAV backup/restore backend, byte-for-byte the iOS materializing-restore
