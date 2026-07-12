@@ -12,6 +12,7 @@ import com.vreader.app.data.VReaderDatabase
 import com.vreader.app.reader.BookOpener
 import com.vreader.app.search.BookTextExtractor
 import com.vreader.app.search.EpubTextExtractor
+import com.vreader.app.search.asSearcher
 import com.vreader.app.search.SearchIndexCoordinator
 import com.vreader.app.search.TxtMdTextExtractor
 import com.vreader.app.annotations.AnnotationsRepository
@@ -119,6 +120,70 @@ class AppContainer(context: Context) {
     }
     val recentSearchesStore: com.vreader.app.search.RecentSearchesStore by lazy {
         com.vreader.app.search.RecentSearchesStore(recentSearchesDataStore)
+    }
+
+    /**
+     * feature #133 WI-10 — the per-reader-session in-book-search ViewModel for a TXT/MD host. Wires the
+     * WI-6 [InBookSearchRepository] (FTS DAO page/count/resume + the WI-4 [TxtMdInBookHitResolver] over the
+     * already-decoded [decodedText]) behind the WI-8 [InBookSearchViewModel], gated by the WI-7
+     * [IndexStateGate] over the DAO's `observeIndexState` Flow and fed the GLOBAL recents store.
+     *
+     * The EPUB engine seam is NEVER invoked for a TXT/MD host (the repository dispatches only the TXT/MD
+     * branch for `txt`/`md`), so `epubEngineFor` is an error-throwing guard — a call would be a wiring bug.
+     * ONE [InBookSearchRepository] per session (the VM's `closeAllEpubCursors` lifecycle contract holds
+     * uniformly even though TXT has no cursors). [coroutineScope] is the VM's `viewModelScope` in production
+     * (the VM cancels its child collectors on `onCleared`).
+     */
+    fun inBookSearchViewModel(
+        bookKey: String,
+        format: BookFormat,
+        decodedText: String,
+        contentSHA256: String,
+        fileByteCount: Long,
+        coroutineScope: CoroutineScope,
+    ): com.vreader.app.search.InBookSearchViewModel {
+        val searchDao = database.searchDao()
+        val repository = com.vreader.app.search.InBookSearchRepository(
+            dispatcher = Dispatchers.Default,
+            fts = com.vreader.app.search.InBookFtsDeps(
+                matchingChunksPage = { ftsQuery, afterSectionIndex, afterChunkOrdinal, afterId, limit ->
+                    searchDao.matchingChunksPage(bookKey, ftsQuery, afterSectionIndex, afterChunkOrdinal, afterId, limit)
+                },
+                chunkAtOrAfter = { ftsQuery, atSectionIndex, atChunkOrdinal, atId ->
+                    searchDao.chunkAtOrAfter(bookKey, ftsQuery, atSectionIndex, atChunkOrdinal, atId)
+                },
+                // The resolver re-derives the chunk boundaries from the ALREADY-decoded reader text (no I/O);
+                // memoized per session inside the resolver (built once).
+                resolverFor = {
+                    com.vreader.app.search.TxtMdInBookHitResolver(
+                        contentSHA256 = contentSHA256,
+                        fileByteCount = fileByteCount,
+                        format = format.name,
+                        decodedText = decodedText,
+                    )
+                },
+            ),
+            // TXT/MD never reaches the EPUB branch — a call here is a dispatch bug, fail fast.
+            epubEngineFor = { error("EPUB in-book search engine requested on a TXT/MD host") },
+        )
+        return com.vreader.app.search.InBookSearchViewModel(
+            bookKey = bookKey,
+            format = format,
+            searcher = repository.asSearcher(),
+            indexStateGate = com.vreader.app.search.IndexStateGate(Dispatchers.Default),
+            indexStateFlow = searchDao.observeIndexState(bookKey),
+            // For a settled-`indexed` TXT/MD row the gate consults this to decide Ready vs definitive
+            // NoResults. `hasOccurrence` carries no query, so we report Ready (true) and let the actual
+            // `page(...)` be the source of truth: a settled book with zero matches runs one fast FTS query
+            // and the repository returns NoResults — the SAME UI outcome the gate's occurrence short-circuit
+            // would give, without threading the live query through a shared mutable seam (no race). The gate
+            // is only consulted on a settled-indexed row, so this never fires while Indexing/missing/failed.
+            hasOccurrence = { true },
+            recentsFlow = recentSearchesStore.recents(),
+            recordQuery = { q -> recentSearchesStore.record(q) },
+            dispatcher = Dispatchers.Default,
+            coroutineScope = coroutineScope,
+        )
     }
 
     /** Builds a [com.vreader.app.search.SearchViewModel] wired to the live library, in-text repository,
