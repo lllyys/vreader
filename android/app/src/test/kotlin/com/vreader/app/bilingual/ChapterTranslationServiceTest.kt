@@ -360,6 +360,50 @@ class ChapterTranslationServiceTest {
         assertTrue("ensureActive-before-write prevented the row", dao.rows.isEmpty())
     }
 
+    @Test fun translate_cancellationInsideUpsert_propagates_notSwallowed() = runTest {
+        // Cancellation observed WHILE the Room upsert suspends must propagate — a bare
+        // runCatching in writeCache would swallow it (Gate-4 Medium). All chunks
+        // succeed, but the DAO's upsert throws CancellationException.
+        val dao = object : ChapterTranslationDao {
+            val rows = LinkedHashMap<String, ChapterTranslationEntity>()
+            override suspend fun getByLookupKey(key: String): ChapterTranslationEntity? = rows[key]
+            override suspend fun upsert(row: ChapterTranslationEntity) {
+                throw CancellationException("cancelled mid-upsert")
+            }
+            override suspend fun deleteByLookupKey(key: String) { rows.remove(key) }
+            override suspend fun count(): Int = rows.size
+        }
+        val client = FakeAiClient.translating()
+        val svc = service(client, ChapterTranslationStore(dao))
+
+        try {
+            svc.translate(bookKey, unit, twoParagraphSource, lang, profile)
+            fail("cancellation inside upsert must propagate, not be swallowed")
+        } catch (e: CancellationException) {
+            // Correct — cancellation is cancellation-transparent.
+        }
+        assertTrue("no row written when the upsert is cancelled", dao.rows.isEmpty())
+    }
+
+    @Test fun translate_upsertFailure_isNonFatal_translationStillReturned() = runTest {
+        // A NON-cancellation store-write failure must NOT fail the translation — the
+        // caller still gets the freshly translated text (rule 50 §6).
+        val dao = object : ChapterTranslationDao {
+            val rows = LinkedHashMap<String, ChapterTranslationEntity>()
+            override suspend fun getByLookupKey(key: String): ChapterTranslationEntity? = rows[key]
+            override suspend fun upsert(row: ChapterTranslationEntity) { throw RuntimeException("disk full") }
+            override suspend fun deleteByLookupKey(key: String) { rows.remove(key) }
+            override suspend fun count(): Int = rows.size
+        }
+        val client = FakeAiClient.translating()
+        val svc = service(client, ChapterTranslationStore(dao))
+
+        val result = svc.translate(bookKey, unit, twoParagraphSource, lang, profile)
+
+        assertEquals(listOf("T:Alpha paragraph one.", "T:Beta paragraph two."), result.segments)
+        assertTrue("a write failure leaves no cached row but returns the translation", dao.rows.isEmpty())
+    }
+
     // ── AiError mapping ───────────────────────────────────────
 
     @Test fun translate_configError_mapsToProviderFailed() = runTest {

@@ -150,8 +150,15 @@ class ChapterTranslationService(
                 }
                 // Stale (source changed): drop the row and re-translate. A delete
                 // failure does not block re-translation — the later upsert refreshes
-                // the same key regardless.
-                runCatching { store.delete(key) }
+                // the same key regardless. Cancellation still propagates (a bare
+                // runCatching would swallow it).
+                try {
+                    store.delete(key)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Throwable) {
+                    // Non-fatal — the upsert refreshes the same key regardless.
+                }
             }
         }
 
@@ -331,7 +338,11 @@ class ChapterTranslationService(
     private fun lookupKey(bookKey: String, unit: TranslationUnitId, targetLanguage: String): String =
         CachedTranslation.lookupKey(bookKey, unit.storageKey, targetLanguage, promptVersion)
 
-    /** Writes the canonical row. A store-write failure does not fail the translation. */
+    /**
+     * Writes the canonical row. A store-write failure does not fail the translation
+     * (rule 50 §6) — but a [CancellationException] is NOT a store failure and must
+     * propagate (a bare `runCatching` would swallow cooperative cancellation).
+     */
     private suspend fun writeCache(
         bookKey: String,
         unit: TranslationUnitId,
@@ -340,7 +351,7 @@ class ChapterTranslationService(
         segments: List<String>,
         sourceParagraphCount: Int,
     ) {
-        runCatching {
+        try {
             store.upsert(
                 CachedTranslation(
                     bookKey = bookKey,
@@ -352,6 +363,11 @@ class ChapterTranslationService(
                     createdAt = System.currentTimeMillis(),
                 ),
             )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Throwable) {
+            // Non-fatal: the caller still gets this run's translation; it just
+            // won't be cached this time.
         }
     }
 
