@@ -1,11 +1,17 @@
 // Purpose: feature #129 WI-1 (#110 Phase 3) — the reader "Display" settings value type. iOS parity:
 // `TypographySettings` + `ReaderThemeV2`. Global (not per-book), device-local (not backed up). The
-// layout (scroll/paged) toggle is a tracked follow-up — NOT in #129 (TXT/MD are scroll-only). Ranges
-// are the committed design's slider bounds (vreader-panels.jsx ReaderSettingsSheet).
+// layout (scroll/paged) toggle is feature #137 WI-1 (default Scroll — iOS parity, the pre-#137 renderer
+// is scroll-only). Ranges are the committed design's slider bounds (vreader-panels.jsx ReaderSettingsSheet).
 package com.vreader.app.reader.settings
 
 /** The two designed font families (Source Serif 4 / Inter → platform serif / sans). */
 enum class ReaderFontFamily { Serif, Sans }
+
+/**
+ * How reflowable text is paginated. [Scroll] is the pre-#137 continuous-scroll renderer (the default —
+ * an untouched install keeps scrolling); [Paged] is the feature-#137 page-turn renderer.
+ */
+enum class ReaderLayout { Paged, Scroll }
 
 /**
  * The display settings applied across the reflowable readers (EPUB/TXT/MD/AZW3); PDF reads only [theme]
@@ -17,6 +23,7 @@ data class ReaderSettings(
     val fontSizeSp: Float = DEFAULT_FONT_SIZE,
     val lineSpacing: Float = DEFAULT_LINE_SPACING,
     val marginDp: Float = DEFAULT_MARGIN,
+    val layout: ReaderLayout = ReaderLayout.Scroll,
 ) {
     companion object {
         // Defaults: font size keeps the pre-#129 hardcoded 18sp; line spacing + margin are round

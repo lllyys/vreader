@@ -26,6 +26,7 @@ private data class ReaderSettingsState(
     val fontSizeSp: Float = ReaderSettings.DEFAULT_FONT_SIZE,
     val lineSpacing: Float = ReaderSettings.DEFAULT_LINE_SPACING,
     val marginDp: Float = ReaderSettings.DEFAULT_MARGIN,
+    val layout: String = ReaderLayout.Scroll.name,
 )
 
 class ReaderSettingsStore(
@@ -50,7 +51,7 @@ class ReaderSettingsStore(
     private val seq = AtomicLong(0)
     private val committedSeqByField = HashMap<Field, Long>()
 
-    private enum class Field { THEME, FONT_FAMILY, FONT_SIZE, LINE_SPACING, MARGIN }
+    private enum class Field { THEME, FONT_FAMILY, FONT_SIZE, LINE_SPACING, MARGIN, LAYOUT }
 
     /** Allocate the next monotonic submission sequence. Call this SYNCHRONOUSLY at the UI callback (on
      *  the main thread, in edit order) and pass the result into the setter, so latest-wins reflects the
@@ -72,6 +73,7 @@ class ReaderSettingsStore(
     suspend fun setFontSize(sp: Float, order: Long = nextSeq()) = update(Field.FONT_SIZE, order) { it.copy(fontSizeSp = ReaderSettings.clampFontSize(sp)) }
     suspend fun setLineSpacing(v: Float, order: Long = nextSeq()) = update(Field.LINE_SPACING, order) { it.copy(lineSpacing = ReaderSettings.clampLineSpacing(v)) }
     suspend fun setMargin(dp: Float, order: Long = nextSeq()) = update(Field.MARGIN, order) { it.copy(marginDp = ReaderSettings.clampMargin(dp)) }
+    suspend fun setLayout(value: ReaderLayout, order: Long = nextSeq()) = update(Field.LAYOUT, order) { it.copy(layout = value.name) }
 
     private suspend fun update(field: Field, order: Long, transform: (ReaderSettingsState) -> ReaderSettingsState) {
         writeMutex.withLock {
@@ -104,6 +106,7 @@ class ReaderSettingsStore(
         fontSizeSp = ReaderSettings.clampFontSize(fontSizeSp),
         lineSpacing = ReaderSettings.clampLineSpacing(lineSpacing),
         marginDp = ReaderSettings.clampMargin(marginDp),
+        layout = runCatching { ReaderLayout.valueOf(layout) }.getOrDefault(ReaderLayout.Scroll),
     )
 
     companion object {
