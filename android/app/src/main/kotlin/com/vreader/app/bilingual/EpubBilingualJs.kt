@@ -77,11 +77,17 @@ object EpubBilingualJs {
             };
             var BLOCK_SELECTOR = Object.keys(BLOCK_TAGS).join(',');
             var seq = 0;
+            var seen = {};   // guards against a book-supplied duplicate/reserved bid (Gate-4 Low)
             function stamp(el) {
                 var existing = el.getAttribute('$BLOCK_ID_ATTRIBUTE');
-                if (existing) { return existing; }
-                seq += 1;
-                var bid = 'b' + seq;
+                // Reuse a stable existing bid ONLY when it is unique this enumeration — a
+                // book-supplied duplicate would otherwise collapse the translation map.
+                if (existing && !Object.prototype.hasOwnProperty.call(seen, existing)) {
+                    seen[existing] = 1;
+                    return existing;
+                }
+                do { seq += 1; var bid = 'b' + seq; } while (Object.prototype.hasOwnProperty.call(seen, bid));
+                seen[bid] = 1;
                 el.setAttribute('$BLOCK_ID_ATTRIBUTE', bid);
                 return bid;
             }
@@ -178,8 +184,12 @@ object EpubBilingualJs {
                     return div;
                 }
                 var count = 0;
-                for (var bid in translations) {
-                    if (!translations.hasOwnProperty(bid)) continue;
+                var keys = Object.keys(translations);
+                for (var k = 0; k < keys.length; k++) {
+                    var bid = keys[k];
+                    // Use the prototype's hasOwnProperty so a book-supplied bid that shadows a
+                    // built-in name (e.g. 'hasOwnProperty') cannot break the guard (Gate-4 Low).
+                    if (!Object.prototype.hasOwnProperty.call(translations, bid)) continue;
                     var block = findBlock(bid);
                     if (!block) continue;
                     var existing = block.nextElementSibling;

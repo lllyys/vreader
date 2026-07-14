@@ -167,7 +167,10 @@ class ReaderActivity : AppCompatActivity() {
     private var bilingualProvider: com.vreader.app.bilingual.EpubChapterTextProvider? = null
     private var bilingualViewModel: com.vreader.app.bilingual.BilingualViewModel? = null
     private var bilingualUnit: com.vreader.app.bilingual.TranslationUnitId? = null
-    @Volatile private var bilingualExpectedCount: Int = 0
+    // The dedicated re-apply job: a NEW resource/enable cancels the prior in-flight apply so a
+    // slow chapter-A translation can't inject into chapter B (Gate-4 High). The position observer
+    // NEVER suspends on translation — it schedules onto this job (chrome updates stay responsive).
+    private var bilingualJob: kotlinx.coroutines.Job? = null
 
     // feature #123 — in-reader highlighting
     private var highlightController: ReaderHighlightController? = null
@@ -267,9 +270,9 @@ class ReaderActivity : AppCompatActivity() {
     /** feature #131 WI-7b — construct the per-session EPUB bilingual controller + provider + VM (over the
      *  live [nav] / [pub]) and, when bilingual is ENABLED for this book, apply the interlinear decorations
      *  for the current resource. The controller keys the current unit off `currentLocator.href` (the EPUB
-     *  divergence — an href, not a char offset); `evaluateJavascript` is dispatched on the MAIN thread (a
-     *  Readium `R2BasicWebView.checkThread` throws off-main). The re-apply signal (scroll round-trip / href
-     *  change / reflow / activity recreate) is `currentLocator` in [observePosition]. */
+     *  divergence — an href, not a char offset); `evaluateJavascript` is dispatched on the MAIN thread via
+     *  [evalOnMain] (a Readium `R2BasicWebView.checkThread` throws off-main). The re-apply signal (scroll
+     *  round-trip / href change / reflow / activity recreate) is `currentLocator` in [observePosition]. */
     private fun buildBilingual(bookKey: String, pub: Publication, nav: EpubNavigatorFragment, current: Book) {
         if (current.originalFormat != vreader.contracts.BookFormat.epub) return
         val spineHrefs = runCatching { pub.readingOrder.map { it.href.toString() } }.getOrDefault(emptyList())
@@ -289,51 +292,68 @@ class ReaderActivity : AppCompatActivity() {
         bilingualProvider = provider
         bilingualViewModel = vm
         bilingualController = com.vreader.app.bilingual.EpubBilingualController(
-            // Main-thread eval: R2BasicWebView.checkThread throws off-main. lifecycleScope launches
-            // on Dispatchers.Main.immediate, and this lambda is only invoked from those launches, so
-            // the withStarted/collect callers already run on Main — the eval is safe.
-            evaluateJavascript = { js -> runCatching { nav.evaluateJavascript(js) }.getOrNull() },
+            evaluateJavascript = { js -> evalOnMain(nav, js) },
             prefetcher = prefetcher,
             onEpubBlocksEnumerated = vm::onEpubBlocksEnumerated,
             // Read the CURRENT language script fresh per apply so a language change is reflected.
             targetIsCjk = { vm.state.value.targetLanguage.script == com.vreader.app.bilingual.BilingualScript.cjk },
         )
-        // If bilingual is already on for this book (persisted), apply for the opening resource.
-        lifecycleScope.launch {
-            if (bilingualEnabledFor(vm)) maybeReapplyBilingual(force = true)
-        }
+        // If bilingual is already on for this book (persisted), apply for the opening resource — AFTER
+        // the VM hydrates (both enabled + language), so the open-time apply uses the correct language.
+        scheduleBilingual(force = true, awaitHydration = true)
     }
 
-    /** feature #131 WI-7b — whether bilingual is enabled for this book, read from the persisted per-book
-     *  store (the VM hydrates asynchronously, so read the store directly for the open-time decision). */
-    private suspend fun bilingualEnabledFor(vm: com.vreader.app.bilingual.BilingualViewModel): Boolean =
-        runCatching { container.perBookBilingualStore.read(book?.fingerprintKey ?: return false).enabled }
-            .getOrDefault(false) || vm.state.value.enabled
+    /** feature #131 WI-7b — evaluate [js] against the live navigator ON THE MAIN THREAD (Readium's
+     *  `R2BasicWebView.checkThread` throws off-main). A non-cancellation failure (a torn-down navigator)
+     *  is swallowed to null; a cooperative [kotlinx.coroutines.CancellationException] propagates (so a
+     *  teardown/cancel is not misread as a benign null). */
+    private suspend fun evalOnMain(nav: EpubNavigatorFragment, js: String): String? =
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main.immediate) {
+            try {
+                nav.evaluateJavascript(js)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                null
+            }
+        }
 
-    /** feature #131 WI-7b — the probe-gated re-apply for the current EPUB resource. Resolves the current
-     *  href → the epubHref unit; on a unit CHANGE (new resource) it applies fresh; otherwise it re-applies
-     *  ONLY when the resource DOM is missing the expected decorations (a scroll round-trip / reflow usually
-     *  keeps them — spike finding c). [force] applies unconditionally (open-time / an explicit enable). A
-     *  no-op when bilingual is off or the controller/nav is absent. */
-    private suspend fun maybeReapplyBilingual(force: Boolean) {
+    /** feature #131 WI-7b — schedule a bilingual re-apply on the DEDICATED [bilingualJob], cancelling any
+     *  prior in-flight apply so a slow chapter-A translation can't inject into chapter B (Gate-4 High). The
+     *  position/display observers call this and return immediately — they NEVER suspend on translation, so
+     *  chrome/progress/bookmark updates stay responsive. [force] applies unconditionally (open-time / an
+     *  explicit enable); otherwise the controller's probe gates the re-inject. [awaitHydration] waits for
+     *  the VM's persisted enabled+language to hydrate before the open-time apply (Gate-4 High). */
+    private fun scheduleBilingual(force: Boolean, awaitHydration: Boolean = false) {
         val controller = bilingualController ?: return
         val provider = bilingualProvider ?: return
         val vm = bilingualViewModel ?: return
-        if (!vm.state.value.enabled) return
-        val nav = navigator ?: return
-        val href = nav.currentLocator.value.href.toString()
-        val unit = provider.unitForHref(href) ?: return
-        val lang = vm.state.value.targetLanguage.key
-        if (unit != bilingualUnit) {
-            // A new resource — apply fresh, then remember the block count for the probe.
-            bilingualUnit = unit
-            controller.apply(unit, lang)
-            bilingualExpectedCount = vm.state.value.translationsByUnit[unit]?.size ?: 0
-        } else if (force) {
-            controller.apply(unit, lang)
-            bilingualExpectedCount = vm.state.value.translationsByUnit[unit]?.size ?: bilingualExpectedCount
-        } else {
-            controller.reapplyIfNeeded(unit, lang, expectedCount = bilingualExpectedCount)
+        bilingualJob?.cancel()
+        bilingualJob = lifecycleScope.launch {
+            if (awaitHydration) awaitBilingualHydration(vm)
+            if (!vm.state.value.enabled) return@launch
+            val nav = navigator ?: return@launch
+            val href = nav.currentLocator.value.href.toString()
+            val unit = provider.unitForHref(href) ?: return@launch
+            val lang = vm.state.value.targetLanguage.key
+            when {
+                unit != bilingualUnit -> { bilingualUnit = unit; controller.apply(unit, lang) }
+                force -> controller.apply(unit, lang)
+                else -> controller.reapplyIfNeeded(unit, lang, expectedCount = controller.expectedCountFor(unit))
+            }
+        }
+    }
+
+    /** feature #131 WI-7b — wait until the VM has hydrated its persisted config (the `init` store read
+     *  flips enabled/language). Bounded so a never-hydrating VM doesn't hang the open-time apply; the
+     *  persisted store value is authoritative on the first frame after hydration. */
+    private suspend fun awaitBilingualHydration(vm: com.vreader.app.bilingual.BilingualViewModel) {
+        val persisted = runCatching { container.perBookBilingualStore.read(book?.fingerprintKey ?: return) }
+            .getOrNull() ?: return
+        // Wait until the VM's live enabled matches the persisted enabled (hydration finished).
+        for (i in 0 until 100) {
+            if (vm.state.value.enabled == persisted.enabled) return
+            kotlinx.coroutines.delay(20)
         }
     }
 
@@ -544,11 +564,13 @@ class ReaderActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
-        // feature #131 WI-7b — invalidate the bilingual session BEFORE the fragment/publication teardown
-        // so any in-flight/late apply no-ops at its next token re-check (a JS eval against a torn-down
-        // navigator throws — the bump is the clear-before-teardown guarantee; done before super, which
-        // tears the fragment). The VM's own coroutines are cancelled with its viewModelScope; we drop the
-        // references so a re-open builds a fresh controller/VM.
+        // feature #131 WI-7b — invalidate the bilingual session AND cancel the in-flight re-apply job
+        // BEFORE the fragment/publication teardown so no late apply reaches the torn-down navigator (a
+        // JS eval against it throws; the bump makes the next token re-check discard, the job cancel stops
+        // a suspended apply). Done before super, which tears the fragment. The VM is cleared by Android
+        // (it lives in this activity's ViewModelStore); we drop the references so a re-open is fresh.
+        bilingualJob?.cancel()
+        bilingualJob = null
         bilingualController?.bumpSession()
         bilingualController = null
         bilingualViewModel = null
@@ -585,10 +607,11 @@ class ReaderActivity : AppCompatActivity() {
                 runCatching { nav.submitPreferences(EpubPreferences(scroll = true) + settings.toEpubPreferences()) }
                     .onFailure { android.util.Log.w("ReaderActivity", "submitPreferences failed; display change not applied", it) }
                 // feature #131 WI-7b — a `submitPreferences` reflow can drop the injected decorations
-                // (a CSS/typography reflow re-renders the resource DOM). Probe-gate a re-inject so the
-                // interlinear survives a Display-settings change (spike finding c-ii). A no-op when the
-                // decorations survived, and when bilingual is off / non-EPUB.
-                maybeReapplyBilingual(force = false)
+                // (a CSS/typography reflow re-renders the resource DOM). Schedule a probe-gated re-inject
+                // (on the dedicated job — never suspend this settings collector) so the interlinear
+                // survives a Display-settings change (spike finding c-ii). A no-op when the decorations
+                // survived, and when bilingual is off / non-EPUB.
+                scheduleBilingual(force = false)
             }
         }
     }
@@ -619,9 +642,10 @@ class ReaderActivity : AppCompatActivity() {
                     runCatching { annotations.isBookmarked(current.fingerprintKey, canonical) }.getOrDefault(false)
                 // feature #131 WI-7b — the universal re-apply signal for ALL four EPUB recreation
                 // cases (scroll round-trip / href change / fragment recreation / activity recreate):
-                // when bilingual is on, probe-gate a re-apply on the current resource. A unit CHANGE
+                // schedule a probe-gated re-apply on the DEDICATED job (never suspend this collector on
+                // translation — chrome/progress/bookmark updates above stay responsive). A unit CHANGE
                 // applies fresh; a same-unit reflow re-injects ONLY if the DOM lost the decorations.
-                maybeReapplyBilingual(force = false)
+                scheduleBilingual(force = false)
             }
         }
     }
@@ -1046,16 +1070,22 @@ class ReaderActivity : AppCompatActivity() {
     fun bilingualControllerBuiltForTest(): Boolean = bilingualController != null
 
     /** Enable bilingual for this book (the store/VM seam the connected test drives — the More-menu
-     *  entry is WI-9), then apply the interlinear for the current resource. Returns after the apply. */
+     *  entry is WI-9), then apply the interlinear for the current resource. Awaits BOTH the requested
+     *  language AND enabled before applying (so the apply uses the intended language, not a stale one)
+     *  and drives the controller directly (deterministic vs the scheduled job). Returns after the apply. */
     @androidx.annotation.VisibleForTesting
     suspend fun enableBilingualForTest(languageKey: String? = null) {
         val vm = bilingualViewModel ?: return
+        val controller = bilingualController ?: return
+        val provider = bilingualProvider ?: return
         languageKey?.let { vm.setTargetLanguage(it) }
         vm.setEnabled(true)
-        // Wait for the VM's serial command consumer to flip `enabled` before applying.
-        awaitBilingualEnabled(true)
-        bilingualController?.bumpSession()   // fresh session for the enable (matches WI-9 wiring)
-        maybeReapplyBilingual(force = true)
+        awaitBilingualState(enabled = true, language = languageKey)
+        controller.bumpSession()   // fresh session for the enable (matches WI-9 wiring)
+        val nav = navigator ?: return
+        val unit = provider.unitForHref(nav.currentLocator.value.href.toString()) ?: return
+        bilingualUnit = unit
+        controller.apply(unit, vm.state.value.targetLanguage.key)
     }
 
     /** Disable bilingual + clear the decorations. */
@@ -1063,33 +1093,43 @@ class ReaderActivity : AppCompatActivity() {
     suspend fun disableBilingualForTest() {
         val vm = bilingualViewModel ?: return
         vm.setEnabled(false)
-        awaitBilingualEnabled(false)
-        bilingualController?.bumpSession()
-        bilingualController?.clear()
+        awaitBilingualState(enabled = false, language = null)
+        bilingualController?.shutdown()
         bilingualUnit = null
-        bilingualExpectedCount = 0
     }
 
-    /** Force a re-apply for the current resource through the SAME probe-gated seam (proves the
-     *  recreation re-apply restores from cache with zero provider calls). */
+    /** Force a probe-gated re-apply for the current resource through the SAME controller seam (proves the
+     *  recreation re-apply restores from cache with zero provider calls, no dup). */
     @androidx.annotation.VisibleForTesting
-    suspend fun reapplyBilingualForTest() = maybeReapplyBilingual(force = false)
+    suspend fun reapplyBilingualForTest() {
+        val vm = bilingualViewModel ?: return
+        val controller = bilingualController ?: return
+        val provider = bilingualProvider ?: return
+        val nav = navigator ?: return
+        val unit = provider.unitForHref(nav.currentLocator.value.href.toString()) ?: return
+        controller.reapplyIfNeeded(unit, vm.state.value.targetLanguage.key, controller.expectedCountFor(unit))
+    }
 
     /** The CURRENT decoration count in the live resource DOM (via the probe script) — proves the
      *  inject/clear ran against the real WebView. -1 when the controller/nav is absent. */
     @androidx.annotation.VisibleForTesting
     suspend fun bilingualDecorationCountForTest(): Int {
         val nav = navigator ?: return -1
-        val raw = runCatching { nav.evaluateJavascript(com.vreader.app.bilingual.EpubBilingualJs.decorationCountScript) }.getOrNull()
+        val raw = evalOnMain(nav, com.vreader.app.bilingual.EpubBilingualJs.decorationCountScript)
         return com.vreader.app.bilingual.EpubBilingualJs.parseCountResult(raw, default = -1)
     }
 
-    private suspend fun awaitBilingualEnabled(expected: Boolean) {
+    /** Await the VM's serial command consumer flipping BOTH `enabled` to [enabled] AND (when non-null)
+     *  the target [language]. Throws on timeout so a test fails explicitly rather than silently applying
+     *  with stale state (Gate-4 Low). */
+    private suspend fun awaitBilingualState(enabled: Boolean, language: String?) {
         val vm = bilingualViewModel ?: return
-        for (i in 0 until 100) {
-            if (vm.state.value.enabled == expected) return
+        for (i in 0 until 150) {
+            val s = vm.state.value
+            if (s.enabled == enabled && (language == null || s.targetLanguage.key == language)) return
             kotlinx.coroutines.delay(20)
         }
+        throw AssertionError("bilingual state (enabled=$enabled, language=$language) not reached in time")
     }
 
     /** Enumerate the CURRENT resource's leaf blocks against the live navigator (the SAME enumerate
@@ -1098,7 +1138,7 @@ class ReaderActivity : AppCompatActivity() {
     @androidx.annotation.VisibleForTesting
     suspend fun bilingualEnumerateForTest(): List<com.vreader.app.bilingual.EpubBilingualJs.Block> {
         val nav = navigator ?: return emptyList()
-        val raw = runCatching { nav.evaluateJavascript(com.vreader.app.bilingual.EpubBilingualJs.enumScript) }.getOrNull()
+        val raw = evalOnMain(nav, com.vreader.app.bilingual.EpubBilingualJs.enumScript)
         return com.vreader.app.bilingual.EpubBilingualJs.parseEnumResult(raw)
     }
 
