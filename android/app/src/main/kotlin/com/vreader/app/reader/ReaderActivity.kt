@@ -1051,6 +1051,7 @@ class ReaderActivity : AppCompatActivity() {
                 com.vreader.app.reader.settings.ReaderSettingsSheet(
                     settings = settings,
                     onTheme = { v -> val o = store.nextSeq(); container.appScope.launch { store.setTheme(v, o) } },
+                    onLayout = { v -> val o = store.nextSeq(); container.appScope.launch { store.setLayout(v, o) } },
                     onFontFamily = { v -> val o = store.nextSeq(); container.appScope.launch { store.setFontFamily(v, o) } },
                     onFontSize = { v -> val o = store.nextSeq(); container.appScope.launch { store.setFontSize(v, o) } },
                     onLineSpacing = { v -> val o = store.nextSeq(); container.appScope.launch { store.setLineSpacing(v, o) } },
