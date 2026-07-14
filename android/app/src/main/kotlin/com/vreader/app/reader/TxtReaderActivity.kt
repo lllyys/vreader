@@ -768,6 +768,17 @@ class TxtReaderActivity : ComponentActivity() {
                                         },
                                         jumpRequest = pagedJumpRequest.value,
                                         onJumpConsumed = { pagedJumpRequest.value = null },
+                                        // feature #137 WI-7b — wire the SAME selection controller + persisted
+                                        // highlights the scroll body receives, so paged SELECTION (WI-7a) and
+                                        // paged WASH (this WI) are LIVE in-app. Selection long-press-drag begins
+                                        // a source selection through the controller; a finalize opens the
+                                        // create popover; a settled tap resolves tap-to-edit against an existing
+                                        // highlight (returns true → the classifier suppresses page-turn/chrome
+                                        // for that tap). Washes are drawn per page from `highlights`.
+                                        selectionController = selectionController,
+                                        onSelectionFinalized = { finalizeTxtSelection(selectionController, popoverVm) },
+                                        onTapEditAt = { point -> onTxtTapEditPaged(point, s.book, highlightsList, selectionController, popoverVm) },
+                                        highlights = highlightsList,
                                     )
                                 } else {
                                     TxtBody(
@@ -964,6 +975,29 @@ class TxtReaderActivity : ComponentActivity() {
         pendingTxtText = hit.selectedText
         val anchor = c.toWindow(localPoint) ?: androidx.compose.ui.geometry.Offset.Zero
         vm.showForExisting(hit.color, hit.note, anchor.x, anchor.y)
+    }
+
+    /** feature #137 WI-7b — the PAGED tap-to-edit. Resolves the tap → source offset (page registry) →
+     *  the hit highlight; if one is hit, opens the EDIT popover and RETURNS true so the unified
+     *  pagedTapZones classifier SUPPRESSES page-turn/chrome navigation for that tap (no navigate+edit
+     *  double-fire, Gate-4 R1 Critical). Returns false when no highlight is hit (the tap navigates as
+     *  WI-6b) — and does NOT dismiss the selection there, so a plain reading tap still turns the page. */
+    private fun onTxtTapEditPaged(
+        localPoint: androidx.compose.ui.geometry.Offset,
+        book: com.vreader.app.data.Book,
+        highlights: List<com.vreader.app.annotations.HighlightRecord>,
+        controller: TxtSelectionController?,
+        vm: com.vreader.app.annotations.SelectionPopoverViewModel,
+    ): Boolean {
+        val c = controller ?: return false
+        val off = c.resolveSourceOffset(localPoint)
+        val hit = off?.let { TxtHighlightHitTester.highlightAt(it, highlights) } ?: return false
+        c.clear()
+        pendingTxtHighlightId = hit.id
+        pendingTxtText = hit.selectedText
+        val anchor = c.toWindow(localPoint) ?: androidx.compose.ui.geometry.Offset.Zero
+        vm.showForExisting(hit.color, hit.note, anchor.x, anchor.y)
+        return true
     }
 
     private fun txtPopoverActions(

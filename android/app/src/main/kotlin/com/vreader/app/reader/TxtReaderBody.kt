@@ -21,8 +21,12 @@
 // feature #137 WI-7a — paged text SELECTION is now integrated into [TxtPagedBody]: each visible page
 // registers its rendered layout + coords + PageOffsetMap with the (optional) TxtSelectionController, a
 // long-press-drag over a page begins/extends a SOURCE selection (word-select via the page's
-// PageOffsetMap, GLOBAL source coords, MD dual-affinity), and a tap resolves a source offset. The
-// highlight WASH render on the page, bookmarks, TTS, and find are still WI-7b/8/9 (inert in paged mode).
+// PageOffsetMap, GLOBAL source coords, MD dual-affinity), and a tap resolves a source offset.
+//
+// feature #137 WI-7b — the persisted-highlight WASH is now rendered per page: each visible page's
+// rendered Text gets a translucent background over every stored highlight whose SOURCE range intersects
+// that page, projected page-local via TxtPagedWash.washesForPage (the page's PageOffsetMap clamps a
+// boundary-spanning highlight per page). Bookmarks / TTS / find remain WI-8/9 (inert in paged mode).
 //
 // feature #137 WI-6b — the designed page-turn AFFORDANCES on [TxtPagedBody]: the 30/40/30 tap-zones
 // (paged/PagedTapZones.pagedTapZones on the pager — LEFT→prev, RIGHT→next via animateScrollToPage, CENTER
@@ -88,6 +92,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import com.vreader.app.annotations.HighlightRecord
 import com.vreader.app.reader.paged.ComposeLineMeasurer
 import com.vreader.app.reader.paged.PageContentBox
 import com.vreader.app.reader.paged.PageOffsetMap
@@ -154,6 +159,12 @@ internal fun TxtPagedBody(
     // navigation for that tap (Gate-4 R1 Critical — no navigate+edit double-fire). Returns false → the tap
     // navigates (the WI-6b tap-zone behavior). Defaulted to a no-op returning false.
     onTapEditAt: (Offset) -> Boolean = { false },
+    // feature #137 WI-7b — the persisted highlights whose SOURCE ranges are washed on each visible page.
+    // The SAME `highlightsList` the scroll body's `washesForChunk` derives from; each page's rendered
+    // `Text` gets a translucent background over every highlight intersecting that page's source extent,
+    // via TxtPagedWash.washesForPage(pageMap, highlights) (clamped per page for a boundary-spanning
+    // highlight). Defaulted empty so #129/WI-6a/6b/7a call sites + previews stay valid (no wash).
+    highlights: List<HighlightRecord> = emptyList(),
 ) {
     val isMarkdown = format == BookFormat.md
     val density = LocalDensity.current
@@ -437,15 +448,30 @@ internal fun TxtPagedBody(
                             }
                             DisposableEffect(selectionController, page) { onDispose { selectionController.unregisterPage(page) } }
                         }
+                        // feature #137 WI-7b — the persisted-highlight WASH for THIS page: project every
+                        // highlight whose SOURCE range intersects the page onto page-local rendered spans via
+                        // the page's map (boundary-spanning highlights clamp per page). Recomputed only when
+                        // the map or the highlight set changes, then painted BEHIND the page Text through
+                        // drawBehind (getPathForRange, the same mechanism the scroll body uses) — a live
+                        // redraw when a highlight is added/edited/removed (highlights is Compose state upstream).
+                        val pageWashes = remember(pageMap, highlights) {
+                            TxtPagedWash.washesForPage(pageMap, highlights)
+                        }
+                        // Capture the layout whenever it is needed downstream (selection OR wash) so the wash
+                        // has a TextLayoutResult to paint against even on a non-annotatable (no-controller) open.
+                        val needsLayout = selectionController != null || pageWashes.isNotEmpty()
                         Text(
                             text = rendered,
                             // The SAME effective style phase-1 measured against (deterministic breaks).
                             style = effectiveStyle,
-                            onTextLayout = { if (selectionController != null) pageLayout = it },
+                            onTextLayout = { if (needsLayout) pageLayout = it },
                             modifier = Modifier
                                 .fillMaxSize()
                                 .testTag("txt-page-$page")
-                                .onGloballyPositioned { if (selectionController != null) pageCoords = it },
+                                .onGloballyPositioned { if (selectionController != null) pageCoords = it }
+                                .drawBehind {
+                                    if (pageWashes.isNotEmpty()) pageLayout?.let { drawWashes(it, pageWashes) }
+                                },
                         )
                     }
                 }
@@ -479,6 +505,31 @@ private fun TxtScrollFallback(
 ) {
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
     TxtBody(document, listState, format, mapper, textStyle = textStyle, marginDp = marginDp)
+}
+
+/**
+ * Feature #137 WI-7b — the PAGE-scoped analog of [TxtWashMapper.washesByChunk]. Projects each stored
+ * highlight's SOURCE range onto ONE rendered page as page-LOCAL rendered [WashSpan]s via the page's
+ * [PageOffsetMap.sourceRangeToRendered]. The map clamps a highlight that starts before / ends after the
+ * page to the page's rendered extent, so a highlight spanning a page boundary washes correctly on each
+ * covered page (each call sees only that page's map). A highlight without a TXT char range, or an
+ * empty/inverted range, is skipped; an MD marker-only source slice maps to an EMPTY rendered range and
+ * draws nothing (parity with the scroll [TxtWashMapper]). Pure — no Compose; the JVM `TxtPagedWashTest`
+ * covers the range math.
+ */
+object TxtPagedWash {
+    fun washesForPage(map: PageOffsetMap, highlights: List<HighlightRecord>): List<WashSpan> {
+        val out = ArrayList<WashSpan>(highlights.size)
+        for (h in highlights) {
+            val s = h.locator.charRangeStartUTF16 ?: continue
+            val e = h.locator.charRangeEndUTF16 ?: continue
+            if (e <= s) continue
+            val rendered = map.sourceRangeToRendered(Utf16Range(s, e)) ?: continue
+            if (rendered.isEmpty) continue
+            out.add(WashSpan(rendered, h.color))
+        }
+        return out
+    }
 }
 
 /**
