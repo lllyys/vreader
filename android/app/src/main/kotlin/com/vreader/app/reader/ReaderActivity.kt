@@ -231,8 +231,14 @@ class ReaderActivity : AppCompatActivity() {
 
             val initial = computeInitialLocator(key)
             // feature #129 WI-5 — open with the user's stored Display settings already applied (so a
-            // non-default theme/typography renders on first paint, no flash), keeping the scroll layout.
-            val initialPrefs = EpubPreferences(scroll = true) + container.readerSettingsStore.current().toEpubPreferences()
+            // non-default theme/typography renders on first paint, no flash). feature #137 WI-3 — the
+            // OVERFLOW follows the stored layout: Scroll → Readium scroll (the default), Paged → Readium
+            // native pagination (horizontal page-turn). The mapper leaves `scroll` unset, so the left
+            // operand's scroll wins the `+` merge.
+            val current = container.readerSettingsStore.current()
+            val initialPrefs =
+                EpubPreferences(scroll = current.layout == com.vreader.app.reader.settings.ReaderLayout.Scroll) +
+                    current.toEpubPreferences()
             val factory = EpubNavigatorFactory(pub)
             // Attach only when the activity is at least STARTED AND its fragment state
             // isn't already saved — `commitNow` against a state-saved manager throws
@@ -735,13 +741,18 @@ class ReaderActivity : AppCompatActivity() {
 
     /** feature #129 WI-5 — apply the live "Display" settings to the navigator: re-submit Readium
      *  EpubPreferences (typography + per-theme colors) on every change so a settings edit updates the
-     *  open reader immediately. Scroll layout is preserved (WI-5 owns typography/theme only). The
-     *  open-time value is already applied via `initialPrefs`; re-submitting the same value is a cheap
+     *  open reader immediately. feature #137 WI-3 — the OVERFLOW now follows the live layout too:
+     *  Scroll → Readium scroll (the default), Paged → Readium native pagination (horizontal page-turn),
+     *  so the Display-sheet Layout toggle flips scroll↔paged on the open reader. Readium fires
+     *  `currentLocator` on each page turn in paginated mode (the save/progress feed — [observePosition]).
+     *  The open-time value is already applied via `initialPrefs`; re-submitting the same value is a cheap
      *  no-op, so we don't drop the first emission (keeps the render authoritative). */
     private fun observeDisplaySettings(nav: EpubNavigatorFragment) {
         lifecycleScope.launch {
             container.readerSettingsStore.settings.collect { settings ->
-                runCatching { nav.submitPreferences(EpubPreferences(scroll = true) + settings.toEpubPreferences()) }
+                val prefs = EpubPreferences(scroll = settings.layout == com.vreader.app.reader.settings.ReaderLayout.Scroll) +
+                    settings.toEpubPreferences()
+                runCatching { nav.submitPreferences(prefs) }
                     .onFailure { android.util.Log.w("ReaderActivity", "submitPreferences failed; display change not applied", it) }
                 // feature #131 WI-7b — a `submitPreferences` reflow can drop the injected decorations
                 // (a CSS/typography reflow re-renders the resource DOM). Schedule a probe-gated re-inject
@@ -1192,6 +1203,32 @@ class ReaderActivity : AppCompatActivity() {
      *  NOT assert the WebView painted that pixel (a CSS/pixel assertion would; that's WI-8 acceptance). */
     @androidx.annotation.VisibleForTesting
     fun appliedBackgroundArgb(): Int? = navigator?.settings?.value?.backgroundColor?.int
+
+    /** Test hook (feature #137 WI-3): the overflow mode the live navigator has *resolved* — `true` when
+     *  Readium is scrolling (layout==Scroll), `false` when paginated (layout==Paged), or null before the
+     *  navigator/settings exist. Proves the layout toggle reached and was resolved by the live
+     *  EpubNavigatorFragment (scroll↔paged overflow), not that the WebView repainted the columns. */
+    @androidx.annotation.VisibleForTesting
+    fun appliedScroll(): Boolean? = navigator?.settings?.value?.scroll
+
+    /** Test hook (feature #137 WI-3): advance one page/screen forward through the SAME navigator seam
+     *  Readium's native horizontal page-turn uses; returns Readium's Boolean (false at the last page).
+     *  Lets a connected test drive a real page turn and assert `currentLocator` (position/progress)
+     *  advanced on the turn — the Gate-2 High-4 requirement. */
+    @androidx.annotation.VisibleForTesting
+    fun goForwardForTest(): Boolean = navigator?.goForward(false) ?: false
+
+    /** Test hook (feature #137 WI-3): a comparable position key for the CURRENT reading position —
+     *  `href#progression` (within-resource, present as soon as a page renders in paginated mode; a
+     *  horizontal page turn changes progression or href). Proves a page turn advanced `currentLocator`
+     *  (the save/progress feed) without depending on the book-level `totalProgression`, which Readium
+     *  may recompute lazily after a reflow. Null before the navigator has rendered. */
+    @androidx.annotation.VisibleForTesting
+    fun currentPositionKeyForTest(): String? {
+        val loc = navigator?.currentLocator?.value ?: return null
+        val href = loc.href.toString().takeIf { it.isNotBlank() } ?: return null
+        return "$href#${loc.locations.progression ?: 0.0}"
+    }
 
     // feature #133 WI-11 test hooks — assert the in-book search wiring against the live host + live Readium
     // publication without driving Compose gestures (the live Search-icon / sheet taps ride WI-12 acceptance
