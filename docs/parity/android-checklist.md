@@ -89,7 +89,7 @@ Build order is roughly reuse-leverage / dependency order.
   AI-credential-gated (a mock/integration path verifies the pipeline). iOS parity: #56/#100.
   **VERIFIED 2026-07-14 — #131 (GH #1923 closed, `android/v0.19.0`); box D COMPLETE.**
 
-- [~] **E. Reader display settings** — the Aa sheet: theme (the 5 reader themes), font family/size,
+- [x] **E. Reader display settings** — the Aa sheet: theme (the 5 reader themes), font family/size,
   line spacing, layout (scroll/paged) — applied across the EPUB/TXT/MD/PDF readers.
   Design: `vreader-themes.jsx` + `vreader-panels.jsx` (+ `vreader-reader.jsx` chrome).
   Needs: an Android `ReaderSettingsStore` (DataStore) + per-host application. iOS parity: #60 WI-10.
@@ -99,6 +99,7 @@ Build order is roughly reuse-leverage / dependency order.
   Compose hosts → needs a paged renderer first; a layout toggle there would be a non-functional control).
   Box E checks when BOTH #129 AND the layout follow-up are VERIFIED.**
   **RECONCILED 2026-07-14: #129 typography VERIFIED (GH #1879); the LAYOUT (scroll/paged) toggle is now filed as **feature #137** (PLANNED — Gate-1 v4 + Gate-2 passed 3 Codex rounds, GH #1990; 12 WIs, incl. a new Compose paged text renderer for TXT/MD). Box E checks when #137 VERIFIED.**
+  **COMPLETE 2026-07-15: #137 VERIFIED (android/v0.20.6, GH #1990 closed; evidence `dev-docs/verification/feature-137-20260715.md`) — the layout toggle + Compose paged renderer (TXT/MD) + EPUB Readium pagination shipped with every paged feature (selection/highlight/bookmark/find/TTS/bilingual-gate) verified on emulator-5554. Box E COMPLETE. This was the LAST unchecked capability box → #110 DONE. One non-blocking perf follow-up (#138: opt-in large-doc paged phase-1 latency, ~96s on a real 14MB CJK book measured in WI-11).**
 
 - [x] **F. Reader navigation chrome** — the designed top/bottom reader bars hosting: Contents (TOC) +
   bookmarks, find-in-book (in-reader text search), and the More menu (book details · share · export).
