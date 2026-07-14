@@ -4,6 +4,8 @@ import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.test.core.app.ApplicationProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -137,5 +139,64 @@ class ReaderSettingsStoreTest {
         // margin's older order (2) must NOT be blocked by font-size's newer order (5) — fields are independent.
         assertEquals(24f, store.current().fontSizeSp, 1e-4f)
         assertEquals(40f, store.current().marginDp, 1e-4f)
+    }
+
+    // feature #137 WI-1 — the reader "layout" (scroll vs paged) preference is wired exactly like `theme`:
+    // stored by enum name (forward-compat), latest-submission-wins per field, and reflected in the flow.
+    // Default is Scroll (iOS parity — the pre-#137 renderer is scroll-only; adding paged must NOT change
+    // an untouched install's layout on upgrade).
+
+    @Test fun layout_defaultsToScroll_whenUnset() = runBlocking {
+        // Pinned product decision: absent any persisted value, the reader stays in scroll mode.
+        assertEquals(ReaderLayout.Scroll, store.current().layout)
+    }
+
+    @Test fun setLayout_persistsAndRoundTrips() = runBlocking {
+        store.setLayout(ReaderLayout.Paged)
+        assertEquals(ReaderLayout.Paged, store.current().layout)
+        store.setLayout(ReaderLayout.Scroll)
+        assertEquals(ReaderLayout.Scroll, store.current().layout)
+    }
+
+    @Test fun settingsFlow_reflectsLayout() = runBlocking {
+        assertEquals(ReaderLayout.Scroll, store.settings.first().layout)   // default
+        store.setLayout(ReaderLayout.Paged)
+        assertEquals(ReaderLayout.Paged, store.settings.first().layout)
+    }
+
+    @Test fun layout_unknownPersistedName_decodesToScrollDefault() = runBlocking {
+        // Forward-compat: a garbage / older layout name (hand-edited or from a future build) must decode
+        // to the default rather than throwing — mirror the theme enum-by-name behavior.
+        store.setLayout(ReaderLayout.Paged)
+        assertEquals(ReaderLayout.Paged, store.current().layout)
+        // Simulate a future/garbage value landing in the persisted JSON via a valid write path first,
+        // then corrupt the stored name and confirm it heals to the default on read.
+        dataStore.edit { prefs ->
+            val raw = prefs[stringPreferencesKey("reader_settings_json")]
+            require(raw != null) { "expected persisted settings after setLayout" }
+            prefs[stringPreferencesKey("reader_settings_json")] =
+                raw.replace("\"${ReaderLayout.Paged.name}\"", "\"NoSuchLayout\"")
+        }
+        assertEquals(ReaderLayout.Scroll, store.current().layout)
+    }
+
+    @Test fun layout_staleSameFieldWrite_isDropped_evenWhenItRunsLast() = runBlocking {
+        // order=2 (newer) commits first; order=1 (older) runs AFTER and must be dropped (latest-wins).
+        store.setLayout(ReaderLayout.Paged, order = 2L)
+        assertEquals(ReaderLayout.Paged, store.current().layout)
+        store.setLayout(ReaderLayout.Scroll, order = 1L)          // older submission, executed last
+        assertEquals("the stale (lower-order) layout write must not overwrite the newer one",
+            ReaderLayout.Paged, store.current().layout)
+        // A strictly-newer write (order=3) DOES commit — the high-water only blocks OLDER ones.
+        store.setLayout(ReaderLayout.Scroll, order = 3L)
+        assertEquals(ReaderLayout.Scroll, store.current().layout)
+    }
+
+    @Test fun layout_highWater_isIndependentOfOtherFields() = runBlocking {
+        store.setTheme(ReaderTheme.Dark, order = 5L)              // theme high-water = 5
+        store.setLayout(ReaderLayout.Paged, order = 2L)          // layout high-water = 2 (its own track)
+        // layout's older order (2) must NOT be blocked by theme's newer order (5) — fields are independent.
+        assertEquals(ReaderTheme.Dark, store.current().theme)
+        assertEquals(ReaderLayout.Paged, store.current().layout)
     }
 }
