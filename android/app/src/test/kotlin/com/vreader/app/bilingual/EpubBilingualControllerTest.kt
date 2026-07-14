@@ -70,11 +70,10 @@ class EpubBilingualControllerTest {
                 js.contains("out.push({ id: bid") -> { evalKinds.add("enum"); enumJson }
                 js.contains("return count;") -> {
                     evalKinds.add("inject")
-                    // Count the entries in the injected translations object (the number of
-                    // top-level `"key":` pairs). The real inject returns a JS count.
-                    val n = Regex("\"[^\"]+\"\\s*:").findAll(
-                        js.substringAfter("var translations = ").substringBefore("};"),
-                    ).count()
+                    // Count the entries in the injected `ids` array (the number of translated
+                    // blocks). The real inject returns a JS count of injected decorations.
+                    val idsJson = js.substringAfter("var ids = ").substringBefore(";").trim()
+                    val n = org.json.JSONArray(idsJson).length()
                     lastInjectedCount = n
                     decorations = n
                     n.toString()

@@ -48,6 +48,9 @@ import kotlinx.coroutines.sync.withLock
  * @param css the interlinear CSS injected via [EpubBilingualJs.styleScript] on every reinject.
  * @param targetIsCjk reports whether the CURRENT target language is CJK (read fresh per apply so
  *   a language change is reflected — drives the heading tracking modifier class).
+ * @param targetIsRtl reports whether the CURRENT target language is RTL (Arabic) — read fresh per
+ *   apply so the injected translation nodes get `dir="rtl"` (LTR EPUBs otherwise render RTL text
+ *   incorrectly). Default false → `dir="auto"`.
  */
 class EpubBilingualController(
     private val evaluateJavascript: suspend (String) -> String?,
@@ -55,6 +58,7 @@ class EpubBilingualController(
     private val onEpubBlocksEnumerated: (TranslationUnitId, List<String>) -> Unit,
     private val css: String = DEFAULT_BILINGUAL_CSS,
     private val targetIsCjk: () -> Boolean = { false },
+    private val targetIsRtl: () -> Boolean = { false },
 ) {
 
     /** Serializes every enumerate→commit→inject / clear sequence against the navigator, so
@@ -81,10 +85,13 @@ class EpubBilingualController(
     /**
      * Invalidate the current session: a later apply for the OLD token no-ops at its next
      * token re-check. Called on navigator-recreate, language change, and bilingual-off.
-     * Cheap + non-suspending so it can run from a lifecycle callback.
+     * Cheap + non-suspending so it can run from a lifecycle callback. Drops the applied-count
+     * anchors — a bumped session's DOM is stale (the caller [clear]s/re-[apply]s), so a fresh
+     * apply must re-inject rather than let a probe accept the old (now wrong-language) count.
      */
     fun bumpSession() {
         session += 1
+        appliedCount.clear()
     }
 
     /**
@@ -170,11 +177,13 @@ class EpubBilingualController(
         // Commit into VM render state (single writer), then inject the DOM.
         onEpubBlocksEnumerated(unit, segments)
         val idToSegment = pair(blocks, segments)
-        if (idToSegment.isEmpty()) {
-            appliedCount[unit] = 0
-            return
-        }
-        evaluateJavascript(EpubBilingualJs.injectScript(idToSegment, targetIsCjk()))
+        // The reconcile set is EVERY enumerated block id — the inject removes the owned decoration
+        // of any enumerated block that is NOT translated this pass (a now-blank/absent block, or a
+        // language switch to a shorter set — Gate-4 High). So we still inject even for an empty map
+        // when there may be stale decorations to reap.
+        val allBlockIds = blocks.map { it.id }
+        evaluateJavascript(EpubBilingualJs.injectScript(idToSegment, allBlockIds, targetIsCjk(), targetIsRtl()))
+        if (session != token) return   // superseded during inject — don't publish stale probe state
         // Record the NONBLANK count actually injected (blank translations are source-only for
         // their block — excluded here so the probe's expected count matches the live DOM).
         appliedCount[unit] = idToSegment.size

@@ -167,6 +167,9 @@ class ReaderActivity : AppCompatActivity() {
     private var bilingualProvider: com.vreader.app.bilingual.EpubChapterTextProvider? = null
     private var bilingualViewModel: com.vreader.app.bilingual.BilingualViewModel? = null
     private var bilingualUnit: com.vreader.app.bilingual.TranslationUnitId? = null
+    // The last-applied target language — a change clears the old-language DOM before the new apply
+    // (so a failed/blank new-language apply never leaves the previous language visible — Gate-4 High).
+    private var bilingualLang: String? = null
     // The dedicated re-apply job: a NEW resource/enable cancels the prior in-flight apply so a
     // slow chapter-A translation can't inject into chapter B (Gate-4 High). The position observer
     // NEVER suspends on translation — it schedules onto this job (chrome updates stay responsive).
@@ -297,6 +300,7 @@ class ReaderActivity : AppCompatActivity() {
             onEpubBlocksEnumerated = vm::onEpubBlocksEnumerated,
             // Read the CURRENT language script fresh per apply so a language change is reflected.
             targetIsCjk = { vm.state.value.targetLanguage.script == com.vreader.app.bilingual.BilingualScript.cjk },
+            targetIsRtl = { vm.state.value.targetLanguage.script == com.vreader.app.bilingual.BilingualScript.rtl },
         )
         // If bilingual is already on for this book (persisted), apply for the opening resource — AFTER
         // the VM hydrates (both enabled + language), so the open-time apply uses the correct language.
@@ -336,6 +340,15 @@ class ReaderActivity : AppCompatActivity() {
             val href = nav.currentLocator.value.href.toString()
             val unit = provider.unitForHref(href) ?: return@launch
             val lang = vm.state.value.targetLanguage.key
+            // A LANGUAGE CHANGE clears the old-language DOM first (bump + clear) so a failed/blank
+            // new-language apply never leaves the previous language visible (Gate-4 High). A fresh
+            // apply follows unconditionally.
+            val languageChanged = bilingualLang != null && bilingualLang != lang
+            if (languageChanged) {
+                controller.shutdown()   // bump session + clear the old-language decorations
+                bilingualUnit = null
+            }
+            bilingualLang = lang
             when {
                 unit != bilingualUnit -> { bilingualUnit = unit; controller.apply(unit, lang) }
                 force -> controller.apply(unit, lang)
@@ -1085,7 +1098,9 @@ class ReaderActivity : AppCompatActivity() {
         val nav = navigator ?: return
         val unit = provider.unitForHref(nav.currentLocator.value.href.toString()) ?: return
         bilingualUnit = unit
-        controller.apply(unit, vm.state.value.targetLanguage.key)
+        val lang = vm.state.value.targetLanguage.key
+        bilingualLang = lang
+        controller.apply(unit, lang)
     }
 
     /** Disable bilingual + clear the decorations. */
@@ -1096,6 +1111,7 @@ class ReaderActivity : AppCompatActivity() {
         awaitBilingualState(enabled = false, language = null)
         bilingualController?.shutdown()
         bilingualUnit = null
+        bilingualLang = null
     }
 
     /** Force a probe-gated re-apply for the current resource through the SAME controller seam (proves the

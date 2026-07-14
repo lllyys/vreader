@@ -62,9 +62,9 @@ class EpubBilingualJsTest {
 
     @Test fun injectScript_isCspSafe_forHostileTranslation() {
         val hostile = "'; alert(1); //</script><img src=x onerror=alert(2)>\" \\ end"
-        val js = EpubBilingualJs.injectScript(mapOf("b1" to hostile))
-        // The map is JSON-encoded, so the raw hostile text NEVER appears verbatim in the JS —
-        // its quotes/backslashes/`</` are escaped. A break-out would require a bare `';` sequence.
+        val js = EpubBilingualJs.injectScript(mapOf("b1" to hostile), allBlockIds = listOf("b1"))
+        // The map is JSON-encoded into arrays, so the raw hostile text NEVER appears verbatim in
+        // the JS — its quotes/backslashes/`</` are escaped. A break-out needs a bare `';` sequence.
         assertFalse("hostile text must not appear verbatim", js.contains("'; alert(1); //"))
         assertTrue("uses createTextNode/textContent, never innerHTML", !js.contains("innerHTML"))
         assertTrue("builds nodes via createElement", js.contains("createElement('div')"))
@@ -73,28 +73,52 @@ class EpubBilingualJsTest {
     }
 
     @Test fun injectScript_isCjkAndQuoteSafe() {
-        val js = EpubBilingualJs.injectScript(mapOf("b1" to "你好\"世界'—<b>x</b>"), targetIsCjk = true)
+        val js = EpubBilingualJs.injectScript(mapOf("b1" to "你好\"世界'—<b>x</b>"), allBlockIds = listOf("b1"), targetIsCjk = true)
         assertTrue("CJK payload survives JSON-encoded", js.contains("\\u") || js.contains("你好") )
         assertTrue("no innerHTML", !js.contains("innerHTML"))
         assertTrue("CJK modifier toggled on", js.contains("var TARGET_CJK = true;"))
     }
 
     @Test fun injectScript_isIdempotent_replacesDecorationSiblingInPlace() {
-        val js = EpubBilingualJs.injectScript(mapOf("b1" to "T"))
-        assertTrue("replaces existing decoration text in place", js.contains("existing.textContent = translations[bid];"))
+        val js = EpubBilingualJs.injectScript(mapOf("b1" to "T"), allBlockIds = listOf("b1"))
+        assertTrue("replaces existing decoration text in place", js.contains("existing.textContent = texts[i];"))
         assertTrue("checks the decoration attribute before replacing",
-            js.contains("existing.hasAttribute('${EpubBilingualJs.DECORATION_ATTRIBUTE}')"))
+            js.contains("e.hasAttribute('${EpubBilingualJs.DECORATION_ATTRIBUTE}')"))
         assertTrue("returns the decoration count", js.contains("return count;"))
     }
 
+    @Test fun injectScript_reconcilesBlankBlocks_byRemovingOwnedDecoration() {
+        // b2 is enumerated but NOT translated → its owned decoration must be removed (Gate-4 High).
+        val js = EpubBilingualJs.injectScript(mapOf("b1" to "T"), allBlockIds = listOf("b1", "b2"))
+        assertTrue("removes owned decoration for a non-translated enumerated block",
+            js.contains("rdec.parentNode.removeChild(rdec)"))
+        assertTrue("reconcile walks all enumerated ids", js.contains("var allIds ="))
+    }
+
+    @Test fun injectScript_setsDirRtl_forRtlTarget() {
+        val ltr = EpubBilingualJs.injectScript(mapOf("b1" to "T"), allBlockIds = listOf("b1"), rtl = false)
+        val rtl = EpubBilingualJs.injectScript(mapOf("b1" to "T"), allBlockIds = listOf("b1"), rtl = true)
+        assertTrue("LTR target → dir auto", ltr.contains("var DIR = 'auto';"))
+        assertTrue("RTL target → dir rtl", rtl.contains("var DIR = 'rtl';"))
+        assertTrue("dir set on the node", rtl.contains("div.setAttribute('dir', DIR)"))
+    }
+
+    @Test fun injectScript_reservedProtoBid_doesNotCollapseTheMap() {
+        // A book-supplied '__proto__' bid must be an ordinary array element (arrays, not an object
+        // literal) — Object.keys of a `{__proto__:…}` literal would silently drop it (Gate-4 Medium).
+        val js = EpubBilingualJs.injectScript(mapOf("__proto__" to "T", "b1" to "U"), allBlockIds = listOf("__proto__", "b1"))
+        assertTrue("__proto__ is carried as a data element", js.contains("__proto__"))
+        assertTrue("iterates the ids array by index", js.contains("for (var i = 0; i < ids.length; i++)"))
+    }
+
     @Test fun injectScript_nodesAreNonSelectable_forSourceOffsetSafety() {
-        val js = EpubBilingualJs.injectScript(mapOf("b1" to "T"))
+        val js = EpubBilingualJs.injectScript(mapOf("b1" to "T"), allBlockIds = listOf("b1"))
         assertTrue("user-select none", js.contains("user-select: none"))
         assertTrue("webkit-user-select none", js.contains("-webkit-user-select: none"))
     }
 
     @Test fun injectScript_headingModifierAndCssEscapeFallback() {
-        val js = EpubBilingualJs.injectScript(mapOf("b1" to "T"))
+        val js = EpubBilingualJs.injectScript(mapOf("b1" to "T"), allBlockIds = listOf("b1"))
         assertTrue("heading class parity", js.contains(EpubBilingualJs.HEADING_CLASS))
         assertTrue("CSS.escape with the [^a-zA-Z0-9_-] fallback",
             js.contains("CSS.escape") && js.contains("[^a-zA-Z0-9_-]"))
@@ -103,8 +127,8 @@ class EpubBilingualJsTest {
     }
 
     @Test fun injectScript_emptyMap_isSourceOnlyNoCrash() {
-        val js = EpubBilingualJs.injectScript(emptyMap())
-        assertTrue("empty translations object", js.contains("var translations = {}"))
+        val js = EpubBilingualJs.injectScript(emptyMap(), allBlockIds = emptyList())
+        assertTrue("empty ids array", js.contains("var ids = []"))
         assertTrue("no innerHTML", !js.contains("innerHTML"))
     }
 

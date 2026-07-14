@@ -77,17 +77,20 @@ object EpubBilingualJs {
             };
             var BLOCK_SELECTOR = Object.keys(BLOCK_TAGS).join(',');
             var seq = 0;
-            var seen = {};   // guards against a book-supplied duplicate/reserved bid (Gate-4 Low)
+            // An ARRAY (not an object) tracks seen bids so a reserved name like '__proto__'
+            // or 'hasOwnProperty' cannot slip past the guard (Gate-4 Medium — a `{}` never
+            // gets an own '__proto__' key). indexOf is exact string membership.
+            var seen = [];
             function stamp(el) {
                 var existing = el.getAttribute('$BLOCK_ID_ATTRIBUTE');
                 // Reuse a stable existing bid ONLY when it is unique this enumeration — a
                 // book-supplied duplicate would otherwise collapse the translation map.
-                if (existing && !Object.prototype.hasOwnProperty.call(seen, existing)) {
-                    seen[existing] = 1;
+                if (existing && seen.indexOf(existing) === -1) {
+                    seen.push(existing);
                     return existing;
                 }
-                do { seq += 1; var bid = 'b' + seq; } while (Object.prototype.hasOwnProperty.call(seen, bid));
-                seen[bid] = 1;
+                do { seq += 1; var bid = 'b' + seq; } while (seen.indexOf(bid) !== -1);
+                seen.push(bid);
                 el.setAttribute('$BLOCK_ID_ATTRIBUTE', bid);
                 return bid;
             }
@@ -153,12 +156,27 @@ object EpubBilingualJs {
      * does not perturb the source selection offsets). RETURNS the decoration count.
      * [targetIsCjk] toggles the CJK heading tracking modifier.
      */
-    fun injectScript(translationsById: Map<String, String>, targetIsCjk: Boolean = false): String {
-        // JSON-encode the whole map in ONE call — CSP-safe, cannot break the JS literal.
-        val translationsLiteral = JSONObject(translationsById.toMap()).toString()
+    fun injectScript(
+        translationsById: Map<String, String>,
+        allBlockIds: List<String>,
+        targetIsCjk: Boolean = false,
+        rtl: Boolean = false,
+    ): String {
+        // Two ARRAYS (not a JS object) so a book-supplied `__proto__` bid is an ordinary array
+        // element — it can neither collapse the map (a `{__proto__:…}` literal has no own key)
+        // nor pollute Object.prototype. Both are JSON-encoded (CSP-safe). The two are index-paired
+        // (ids[i] → texts[i]); the reconcile set is the FULL enumerated id list so a block whose
+        // translation is now blank/absent has its owned decoration removed (Gate-4 High).
+        val ids = translationsById.keys.toList()
+        val texts = ids.map { translationsById.getValue(it) }
+        val idsLiteral = JSONObject().put("v", org.json.JSONArray(ids)).getJSONArray("v").toString()
+        val textsLiteral = JSONObject().put("v", org.json.JSONArray(texts)).getJSONArray("v").toString()
+        val allLiteral = JSONObject().put("v", org.json.JSONArray(allBlockIds)).getJSONArray("v").toString()
         return """
             (function() {
-                var translations = $translationsLiteral;
+                var ids = $idsLiteral;
+                var texts = $textsLiteral;
+                var allIds = $allLiteral;
                 $BID_SELECTOR_ESCAPE_JS
                 function findBlock(bid) {
                     try {
@@ -167,7 +185,13 @@ object EpubBilingualJs {
                         );
                     } catch (e) { return null; }
                 }
+                function ownedDecoration(block) {
+                    var e = block ? block.nextElementSibling : null;
+                    return (e && e.hasAttribute && e.hasAttribute('$DECORATION_ATTRIBUTE')
+                        && e.classList && e.classList.contains('$BLOCK_CLASS')) ? e : null;
+                }
                 var TARGET_CJK = ${if (targetIsCjk) "true" else "false"};
+                var DIR = ${if (rtl) "'rtl'" else "'auto'"};
                 function isHeading(el) {
                     return !!(el && /^H[1-6]${'$'}/i.test(el.tagName || ''));
                 }
@@ -179,25 +203,32 @@ object EpubBilingualJs {
                     var div = document.createElement('div');
                     div.className = '$BLOCK_CLASS' + headingClasses(sourceBlock);
                     div.setAttribute('$DECORATION_ATTRIBUTE', '');
+                    div.setAttribute('dir', DIR);
                     div.style.cssText = 'user-select: none; -webkit-user-select: none;';
                     div.textContent = text;
                     return div;
                 }
+                // Build a set of ids that will carry a translation this pass (for reconciliation).
+                var keep = {};
+                for (var a = 0; a < ids.length; a++) { keep[ids[a]] = 1; }
+                // 1) Reconcile: remove the owned decoration for any enumerated block that is NOT
+                //    getting a translation this pass (a now-blank/absent block — Gate-4 High), so a
+                //    language switch to a shorter/blank set never leaves stale nodes behind.
+                for (var r = 0; r < allIds.length; r++) {
+                    var rid = allIds[r];
+                    if (Object.prototype.hasOwnProperty.call(keep, rid)) continue;
+                    var rblock = findBlock(rid);
+                    var rdec = ownedDecoration(rblock);
+                    if (rdec && rdec.parentNode) { rdec.parentNode.removeChild(rdec); }
+                }
+                // 2) Inject / update in place for each translated id.
                 var count = 0;
-                var keys = Object.keys(translations);
-                for (var k = 0; k < keys.length; k++) {
-                    var bid = keys[k];
-                    // Use the prototype's hasOwnProperty so a book-supplied bid that shadows a
-                    // built-in name (e.g. 'hasOwnProperty') cannot break the guard (Gate-4 Low).
-                    if (!Object.prototype.hasOwnProperty.call(translations, bid)) continue;
+                for (var i = 0; i < ids.length; i++) {
+                    var bid = ids[i];
                     var block = findBlock(bid);
                     if (!block) continue;
-                    var existing = block.nextElementSibling;
-                    if (existing
-                        && existing.hasAttribute
-                        && existing.hasAttribute('$DECORATION_ATTRIBUTE')
-                        && existing.classList
-                        && existing.classList.contains('$BLOCK_CLASS')) {
+                    var existing = ownedDecoration(block);
+                    if (existing) {
                         if (isHeading(block)) {
                             existing.classList.add('$HEADING_CLASS');
                             existing.classList.toggle('$CJK_CLASS', TARGET_CJK);
@@ -205,11 +236,12 @@ object EpubBilingualJs {
                             existing.classList.remove('$HEADING_CLASS');
                             existing.classList.remove('$CJK_CLASS');
                         }
-                        existing.textContent = translations[bid];
+                        existing.setAttribute('dir', DIR);
+                        existing.textContent = texts[i];
                         count += 1;
                         continue;
                     }
-                    var node = makeBlock(translations[bid], block);
+                    var node = makeBlock(texts[i], block);
                     if (block.parentNode) {
                         block.parentNode.insertBefore(node, block.nextSibling);
                         count += 1;
