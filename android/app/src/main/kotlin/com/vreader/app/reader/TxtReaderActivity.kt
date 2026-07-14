@@ -164,6 +164,9 @@ private sealed interface TxtUiState {
         val document: TxtDocument,
         val book: Book,
         val initialIndex: Int,
+        // feature #137 WI-6a — the resume anchor as a raw source-UTF-16 offset (the paged body restores
+        // to pageContaining(initialOffset); the scroll body uses initialIndex = chunkForOffset(offset)).
+        val initialOffset: Int,
     ) : TxtUiState
 }
 
@@ -235,11 +238,46 @@ class TxtReaderActivity : ComponentActivity() {
                         // non-null by the gate above (Loaded is unreachable pre-emission).
                         val displaySettings = checkNotNull(settingsOrNull)
                         val listState = rememberLazyListState(initialFirstVisibleItemIndex = s.initialIndex)
-                        // onStop flush — captures the live list state + book/document.
+
+                        // feature #137 WI-6a — the paged renderer's per-open state: the WI-4 paginator +
+                        // WI-5 navigator (offset↔page + reflow reconciliation) + a small page-render LRU.
+                        // Held here (not inside TxtPagedBody) so the flush/restore seams + the connected
+                        // test seams read them; a fresh set per document keeps re-opens independent.
+                        val pagedPaginator = remember(s.document) { com.vreader.app.reader.paged.TxtPaginator() }
+                        val pagedNavigator = remember(s.document) { com.vreader.app.reader.paged.TxtPageNavigator(pagedPaginator) }
+                        val pagedRenderCache = remember(s.document) { PagedRenderCache() }
+                        // The current page's START source offset — updated by the paged body's save callback
+                        // so onStop can flush it. -1 = the paged body hasn't published a page yet.
+                        val pagedOffset = remember(s.document) { mutableStateOf(-1) }
+                        // Whether the paged body is the one mounted (layout == Paged && !bilingual). Read by
+                        // the test seam + the flush branch so onStop saves the right position source.
+                        val pagedBodyMounted = remember(s.document) { mutableStateOf(false) }
+                        // An external programmatic page-jump request (the connected test's page turn; future
+                        // bookmark/search jumps land here). The paged body observes it, scrolls, then clears
+                        // it via onJumpConsumed. -1 / null-equivalent = nothing pending.
+                        val pagedJumpRequest = remember(s.document) { mutableStateOf<Int?>(null) }
                         SideEffect {
-                            flushPosition = { savePosition(s.book, s.document, listState.firstVisibleItemIndex) }
+                            testPagedNavigator = pagedNavigator
+                            testPagedRenderCache = pagedRenderCache
+                            testPagedOffset = pagedOffset
+                            testPagedBodyMounted = pagedBodyMounted
+                            testPagedJumpRequest = pagedJumpRequest
+                            testPagedBook = s.book
                         }
-                        // Debounced steady-state save as the user scrolls.
+
+                        // onStop flush — the PAGED body flushes its current page-start offset; the scroll
+                        // body flushes the top-visible chunk's offset. One seam, two sources.
+                        SideEffect {
+                            flushPosition = {
+                                if (pagedBodyMounted.value && pagedOffset.value >= 0) {
+                                    savePositionOffset(s.book, pagedOffset.value)
+                                } else {
+                                    savePosition(s.book, s.document, listState.firstVisibleItemIndex)
+                                }
+                            }
+                        }
+                        // Debounced steady-state save as the user scrolls (SCROLL body only; the paged body
+                        // saves on each settled page turn via its onSaveSourceOffset callback).
                         LaunchedEffect(listState, s.document) {
                             snapshotFlow { listState.firstVisibleItemIndex }
                                 .drop(1)
@@ -388,12 +426,9 @@ class TxtReaderActivity : ComponentActivity() {
                         val bookmarkRows = remember(bookmarkRecords, s.book) {
                             bookmarkRowItems(bookmarkRecords, s.book.originalFormat, tocIndex = null, previewProvider = previewProvider, dateRenderer = dateRenderer)
                         }
-                        // The live top-visible offset → canonical (recomputed on scroll; the toggle/presence read it).
-                        val liveOffset = s.document.offsetForChunk(listState.firstVisibleItemIndex)
-                        val liveCanonical = remember(s.book, liveOffset) { txtBookmarkLocator(s.book, liveOffset) }
-                        val isBookmarked by produceState(false, liveCanonical, bookmarkRecords) {
-                            value = runCatching { container.annotationsRepository.isBookmarked(bookKey, liveCanonical) }.getOrDefault(false)
-                        }
+                        // NOTE: the live bookmark offset (liveCanonical/isBookmarked) is derived below, AFTER
+                        // usePaged is known, so the top-bar bookmark toggle/presence uses the PAGED current
+                        // page-start offset in paged mode (not the hidden scroll list — Gate-4 R2 High).
 
                         // feature #133 WI-10 — the in-book search VM (ONE per reader session): built from the
                         // ALREADY-decoded reader text so a search never re-reads the file, scoped to a
@@ -446,6 +481,27 @@ class TxtReaderActivity : ComponentActivity() {
                         SideEffect { bilingualViewModel = bilingualVm }
                         val bilingualState by (bilingualVm?.state ?: flowOf(com.vreader.app.bilingual.BilingualUiState()))
                             .collectAsStateWithLifecycle(com.vreader.app.bilingual.BilingualUiState())
+                        // feature #137 WI-6a — whether the PAGED body is the mounted one (layout == Paged AND
+                        // bilingual OFF; the #131 interlinear contract has no paged analog → bilingual-on
+                        // renders scroll; WI-10 formalizes the gate). Hoisted here (above the chrome) so the
+                        // scroll-listState-driven chrome controls (TTS read-aloud, in-book search jump,
+                        // scrubber, bookmark/annotation jump) are made INERT/ABSENT in paged mode — those all
+                        // scroll the hidden LazyListState, which does nothing visible in paged mode and is a
+                        // dead control (Gate-4 High-2). Their paged re-integration is WI-8/WI-9.
+                        val usePaged = displaySettings.layout == com.vreader.app.reader.settings.ReaderLayout.Paged &&
+                            !bilingualState.enabled
+
+                        // The live bookmark position → canonical (the top-bar toggle/presence read it). Mode-
+                        // aware (Gate-4 R2 High): in PAGED mode the current page's START offset (pagedOffset);
+                        // in scroll mode the top-visible chunk's offset. So the bookmark toggle bookmarks the
+                        // PAGE the user is on, and the bookmarked-state reflects it — never the hidden list.
+                        val liveOffset = if (usePaged && pagedOffset.value >= 0) pagedOffset.value
+                            else s.document.offsetForChunk(listState.firstVisibleItemIndex)
+                        val liveCanonical = remember(s.book, liveOffset) { txtBookmarkLocator(s.book, liveOffset) }
+                        val isBookmarked by produceState(false, liveCanonical, bookmarkRecords) {
+                            value = runCatching { container.annotationsRepository.isBookmarked(bookKey, liveCanonical) }.getOrDefault(false)
+                        }
+
                         // The source-chunk → translation-unit anchor map. Constructed cheaply per doc/kind;
                         // its whole-document scan is itself LAZY (runs on first unitsForChunk, only while
                         // enabled + rendering — round-4 audit High-3), so a disabled open pays nothing.
@@ -501,6 +557,28 @@ class TxtReaderActivity : ComponentActivity() {
                             }
                         }
 
+                        // feature #137 WI-6a — a MODE-AWARE offset jump: in PAGED mode a chrome jump
+                        // (bookmark / annotation / search / scrubber) must move the PAGER (via the navigator's
+                        // pageContaining + the paged body's jump seam), NOT the hidden scroll LazyListState —
+                        // else the control is dead (Gate-4 High-2). In scroll mode it uses the existing chunk
+                        // scroll seam. This is the ONLY chrome↔paged glue in WI-6a (uses just the navigator's
+                        // existing pageContaining + jumpRequest — no feature re-integration; full paged
+                        // bookmarks/find/TTS are WI-8/WI-9).
+                        val jumpToOffset: (Int) -> Unit = { offset ->
+                            if (usePaged) {
+                                // Before the first page index publishes, pageContaining() returns 0 for ANY
+                                // offset — so a jump during the sub-second paged-load window would collapse to
+                                // page 0. Skip it while there is no index yet (the control is barely visible
+                                // then); once the index exists the jump lands on the right page (Gate-4 R2 Low).
+                                if (pagedNavigator.index != null) {
+                                    val target = offset.coerceIn(0, (s.document.text.length - 1).coerceAtLeast(0))
+                                    pagedJumpRequest.value = pagedNavigator.pageContaining(target)
+                                }
+                            } else {
+                                ttsScope.launch { runCatching { listState.scrollToItem(s.document.chunkForOffset(offset)) } }
+                            }
+                        }
+
                         TxtReaderChrome(
                             theme = displaySettings.theme,
                             title = s.title,
@@ -526,18 +604,16 @@ class TxtReaderActivity : ComponentActivity() {
                                 if (target == null) {
                                     JumpResult.Failed
                                 } else {
-                                    ttsScope.launch { listState.scrollToItem(s.document.chunkForOffset(target)) }
+                                    jumpToOffset(target)   // pager in paged mode, list in scroll mode
                                     JumpResult.Succeeded
                                 }
                             },
-                            // TXT/MD jump: scroll to the annotation's UTF-16 offset via the existing chunk
-                            // scroll seam (the same path used by resume + scrubber).
+                            // TXT/MD jump: move to the annotation's UTF-16 offset (pager in paged mode, chunk
+                            // scroll in scroll mode — the same path resume + scrubber use).
                             onJumpToAnnotation = { item ->
-                                ttsScope.launch {
-                                    val target = annotationScrollOffset(item)
-                                        .coerceIn(0, (s.document.text.length - 1).coerceAtLeast(0))
-                                    listState.scrollToItem(s.document.chunkForOffset(target))
-                                }
+                                val target = annotationScrollOffset(item)
+                                    .coerceIn(0, (s.document.text.length - 1).coerceAtLeast(0))
+                                jumpToOffset(target)
                             },
                             onShareAnnotations = { shareAnnotations(annotationsSnapshot) },
                             // feature #131 WI-9 — the top-chrome pill (only while bilingual is ON; tapping it
@@ -594,7 +670,7 @@ class TxtReaderActivity : ComponentActivity() {
                                                 JumpResult.Failed
                                             } else {
                                                 inBookSearchVm.commitSearch()
-                                                ttsScope.launch { runCatching { listState.scrollToItem(s.document.chunkForOffset(target)) } }
+                                                jumpToOffset(target)   // pager in paged mode, list in scroll mode
                                                 JumpResult.Succeeded
                                             }
                                         },
@@ -612,17 +688,22 @@ class TxtReaderActivity : ComponentActivity() {
                                     onInstallVoice = ttsVm::installVoiceData, onSystemTts = ttsVm::openSystemTts,
                                 ) else ReaderBottomChrome(
                                     theme = displaySettings.theme,
+                                    // feature #137 WI-6a — progress source is mode-aware: the PAGED body's
+                                    // current page-start offset (so the scrubber fraction tracks the pager),
+                                    // else the scroll top-visible chunk. Page labels stay 0 (page count is
+                                    // shown by WI-6b's chrome footer, not this WI).
                                     progress = TxtProgress.fraction(
-                                        s.document.offsetForChunk(listState.firstVisibleItemIndex),
+                                        if (usePaged) pagedOffset.value.coerceAtLeast(0)
+                                        else s.document.offsetForChunk(listState.firstVisibleItemIndex),
                                         s.document.text.length,
                                     ),
-                                    displayPage = 0, totalPages = 0,   // TXT/MD scroll-only — no page labels
+                                    displayPage = 0, totalPages = 0,   // page labels are WI-6b
+                                    // Scrub moves the PAGER in paged mode, the list in scroll mode (via the
+                                    // shared jumpToOffset seam) — never the hidden list in paged mode.
                                     onScrub = { f ->
-                                        ttsScope.launch {
-                                            val target = (f * s.document.text.length).toInt()
-                                                .coerceIn(0, (s.document.text.length - 1).coerceAtLeast(0))
-                                            listState.scrollToItem(s.document.chunkForOffset(target))
-                                        }
+                                        val target = (f * s.document.text.length).toInt()
+                                            .coerceIn(0, (s.document.text.length - 1).coerceAtLeast(0))
+                                        jumpToOffset(target)
                                     },
                                     onOpenDisplay = { showDisplaySheet = true },
                                     // #132 WI-6: the scaffold hands the Contents/Notes open callbacks in.
@@ -633,7 +714,10 @@ class TxtReaderActivity : ComponentActivity() {
                                     extraSlot = {
                                         ReadAloudChromeSlot(
                                             theme = displaySettings.theme,
-                                            enabled = !starting && s.document.text.isNotBlank(),
+                                            // feature #137 WI-6a — read-aloud (TTS) stays INERT in paged mode
+                                            // (WI-9 re-integrates it); disabling the entry avoids starting TTS
+                                            // that would drive the hidden scroll list (Gate-4 High-2).
+                                            enabled = !usePaged && !starting && s.document.text.isNotBlank(),
                                         ) {
                                             starting = true
                                             ttsScope.launch {
@@ -652,43 +736,72 @@ class TxtReaderActivity : ComponentActivity() {
                             var boxOriginWindow by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
                             var boxSize by remember { mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
                             Box(Modifier.fillMaxSize().onGloballyPositioned { boxOriginWindow = it.localToWindow(androidx.compose.ui.geometry.Offset.Zero); boxSize = it.size }) {
-                                TxtBody(
-                                    s.document, listState, s.book.originalFormat, chunkMapper,
-                                    textStyle = displaySettings.bodyTextStyle(),
-                                    marginDp = displaySettings.marginDp,
-                                    highlightSpan = { chunkIndex ->
-                                        if (!active) null
-                                        else {
-                                            val cs = s.document.offsetForChunk(chunkIndex)
-                                            val ce = if (chunkIndex + 1 < s.document.chunkCount) s.document.offsetForChunk(chunkIndex + 1) else s.document.text.length
-                                            TtsHighlight.localSpan(cs, ce, tts.charStart, tts.charEnd)
-                                        }
-                                    },
-                                    washesForChunk = { washMap[it] ?: emptyList() },
-                                    selectionController = selectionController,
-                                    onSelectionFinalized = { finalizeTxtSelection(selectionController, popoverVm) },
-                                    onTapAt = { point -> onTxtTap(point, s.book, highlightsList, selectionController, popoverVm) },
-                                    // feature #131 WI-8 — interlinear translation slot(s) per chunk. Only
-                                    // drawn while bilingual is enabled; each returned state is derived from
-                                    // the VM's shaped render slice for a unit anchored to this chunk (round-4
-                                    // H2). Empty when off / no unit anchored here → the item's Column holds
-                                    // only the unchanged source Text (behaviorally identical to today).
-                                    bilingualRenderStates = { chunkIndex ->
-                                        if (bilingualVm == null || !bilingualState.enabled) emptyList()
-                                        else bilingualAnchors?.unitsForChunk(chunkIndex).orEmpty().map { unit ->
-                                            com.vreader.app.bilingual.BilingualRenderState.forUnit(bilingualState, unit)
-                                        }
-                                    },
-                                    bilingualLanguage = bilingualState.targetLanguage,
-                                    bilingualTheme = displaySettings.theme,
-                                    bilingualSourceFontSizeSp = displaySettings.fontSizeSp,
-                                    // The translation slots report their window bounds so the selection
-                                    // controller can exclude a long-press on translation from the
-                                    // nearest-source-chunk fallback (round-4 H2 gesture exclusion).
-                                    onBilingualSlotBounds = { bounds ->
-                                        selectionController?.setExcludedBounds(bounds)
-                                    },
-                                )
+                                // feature #137 WI-6a — the body branch (usePaged hoisted above): PAGED
+                                // renderer when the Display layout is Paged AND bilingual is OFF; otherwise the
+                                // pre-#137 continuous-scroll TxtBody (byte-identical behavior — selection/
+                                // washes/TTS/bilingual). The scroll path keeps EVERY existing feature; paged
+                                // mode leaves selection/highlights/bookmarks/TTS/find inert for now (WI-7a/7b/8/9).
+                                SideEffect { pagedBodyMounted.value = usePaged }
+                                if (usePaged) {
+                                    TxtPagedBody(
+                                        document = s.document,
+                                        format = s.book.originalFormat,
+                                        mapper = chunkMapper,
+                                        textStyle = displaySettings.bodyTextStyle(),
+                                        marginDp = displaySettings.marginDp,
+                                        navigator = pagedNavigator,
+                                        paginator = pagedPaginator,
+                                        renderCache = pagedRenderCache,
+                                        initialSourceOffset = s.initialOffset,
+                                        // Persist the CURRENT page's start source offset on each settled
+                                        // page turn (the page-start save; R1 Medium-8) — through the SAME
+                                        // conflated writer the scroll save uses.
+                                        onSaveSourceOffset = { offset ->
+                                            pagedOffset.value = offset
+                                            savePositionOffset(s.book, offset)
+                                        },
+                                        jumpRequest = pagedJumpRequest.value,
+                                        onJumpConsumed = { pagedJumpRequest.value = null },
+                                    )
+                                } else {
+                                    TxtBody(
+                                        s.document, listState, s.book.originalFormat, chunkMapper,
+                                        textStyle = displaySettings.bodyTextStyle(),
+                                        marginDp = displaySettings.marginDp,
+                                        highlightSpan = { chunkIndex ->
+                                            if (!active) null
+                                            else {
+                                                val cs = s.document.offsetForChunk(chunkIndex)
+                                                val ce = if (chunkIndex + 1 < s.document.chunkCount) s.document.offsetForChunk(chunkIndex + 1) else s.document.text.length
+                                                TtsHighlight.localSpan(cs, ce, tts.charStart, tts.charEnd)
+                                            }
+                                        },
+                                        washesForChunk = { washMap[it] ?: emptyList() },
+                                        selectionController = selectionController,
+                                        onSelectionFinalized = { finalizeTxtSelection(selectionController, popoverVm) },
+                                        onTapAt = { point -> onTxtTap(point, s.book, highlightsList, selectionController, popoverVm) },
+                                        // feature #131 WI-8 — interlinear translation slot(s) per chunk. Only
+                                        // drawn while bilingual is enabled; each returned state is derived from
+                                        // the VM's shaped render slice for a unit anchored to this chunk (round-4
+                                        // H2). Empty when off / no unit anchored here → the item's Column holds
+                                        // only the unchanged source Text (behaviorally identical to today).
+                                        bilingualRenderStates = { chunkIndex ->
+                                            if (bilingualVm == null || !bilingualState.enabled) emptyList()
+                                            else bilingualAnchors?.unitsForChunk(chunkIndex).orEmpty().map { unit ->
+                                                com.vreader.app.bilingual.BilingualRenderState.forUnit(bilingualState, unit)
+                                            }
+                                        },
+                                        bilingualLanguage = bilingualState.targetLanguage,
+                                        bilingualTheme = displaySettings.theme,
+                                        bilingualSourceFontSizeSp = displaySettings.fontSizeSp,
+                                        // The translation slots report their window bounds so the selection
+                                        // controller can exclude a long-press on translation from the
+                                        // nearest-source-chunk fallback (round-4 H2 gesture exclusion).
+                                        onBilingualSlotBounds = { bounds ->
+                                            selectionController?.setExcludedBounds(bounds)
+                                        },
+                                    )
+                                }
                                 AnimatedVisibility(pillVisible, modifier = Modifier.align(Alignment.TopEnd).padding(12.dp)) {
                                     InReaderSessionPill(sessionSeconds)
                                 }
@@ -765,26 +878,33 @@ class TxtReaderActivity : ComponentActivity() {
         val decoded = TxtDecoder.decode(File(path))
         val document = TxtDocument.of(decoded.text)
         container.repository.markOpened(key, System.currentTimeMillis())
-        val initial = computeInitialIndex(key, document)
-        return TxtUiState.Loaded(book.title, document, book, initial)
+        val initialOffset = computeInitialOffset(key)
+        val initial = document.chunkForOffset(initialOffset)
+        return TxtUiState.Loaded(book.title, document, book, initial, initialOffset)
     }
 
-    /** Restore: the saved legacy locator's charOffsetUTF16 → the chunk containing it. */
-    private suspend fun computeInitialIndex(key: String, document: TxtDocument): Int {
+    /** Restore: the saved legacy locator's charOffsetUTF16 (the raw source-UTF-16 anchor). The scroll
+     *  body maps it to a chunk (chunkForOffset); the paged body to a page (pageContaining). */
+    private suspend fun computeInitialOffset(key: String): Int {
         // In-memory cache first — a fast rotation / reopen sees the latest offset even
         // before the prior instance's async Room flush commits. Falls to durable Room.
-        container.cachedOffset(key)?.let { return document.chunkForOffset(it) }
+        container.cachedOffset(key)?.let { return it }
         val saved = container.repository.loadPosition(key) ?: return 0
         // ResumeResolver/ResumeTarget are in this package. A TXT position is a legacy
         // (non-Readium) envelope → Canonical; its charOffsetUTF16 is the anchor.
-        val offset = (ResumeResolver.resolve(saved) as? ResumeTarget.Canonical)
+        return (ResumeResolver.resolve(saved) as? ResumeTarget.Canonical)
             ?.locator?.charOffsetUTF16 ?: return 0
-        return document.chunkForOffset(offset)
     }
 
     /** Enqueue the top-visible chunk's char offset; the lone writer persists it (latest-wins). */
     private fun savePosition(book: Book, document: TxtDocument, topIndex: Int) {
-        val offset = document.offsetForChunk(topIndex)
+        savePositionOffset(book, document.offsetForChunk(topIndex))
+    }
+
+    /** feature #137 WI-6a — enqueue a raw source-UTF-16 [offset] (the paged body saves the CURRENT
+     *  page's START offset, already a source offset; the scroll body maps a chunk index first). Both
+     *  funnel through the same conflated writer so a paged save and a scroll save can't interleave. */
+    private fun savePositionOffset(book: Book, offset: Int) {
         // Cache synchronously so an immediate reopen/rotation reads the latest position
         // even before the async Room write below commits.
         container.cacheOffset(book.fingerprintKey, offset)
@@ -1030,6 +1150,62 @@ class TxtReaderActivity : ComponentActivity() {
         throw AssertionError("bilingual state (enabled=$enabled, language=$language) not reached in time")
     }
 
+    // ---- feature #137 WI-6a — paged-body test seams (the connected TxtPagedBodyConnectedTest reads
+    // page-index state + drives programmatic page turns; there is no CU-drivable horizontal-swipe gesture
+    // in the harness, so the turn is exercised via the navigator's page jump). Set by the composition. ----
+    @Volatile private var testPagedNavigator: com.vreader.app.reader.paged.TxtPageNavigator? = null
+    @Volatile private var testPagedRenderCache: PagedRenderCache? = null
+    @Volatile private var testPagedOffset: androidx.compose.runtime.MutableState<Int>? = null
+    @Volatile private var testPagedBodyMounted: androidx.compose.runtime.MutableState<Boolean>? = null
+    @Volatile private var testPagedJumpRequest: androidx.compose.runtime.MutableState<Int?>? = null
+    @Volatile private var testPagedBook: Book? = null
+
+    /** The published page count (0 before phase-1 finishes, or when the paged body isn't mounted). */
+    @androidx.annotation.VisibleForTesting
+    fun pagedPageCountForTest(): Int? = testPagedNavigator?.index?.pageCount
+
+    /** The pager's current page (null before an index publishes). */
+    @androidx.annotation.VisibleForTesting
+    fun pagedCurrentPageForTest(): Int? = testPagedNavigator?.let { if (it.index == null) null else it.currentPage }
+
+    /** The current page's START source offset (the value the host persists). */
+    @androidx.annotation.VisibleForTesting
+    fun pagedCurrentSourceOffsetForTest(): Int? = testPagedNavigator?.let { if (it.index == null) null else it.currentSourceOffset() }
+
+    /** The page containing source [offset] in the current index (null if no index yet). */
+    @androidx.annotation.VisibleForTesting
+    fun pagedPageContainingForTest(offset: Int): Int? = testPagedNavigator?.let { if (it.index == null) null else it.pageContaining(offset) }
+
+    /** The retained rendered-page count (proves the lazy window stays bounded). */
+    @androidx.annotation.VisibleForTesting
+    fun pagedRenderedCacheSizeForTest(): Int? = testPagedRenderCache?.size
+
+    /** Whether the PAGED body is the mounted one (layout == Paged && !bilingual). */
+    @androidx.annotation.VisibleForTesting
+    fun pagedBodyMountedForTest(): Boolean? = testPagedBodyMounted?.value
+
+    /** Turn to the next page PROGRAMMATICALLY by raising the paged body's jump request (the harness cannot
+     *  express a horizontal swipe on the virtual display; the request drives the SAME scroll+save seam a
+     *  settled swipe would, so the pager scrolls, the navigator's currentPage advances, and the new
+     *  page-start offset is persisted). */
+    @androidx.annotation.VisibleForTesting
+    fun turnToNextPageForTest() {
+        val nav = testPagedNavigator ?: return
+        val idx = nav.index ?: return
+        val req = testPagedJumpRequest ?: return
+        val next = (nav.currentPage + 1).coerceAtMost((idx.pageCount - 1).coerceAtLeast(0))
+        req.value = next
+    }
+
+    /** Persist the current paged page-start offset immediately (the connected test's save→reopen proof). */
+    @androidx.annotation.VisibleForTesting
+    fun flushPagedPositionForTest() {
+        val nav = testPagedNavigator ?: return
+        val book = testPagedBook ?: return
+        if (nav.index == null) return
+        savePositionOffset(book, nav.currentSourceOffset())
+    }
+
     companion object {
         const val EXTRA_FINGERPRINT_KEY = "fingerprintKey"
 
@@ -1214,169 +1390,5 @@ private fun ReadAloudChromeSlot(theme: ReaderTheme, enabled: Boolean, onReadAlou
         Icon(Icons.AutoMirrored.Filled.VolumeUp, contentDescription = "Read aloud", tint = tint, modifier = Modifier.size(24.dp))
         // accent label when enabled — the committed TtsEntry active treatment (pre-#129 TtsEntryBar parity).
         Text("Read aloud", color = tint, fontFamily = VReaderFonts.Sans, fontSize = 10.sp, fontWeight = FontWeight.Medium)
-    }
-}
-
-/** The reading body — a LazyColumn over the document's chunk ranges. For BookFormat.md each chunk
- *  renders through MarkdownRenderer (styled); else verbatim. [textStyle] + [marginDp] come from the
- *  #129 Display settings (bodyTextStyle + the margin slider). */
-@Composable
-private fun TxtBody(
-    document: TxtDocument, listState: LazyListState, format: BookFormat,
-    // feature #125 — the single render owner. MD chunks render via mapper.renderedText so the body's
-    // TextLayoutResult matches the controller/wash's offset map exactly (no double render, no drift).
-    mapper: ChunkTextMapper,
-    textStyle: TextStyle, marginDp: Float,
-    highlightSpan: (chunkIndex: Int) -> IntRange? = { null },
-    // feature #124 — annotation highlight washes per chunk (TXT only; the activity passes empty for MD).
-    washesForChunk: (chunkIndex: Int) -> List<WashSpan> = { emptyList() },
-    // feature #124 — TXT custom selection (null = no selection, e.g. MD). onSelectionFinalized fires on
-    // long-press-drag release so the host can show the popover.
-    selectionController: TxtSelectionController? = null,
-    onSelectionFinalized: () -> Unit = {},
-    // feature #124 WI-4 — a tap (LazyColumn-local point) → host hit-tests an existing highlight to edit.
-    onTapAt: (androidx.compose.ui.geometry.Offset) -> Unit = {},
-    // feature #131 WI-8 — the interlinear translation slot(s) anchored to a chunk. Each source chunk `i`'s
-    // item wraps its (byte-unchanged) source `Text` and these translation children in ONE `Column`, so
-    // lazy-index == chunk-index is preserved (round-4 H2). Empty list → no translation child for the
-    // chunk. The translation slots are NON-registered (never call registerChunk).
-    bilingualRenderStates: (chunkIndex: Int) -> List<com.vreader.app.bilingual.BilingualRenderState> = { emptyList() },
-    bilingualLanguage: com.vreader.app.bilingual.BilingualLanguage = com.vreader.app.bilingual.BilingualLanguages.ALL.first(),
-    bilingualTheme: ReaderTheme? = null,
-    bilingualSourceFontSizeSp: Float = 17f,
-    // feature #131 WI-8 — the flattened WINDOW-space bounds of the currently laid-out translation slots,
-    // pushed to the host so the selection controller excludes a long-press on translation from the
-    // nearest-source-chunk fallback (round-4 H2 gesture exclusion).
-    onBilingualSlotBounds: (List<androidx.compose.ui.geometry.Rect>) -> Unit = {},
-) {
-    val isMarkdown = format == BookFormat.md
-    val wash = VReaderColors.Accent.copy(alpha = 0.18f)
-    val selectionAccent = Color(0x575C8FC4)   // design selection bg rgba(92,143,196,0.34)
-    val selection by (selectionController?.selection ?: flowOf(null)).collectAsState(null)
-    // the pointerInput block keys on selectionController (stable), so without this it would capture the
-    // INITIAL onTapAt/onSelectionFinalized closures (stale highlightsList → tap-to-edit never hits).
-    val currentOnTap by androidx.compose.runtime.rememberUpdatedState(onTapAt)
-    val currentOnFinalize by androidx.compose.runtime.rememberUpdatedState(onSelectionFinalized)
-    // feature #131 WI-8 — the WINDOW-space bounds of EACH laid-out translation slot, keyed by
-    // (chunkIndex, slotIndex) so EVERY rendered slot reports its own rect (round-4 audit Medium-1 — a
-    // chunk may anchor several units; the first slot's rect does not cover its siblings). Each slot owns
-    // its entry + disposal, and a source-only/empty slot removes its stale rect. The flattened list is
-    // pushed to the host (→ selection controller's excluded bounds) so a long-press on translation is
-    // never selectable — and never keeps a phantom rect over source content that scrolled into its place.
-    val translationSlotBounds = remember { androidx.compose.runtime.mutableStateMapOf<Pair<Int, Int>, androidx.compose.ui.geometry.Rect>() }
-    LaunchedEffect(translationSlotBounds.entries.toList()) {
-        onBilingualSlotBounds(translationSlotBounds.values.toList())
-    }
-    LazyColumn(
-        Modifier
-            .fillMaxSize()
-            .onGloballyPositioned { selectionController?.setLazyCoords(it) }
-            .then(
-                if (selectionController != null) {
-                    // ONE detector distinguishes a TAP (edit an existing highlight) from a LONG-PRESS+drag
-                    // (new selection) — two separate pointerInput detectors conflict over the same down event.
-                    Modifier.pointerInput(selectionController) {
-                        awaitEachGesture {
-                            val down = awaitFirstDown(requireUnconsumed = false)
-                            val longPress = awaitLongPressOrCancellation(down.id)
-                            if (longPress != null) {
-                                // long-press → selection; finalize only on a COMPLETED drag/up (not a cancel).
-                                selectionController.beginAt(longPress.position)
-                                val completed = drag(longPress.id) { change -> selectionController.extendTo(change.position); change.consume() }
-                                if (completed) currentOnFinalize() else selectionController.clear()
-                            } else if (!down.isConsumed) {
-                                // null also means cancel (e.g. a scroll won) — only a TAP leaves the down
-                                // unconsumed; a scroll consumes it, so it won't be misread as tap-to-edit.
-                                currentOnTap(down.position)
-                            }
-                        }
-                    }
-                } else {
-                    Modifier
-                },
-            ),
-        state = listState,
-        contentPadding = PaddingValues(horizontal = marginDp.dp, vertical = 16.dp),
-    ) {
-        // Count-based: indices on demand (a newline-dense 14MB file can be 100k+ chunks).
-        // ONE lazy item per chunk (loop + keys UNCHANGED → lazy-index == chunk-index preserved, round-4
-        // H2). Inside each item a Column holds the byte-unchanged source Text (below) then the muted,
-        // NON-registered interlinear translation slot(s) anchored to this chunk (feature #131 WI-8).
-        items(count = document.chunkCount, key = { it }) { i ->
-          Column {
-            val raw = document.textForChunk(i).toString()
-            // .md → styled markdown spans (no read-aloud span wash — markers shift offsets, plan §OOS).
-            // .txt → raw verbatim, with the spoken-sentence span washed when read-aloud is active.
-            val span = if (isMarkdown) null else highlightSpan(i)
-            val text = when {
-                isMarkdown -> mapper.renderedText(i)   // #125: the mapper is the single render owner
-                span != null -> buildAnnotatedString {
-                    append(raw)
-                    val a = span.first.coerceIn(0, raw.length); val b = (span.last + 1).coerceIn(a, raw.length)
-                    if (b > a) addStyle(SpanStyle(background = wash), a, b)
-                }
-                else -> AnnotatedString(raw)
-            }
-            // annotation washes drawn BEHIND the text (getPathForRange) — separate from the read-aloud span.
-            val washes = washesForChunk(i)
-            var layout by remember(i) { mutableStateOf<TextLayoutResult?>(null) }
-            var coords by remember(i) { mutableStateOf<androidx.compose.ui.layout.LayoutCoordinates?>(null) }
-            if (selectionController != null) {
-                LaunchedEffect(i, layout, coords) {
-                    val l = layout; val c = coords
-                    if (l != null && c != null) selectionController.registerChunk(i, l, c)
-                }
-                DisposableEffect(selectionController, i) { onDispose { selectionController.unregisterChunk(i) } }
-            }
-            // read `selection` (a State) so a selection change recomposes + redraws the accent.
-            val selRange = if (selection != null) selectionController?.selectionForChunk(i) else null
-            Text(
-                text = text,
-                // merge over the material default (the pre-#129 explicit-param behavior) so platform
-                // text defaults (letterSpacing etc.) are kept — only the Display settings change.
-                style = androidx.compose.material3.LocalTextStyle.current.merge(textStyle),
-                onTextLayout = { layout = it },
-                modifier = Modifier
-                    .onGloballyPositioned { coords = it }
-                    .drawBehind {
-                        layout?.let { l ->
-                            drawWashes(l, washes)
-                            selRange?.let { drawRangeFill(l, it, selectionAccent) }
-                        }
-                    },
-            )
-            // feature #131 WI-8 — the interlinear translation slot(s) for the unit(s) anchored to chunk `i`,
-            // as muted NON-registered `Text` children inside the SAME lazy item's Column. Never registered
-            // with the selection controller; EACH reports its own window bounds (keyed by (i, slotIdx)) so a
-            // long-press on ANY of them is excluded (round-4 audit Medium-1).
-            val renderStates = bilingualRenderStates(i)
-            val slotTheme = bilingualTheme
-            renderStates.forEachIndexed { slotIdx, renderState ->
-                val boundsKey = i to slotIdx
-                // A source-only/empty slot draws NOTHING (no node → no onGloballyPositioned) — so proactively
-                // drop any prior rect for this key, and each slot removes its rect on dispose (recycle /
-                // language change) so no phantom exclusion survives over source content (round-4 audit Medium-1).
-                val drawsSlot = renderState.phase != com.vreader.app.bilingual.BilingualRenderPhase.SourceOnly &&
-                    !(renderState.phase == com.vreader.app.bilingual.BilingualRenderPhase.Loaded &&
-                        renderState.segments.orEmpty().none { it.isNotBlank() })
-                if (slotTheme != null && drawsSlot) {
-                    com.vreader.app.bilingual.BilingualTranslationSlot(
-                        state = renderState,
-                        theme = slotTheme,
-                        language = bilingualLanguage,
-                        sourceFontSizeSp = bilingualSourceFontSizeSp,
-                        modifier = Modifier.onGloballyPositioned { c ->
-                            if (c.isAttached) translationSlotBounds[boundsKey] = c.boundsInWindow()
-                            else translationSlotBounds.remove(boundsKey)
-                        },
-                    )
-                    DisposableEffect(boundsKey) { onDispose { translationSlotBounds.remove(boundsKey) } }
-                } else {
-                    // Nothing drawn for this slot → ensure no stale rect lingers.
-                    DisposableEffect(boundsKey, drawsSlot) { translationSlotBounds.remove(boundsKey); onDispose { translationSlotBounds.remove(boundsKey) } }
-                }
-            }
-          }
-        }
     }
 }
