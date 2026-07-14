@@ -155,6 +155,20 @@ class ReaderActivity : AppCompatActivity() {
     // built per reader open (never a fresh one per query/recomposition — the WI-8 one-per-session contract).
     @Volatile private var inBookSearchVmBuildCount: Int = 0
 
+    // feature #131 WI-7b — the EPUB bilingual DOM controller (the single owner of this book's
+    // interlinear decorations, over Readium's `evaluateJavascript`). Built once per open book
+    // when bilingual is ENABLED for an EPUB; null otherwise (non-EPUB / bilingual-off → zero
+    // overhead beyond the idle position observer's fast-path guard). The controller enumerates
+    // leaf blocks, restores from cache / translates via the direct-block path, and injects the
+    // DOM — all main-thread, session-token guarded. `bilingualUnit` is the current resource's
+    // href unit + `bilingualExpectedCount` its last-applied block count (drives the probe-gated
+    // re-apply); `bilingualProvider` maps the live `currentLocator.href` → the epubHref unit.
+    private var bilingualController: com.vreader.app.bilingual.EpubBilingualController? = null
+    private var bilingualProvider: com.vreader.app.bilingual.EpubChapterTextProvider? = null
+    private var bilingualViewModel: com.vreader.app.bilingual.BilingualViewModel? = null
+    private var bilingualUnit: com.vreader.app.bilingual.TranslationUnitId? = null
+    @Volatile private var bilingualExpectedCount: Int = 0
+
     // feature #123 — in-reader highlighting
     private var highlightController: ReaderHighlightController? = null
     private val popoverVm = SelectionPopoverViewModel()
@@ -243,6 +257,83 @@ class ReaderActivity : AppCompatActivity() {
             // feature #133 WI-11 — build the per-session in-book search VM over the LIVE publication (Readium
             // SearchService) + observe its state for the top-bar Search-icon presence + the sheet.
             buildInBookSearch(key, pub)
+            // feature #131 WI-7b — build the EPUB bilingual controller (single-owner DOM injection over
+            // the live navigator) + drive it from the position observer. Gated by originalFormat==EPUB AND
+            // bilingual-enabled — a non-EPUB or bilingual-off book pays only the observer's fast-path guard.
+            buildBilingual(key, pub, nav, loaded)
+        }
+    }
+
+    /** feature #131 WI-7b — construct the per-session EPUB bilingual controller + provider + VM (over the
+     *  live [nav] / [pub]) and, when bilingual is ENABLED for this book, apply the interlinear decorations
+     *  for the current resource. The controller keys the current unit off `currentLocator.href` (the EPUB
+     *  divergence — an href, not a char offset); `evaluateJavascript` is dispatched on the MAIN thread (a
+     *  Readium `R2BasicWebView.checkThread` throws off-main). The re-apply signal (scroll round-trip / href
+     *  change / reflow / activity recreate) is `currentLocator` in [observePosition]. */
+    private fun buildBilingual(bookKey: String, pub: Publication, nav: EpubNavigatorFragment, current: Book) {
+        if (current.originalFormat != vreader.contracts.BookFormat.epub) return
+        val spineHrefs = runCatching { pub.readingOrder.map { it.href.toString() } }.getOrDefault(emptyList())
+        val provider = com.vreader.app.bilingual.EpubChapterTextProvider(spineHrefs)
+        // Host the VM in THIS activity's ViewModelStore (via a one-shot factory) so Android clears it
+        // — and cancels its viewModelScope — automatically on destroy (no manual dispose needed; the
+        // VM's onCleared is protected). A fresh store key per book keeps re-opens independent.
+        val vm = androidx.lifecycle.ViewModelProvider(
+            this,
+            object : androidx.lifecycle.ViewModelProvider.Factory {
+                @Suppress("UNCHECKED_CAST")
+                override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T =
+                    container.bilingualViewModel(bookKey, provider) as T
+            },
+        )[com.vreader.app.bilingual.BilingualViewModel::class.java]
+        val prefetcher = container.chapterTranslationPrefetcher(bookKey, provider)
+        bilingualProvider = provider
+        bilingualViewModel = vm
+        bilingualController = com.vreader.app.bilingual.EpubBilingualController(
+            // Main-thread eval: R2BasicWebView.checkThread throws off-main. lifecycleScope launches
+            // on Dispatchers.Main.immediate, and this lambda is only invoked from those launches, so
+            // the withStarted/collect callers already run on Main — the eval is safe.
+            evaluateJavascript = { js -> runCatching { nav.evaluateJavascript(js) }.getOrNull() },
+            prefetcher = prefetcher,
+            onEpubBlocksEnumerated = vm::onEpubBlocksEnumerated,
+            // Read the CURRENT language script fresh per apply so a language change is reflected.
+            targetIsCjk = { vm.state.value.targetLanguage.script == com.vreader.app.bilingual.BilingualScript.cjk },
+        )
+        // If bilingual is already on for this book (persisted), apply for the opening resource.
+        lifecycleScope.launch {
+            if (bilingualEnabledFor(vm)) maybeReapplyBilingual(force = true)
+        }
+    }
+
+    /** feature #131 WI-7b — whether bilingual is enabled for this book, read from the persisted per-book
+     *  store (the VM hydrates asynchronously, so read the store directly for the open-time decision). */
+    private suspend fun bilingualEnabledFor(vm: com.vreader.app.bilingual.BilingualViewModel): Boolean =
+        runCatching { container.perBookBilingualStore.read(book?.fingerprintKey ?: return false).enabled }
+            .getOrDefault(false) || vm.state.value.enabled
+
+    /** feature #131 WI-7b — the probe-gated re-apply for the current EPUB resource. Resolves the current
+     *  href → the epubHref unit; on a unit CHANGE (new resource) it applies fresh; otherwise it re-applies
+     *  ONLY when the resource DOM is missing the expected decorations (a scroll round-trip / reflow usually
+     *  keeps them — spike finding c). [force] applies unconditionally (open-time / an explicit enable). A
+     *  no-op when bilingual is off or the controller/nav is absent. */
+    private suspend fun maybeReapplyBilingual(force: Boolean) {
+        val controller = bilingualController ?: return
+        val provider = bilingualProvider ?: return
+        val vm = bilingualViewModel ?: return
+        if (!vm.state.value.enabled) return
+        val nav = navigator ?: return
+        val href = nav.currentLocator.value.href.toString()
+        val unit = provider.unitForHref(href) ?: return
+        val lang = vm.state.value.targetLanguage.key
+        if (unit != bilingualUnit) {
+            // A new resource — apply fresh, then remember the block count for the probe.
+            bilingualUnit = unit
+            controller.apply(unit, lang)
+            bilingualExpectedCount = vm.state.value.translationsByUnit[unit]?.size ?: 0
+        } else if (force) {
+            controller.apply(unit, lang)
+            bilingualExpectedCount = vm.state.value.translationsByUnit[unit]?.size ?: bilingualExpectedCount
+        } else {
+            controller.reapplyIfNeeded(unit, lang, expectedCount = bilingualExpectedCount)
         }
     }
 
@@ -453,6 +544,15 @@ class ReaderActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        // feature #131 WI-7b — invalidate the bilingual session BEFORE the fragment/publication teardown
+        // so any in-flight/late apply no-ops at its next token re-check (a JS eval against a torn-down
+        // navigator throws — the bump is the clear-before-teardown guarantee; done before super, which
+        // tears the fragment). The VM's own coroutines are cancelled with its viewModelScope; we drop the
+        // references so a re-open builds a fresh controller/VM.
+        bilingualController?.bumpSession()
+        bilingualController = null
+        bilingualViewModel = null
+        bilingualProvider = null
         super.onDestroy()
         // feature #133 WI-11 — dispose the in-book search VM (its onCleared disposes the live Readium
         // SearchIterator via closeAllEpubCursors) BEFORE releasing the publication it searches over — the
@@ -484,6 +584,11 @@ class ReaderActivity : AppCompatActivity() {
             container.readerSettingsStore.settings.collect { settings ->
                 runCatching { nav.submitPreferences(EpubPreferences(scroll = true) + settings.toEpubPreferences()) }
                     .onFailure { android.util.Log.w("ReaderActivity", "submitPreferences failed; display change not applied", it) }
+                // feature #131 WI-7b — a `submitPreferences` reflow can drop the injected decorations
+                // (a CSS/typography reflow re-renders the resource DOM). Probe-gate a re-inject so the
+                // interlinear survives a Display-settings change (spike finding c-ii). A no-op when the
+                // decorations survived, and when bilingual is off / non-EPUB.
+                maybeReapplyBilingual(force = false)
             }
         }
     }
@@ -512,6 +617,11 @@ class ReaderActivity : AppCompatActivity() {
                 currentCanonical = canonical
                 isCurrentBookmarked.value = canonical != null &&
                     runCatching { annotations.isBookmarked(current.fingerprintKey, canonical) }.getOrDefault(false)
+                // feature #131 WI-7b — the universal re-apply signal for ALL four EPUB recreation
+                // cases (scroll round-trip / href change / fragment recreation / activity recreate):
+                // when bilingual is on, probe-gate a re-apply on the current resource. A unit CHANGE
+                // applies fresh; a same-unit reflow re-injects ONLY if the DOM lost the decorations.
+                maybeReapplyBilingual(force = false)
             }
         }
     }
@@ -926,6 +1036,79 @@ class ReaderActivity : AppCompatActivity() {
      *  is built per reader open (never a fresh one per query/recomposition — the WI-8 one-per-session contract). */
     @androidx.annotation.VisibleForTesting
     fun inBookSearchVmBuildCountForTest(): Int = inBookSearchVmBuildCount
+
+    // feature #131 WI-7b test hooks — assert the bilingual DOM injection against the live navigator
+    // without driving Compose gestures (the live More-menu enable ride WI-9 acceptance). The seams
+    // drive the SAME controller/provider the production position observer uses.
+
+    /** Whether the EPUB bilingual controller was built for this book (EPUB + reachable). */
+    @androidx.annotation.VisibleForTesting
+    fun bilingualControllerBuiltForTest(): Boolean = bilingualController != null
+
+    /** Enable bilingual for this book (the store/VM seam the connected test drives — the More-menu
+     *  entry is WI-9), then apply the interlinear for the current resource. Returns after the apply. */
+    @androidx.annotation.VisibleForTesting
+    suspend fun enableBilingualForTest(languageKey: String? = null) {
+        val vm = bilingualViewModel ?: return
+        languageKey?.let { vm.setTargetLanguage(it) }
+        vm.setEnabled(true)
+        // Wait for the VM's serial command consumer to flip `enabled` before applying.
+        awaitBilingualEnabled(true)
+        bilingualController?.bumpSession()   // fresh session for the enable (matches WI-9 wiring)
+        maybeReapplyBilingual(force = true)
+    }
+
+    /** Disable bilingual + clear the decorations. */
+    @androidx.annotation.VisibleForTesting
+    suspend fun disableBilingualForTest() {
+        val vm = bilingualViewModel ?: return
+        vm.setEnabled(false)
+        awaitBilingualEnabled(false)
+        bilingualController?.bumpSession()
+        bilingualController?.clear()
+        bilingualUnit = null
+        bilingualExpectedCount = 0
+    }
+
+    /** Force a re-apply for the current resource through the SAME probe-gated seam (proves the
+     *  recreation re-apply restores from cache with zero provider calls). */
+    @androidx.annotation.VisibleForTesting
+    suspend fun reapplyBilingualForTest() = maybeReapplyBilingual(force = false)
+
+    /** The CURRENT decoration count in the live resource DOM (via the probe script) — proves the
+     *  inject/clear ran against the real WebView. -1 when the controller/nav is absent. */
+    @androidx.annotation.VisibleForTesting
+    suspend fun bilingualDecorationCountForTest(): Int {
+        val nav = navigator ?: return -1
+        val raw = runCatching { nav.evaluateJavascript(com.vreader.app.bilingual.EpubBilingualJs.decorationCountScript) }.getOrNull()
+        return com.vreader.app.bilingual.EpubBilingualJs.parseCountResult(raw, default = -1)
+    }
+
+    private suspend fun awaitBilingualEnabled(expected: Boolean) {
+        val vm = bilingualViewModel ?: return
+        for (i in 0 until 100) {
+            if (vm.state.value.enabled == expected) return
+            kotlinx.coroutines.delay(20)
+        }
+    }
+
+    /** Enumerate the CURRENT resource's leaf blocks against the live navigator (the SAME enumerate
+     *  the controller runs) — so a connected test can seed a cache row of the exact block count and
+     *  then prove the enable restores from cache with ZERO provider calls. */
+    @androidx.annotation.VisibleForTesting
+    suspend fun bilingualEnumerateForTest(): List<com.vreader.app.bilingual.EpubBilingualJs.Block> {
+        val nav = navigator ?: return emptyList()
+        val raw = runCatching { nav.evaluateJavascript(com.vreader.app.bilingual.EpubBilingualJs.enumScript) }.getOrNull()
+        return com.vreader.app.bilingual.EpubBilingualJs.parseEnumResult(raw)
+    }
+
+    /** The current EPUB resource href (for building the epubHref unit a test seeds the cache under). */
+    @androidx.annotation.VisibleForTesting
+    fun bilingualCurrentHrefForTest(): String? = navigator?.currentLocator?.value?.href?.toString()
+
+    /** The bilingual VM's current target-language key (the cache-row language a test seeds under). */
+    @androidx.annotation.VisibleForTesting
+    fun bilingualTargetLanguageForTest(): String? = bilingualViewModel?.state?.value?.targetLanguage?.key
 
     companion object {
         const val EXTRA_FINGERPRINT_KEY = "fingerprintKey"
