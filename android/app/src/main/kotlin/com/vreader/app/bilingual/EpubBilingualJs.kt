@@ -60,9 +60,18 @@ object EpubBilingualJs {
     /** One enumerated leaf block: its stamped id and its normalized (collapsed) text. */
     data class Block(val id: String, val text: String)
 
+    /** The enumerate result: the current document's ownership id ([docId], the resource
+     *  location href) + the enumerated leaf [blocks]. The controller carries [docId] into the
+     *  inject so a slow apply that enumerated one resource cannot inject into another (Gate-4 High). */
+    data class EnumResult(val docId: String, val blocks: List<Block>)
+
     /**
      * JS that enumerates the CURRENT resource's LEAF blocks (iOS Bug #266), stamps a
-     * stable `data-vreader-bid` on each, and RETURNS the `[{id,text}]` array DIRECTLY.
+     * stable `data-vreader-bid` on each, and RETURNS `{doc, blocks}` where `blocks` is the
+     * `[{id,text}]` array and `doc` is the current document's location href (the resource
+     * ownership identity — a Readium per-spine WebView has a distinct document location per
+     * resource, so the inject can verify it is still the SAME resource before injecting, and
+     * a slow apply that enumerated chapter A cannot inject into chapter B — Gate-4 High).
      * A block that already contains another block element (a non-leaf, e.g.
      * `<blockquote><p>…`) is skipped so the count stays aligned with the direct-block
      * segmentation. An already-injected decoration node is never re-stamped. Whitespace
@@ -94,6 +103,8 @@ object EpubBilingualJs {
                 el.setAttribute('$BLOCK_ID_ATTRIBUTE', bid);
                 return bid;
             }
+            var docId = '';
+            try { docId = (document.location && document.location.href) || ''; } catch (e) {}
             var out = [];
             try {
                 var all = document.body
@@ -113,7 +124,7 @@ object EpubBilingualJs {
                     out.push({ id: bid, text: text });
                 }
             } catch (e) {}
-            return out;
+            return { doc: docId, blocks: out };
         })();
     """.trimIndent()
 
@@ -153,15 +164,19 @@ object EpubBilingualJs {
      * switch reuses the node, so stale modifiers drop). The bid selector is escaped via
      * `CSS.escape` with the iOS `[^a-zA-Z0-9_-]` fallback. Injected nodes are
      * non-selectable (`user-select: none`, iOS parity — a long-press on the translation
-     * does not perturb the source selection offsets). RETURNS the decoration count.
-     * [targetIsCjk] toggles the CJK heading tracking modifier.
+     * does not perturb the source selection offsets). RETURNS the decoration count, or -1
+     * when the DOCUMENT changed under the apply ([docId] no longer matches
+     * `document.location.href` — a slow apply that enumerated one resource must NOT inject
+     * into a now-different one; Gate-4 High). An empty [docId] skips the guard (legacy).
+     * [targetIsCjk] toggles the CJK heading tracking modifier; [rtl] sets `dir=rtl`.
      */
     fun injectScript(
         translationsById: Map<String, String>,
         allBlockIds: List<String>,
+        docId: String = "",
         targetIsCjk: Boolean = false,
         rtl: Boolean = false,
-    ): String = buildInjectScript(translationsById, allBlockIds, targetIsCjk, rtl)
+    ): String = buildInjectScript(translationsById, allBlockIds, docId, targetIsCjk, rtl)
 
     /**
      * JS that removes every injected decoration node from the whole document. Idempotent
@@ -198,17 +213,22 @@ object EpubBilingualJs {
     """.trimIndent()
 
     /**
-     * Parse the raw JSON string a `evaluateJavascript(enumScript)` call returns (the
-     * WebView already JSON-encoded the returned array) into an ordered [Block] list.
-     * A null/blank/`"null"` return, a non-array, or a malformed entry yields an empty
-     * list (never a crash). An entry missing `id` or `text`, or with a blank id, is
-     * skipped. This is the ONLY place the enumerate wire form is decoded.
+     * Parse the raw JSON string a `evaluateJavascript(enumScript)` call returns (the WebView
+     * already JSON-encoded the `{doc, blocks}` object) into an [EnumResult]. A null/blank/`"null"`
+     * return, a non-object, or a malformed `blocks` entry yields an empty result (never a crash).
+     * An entry missing `id`/`text`, or with a blank id, is skipped. A bare array (legacy shape) is
+     * also accepted with an empty docId. This is the ONLY place the enumerate wire form is decoded.
      */
-    fun parseEnumResult(raw: String?): List<Block> {
+    fun parseEnumResult(raw: String?): EnumResult {
         val trimmed = raw?.trim().orEmpty()
-        if (trimmed.isEmpty() || trimmed == "null") return emptyList()
+        if (trimmed.isEmpty() || trimmed == "null") return EnumResult("", emptyList())
         val value = runCatching { org.json.JSONTokener(trimmed).nextValue() }.getOrNull()
-        val array = value as? org.json.JSONArray ?: return emptyList()
+        val (docId, array) = when (value) {
+            is org.json.JSONObject -> value.optString("doc") to value.optJSONArray("blocks")
+            is org.json.JSONArray -> "" to value   // legacy bare-array tolerance
+            else -> return EnumResult("", emptyList())
+        }
+        if (array == null) return EnumResult(docId, emptyList())
         val out = ArrayList<Block>(array.length())
         for (i in 0 until array.length()) {
             val obj = array.optJSONObject(i) ?: continue
@@ -216,7 +236,7 @@ object EpubBilingualJs {
             if (!obj.has("text")) continue
             out.add(Block(id = id, text = obj.optString("text")))
         }
-        return out
+        return EnumResult(docId, out)
     }
 
     /**

@@ -136,24 +136,35 @@ class EpubBilingualController(
         }
     }
 
-    /** Remove every decoration node (under the mutex). Idempotent — a repeat clear on a clean DOM
-     *  is a no-op. Drops the applied-count anchors (a subsequent apply re-injects fresh). */
-    suspend fun clear() {
+    /** Remove every decoration node from the CURRENT resource DOM (under the mutex). Idempotent — a
+     *  repeat clear on a clean DOM is a no-op. Drops the applied-count anchors (a subsequent apply
+     *  re-injects fresh). Returns true when the clear script verified 0 remaining decorations
+     *  (`clearScript` returns the remaining count); a null/failed eval (-1) returns false so the
+     *  caller can treat the language transition as unfinished (Gate-4 High). */
+    suspend fun clear(): Boolean =
         mutex.withLock {
-            evaluateJavascript(EpubBilingualJs.clearScript)
+            val remaining = EpubBilingualJs.parseCountResult(evaluateJavascript(EpubBilingualJs.clearScript), default = -1)
             appliedCount.clear()
+            remaining == 0
         }
-    }
 
     /**
      * The atomic teardown path — call BEFORE publication/fragment teardown. Bumps the session (so
      * any in-flight apply's next token re-check discards) THEN clears under the mutex (which waits
-     * for a live apply to release the lock, so no eval races the teardown). A best-effort — a
-     * throwing eval against an already-detaching navigator is swallowed (the fragment is going away).
+     * for a live apply to release the lock, so no eval races the teardown). Returns the verified
+     * clear result. A cooperative [CancellationException] PROPAGATES (a cancelled clear did NOT
+     * finish — the caller must not treat the language transition as complete; Gate-4 High); any
+     * other eval failure against an already-detaching navigator returns false (best-effort).
      */
-    suspend fun shutdown() {
+    suspend fun shutdown(): Boolean {
         bumpSession()
-        runCatching { clear() }
+        return try {
+            clear()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            false
+        }
     }
 
     // ── internals ──────────────────────────────────────────────
@@ -167,7 +178,8 @@ class EpubBilingualController(
         if (session != token) return
         val enumRaw = evaluateJavascript(EpubBilingualJs.enumScript)
         if (session != token) return
-        val blocks = EpubBilingualJs.parseEnumResult(enumRaw)
+        val enumResult = EpubBilingualJs.parseEnumResult(enumRaw)
+        val blocks = enumResult.blocks
         if (blocks.isEmpty()) return   // source-only: nothing translatable on this resource
 
         val texts = blocks.map { it.text }
@@ -180,10 +192,17 @@ class EpubBilingualController(
         // The reconcile set is EVERY enumerated block id — the inject removes the owned decoration
         // of any enumerated block that is NOT translated this pass (a now-blank/absent block, or a
         // language switch to a shorter set — Gate-4 High). So we still inject even for an empty map
-        // when there may be stale decorations to reap.
+        // when there may be stale decorations to reap. The enumerate's docId is carried into the
+        // inject so a slow apply that enumerated resource A cannot inject into a now-different B.
         val allBlockIds = blocks.map { it.id }
-        evaluateJavascript(EpubBilingualJs.injectScript(idToSegment, allBlockIds, targetIsCjk(), targetIsRtl()))
+        val injected = EpubBilingualJs.parseCountResult(
+            evaluateJavascript(
+                EpubBilingualJs.injectScript(idToSegment, allBlockIds, enumResult.docId, targetIsCjk(), targetIsRtl()),
+            ),
+            default = -1,
+        )
         if (session != token) return   // superseded during inject — don't publish stale probe state
+        if (injected < 0) return       // the DOM changed under the apply (doc mismatch) — abort, no probe update
         // Record the NONBLANK count actually injected (blank translations are source-only for
         // their block — excluded here so the probe's expected count matches the live DOM).
         appliedCount[unit] = idToSegment.size

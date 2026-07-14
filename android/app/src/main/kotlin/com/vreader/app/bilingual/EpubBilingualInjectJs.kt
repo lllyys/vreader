@@ -26,6 +26,7 @@ import org.json.JSONObject
 internal fun EpubBilingualJs.buildInjectScript(
     translationsById: Map<String, String>,
     allBlockIds: List<String>,
+    docId: String,
     targetIsCjk: Boolean,
     rtl: Boolean,
 ): String {
@@ -39,6 +40,7 @@ internal fun EpubBilingualJs.buildInjectScript(
     val idsLiteral = JSONObject().put("v", JSONArray(ids)).getJSONArray("v").toString()
     val textsLiteral = JSONObject().put("v", JSONArray(texts)).getJSONArray("v").toString()
     val allLiteral = JSONObject().put("v", JSONArray(allBlockIds)).getJSONArray("v").toString()
+    val docLiteral = JSONObject.quote(docId)
     val cjk = if (targetIsCjk) "true" else "false"
     val dir = if (rtl) "'rtl'" else "'auto'"
     return """
@@ -46,6 +48,16 @@ internal fun EpubBilingualJs.buildInjectScript(
             var ids = $idsLiteral;
             var texts = $textsLiteral;
             var allIds = $allLiteral;
+            var expectDoc = $docLiteral;
+            // Document ownership guard: a slow apply that enumerated resource A must NOT inject
+            // into a now-different resource B (Gate-4 High). If the live document's location no
+            // longer matches the enumerate's docId, abort (return -1) — the caller re-applies for
+            // the current resource. An empty expectDoc skips the guard (legacy / no location).
+            if (expectDoc) {
+                var liveDoc = '';
+                try { liveDoc = (document.location && document.location.href) || ''; } catch (e) {}
+                if (liveDoc && liveDoc !== expectDoc) { return -1; }
+            }
             ${EpubBilingualJs.BID_SELECTOR_ESCAPE_JS}
             function findBlock(bid) {
                 try {

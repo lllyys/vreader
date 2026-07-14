@@ -26,9 +26,10 @@ class EpubBilingualJsTest {
         // Bug #266: a block that CONTAINS another block is skipped (leaf-only).
         assertTrue("leaf-only guard via querySelector(BLOCK_SELECTOR)", js.contains("el.querySelector(BLOCK_SELECTOR)"))
         assertTrue("block tag table present", js.contains("blockquote: 1"))
-        // Returns the array directly — NEVER JSON.stringify (the WebView encodes the return).
-        assertTrue("returns an out array", js.contains("return out;"))
+        // Returns { doc, blocks } directly — NEVER JSON.stringify (the WebView encodes the return).
+        assertTrue("returns { doc, blocks }", js.contains("return { doc: docId, blocks: out };"))
         assertFalse("must NOT JSON.stringify the return", js.contains("JSON.stringify"))
+        assertTrue("captures the document ownership id", js.contains("document.location.href"))
         // Skips an already-injected decoration node on re-enumerate.
         assertTrue("skips decoration siblings", js.contains(EpubBilingualJs.DECORATION_ATTRIBUTE))
         // Emits {id,text} (Android key names), not the iOS {bid,text}.
@@ -37,25 +38,46 @@ class EpubBilingualJsTest {
 
     // ── parseEnumResult ───────────────────────────────────────
 
-    @Test fun parseEnumResult_decodesArrayViaJsonTokener() {
-        val blocks = EpubBilingualJs.parseEnumResult("""[{"id":"b1","text":"Hello"},{"id":"b2","text":"World"}]""")
-        assertEquals(listOf(EpubBilingualJs.Block("b1", "Hello"), EpubBilingualJs.Block("b2", "World")), blocks)
+    @Test fun parseEnumResult_decodesDocAndBlocks() {
+        val r = EpubBilingualJs.parseEnumResult(
+            """{"doc":"file:///ch1.xhtml","blocks":[{"id":"b1","text":"Hello"},{"id":"b2","text":"World"}]}""",
+        )
+        assertEquals("file:///ch1.xhtml", r.docId)
+        assertEquals(listOf(EpubBilingualJs.Block("b1", "Hello"), EpubBilingualJs.Block("b2", "World")), r.blocks)
     }
 
-    @Test fun parseEnumResult_toleratesNullBlankNonArrayAndMalformed() {
-        assertTrue(EpubBilingualJs.parseEnumResult(null).isEmpty())
-        assertTrue(EpubBilingualJs.parseEnumResult("").isEmpty())
-        assertTrue(EpubBilingualJs.parseEnumResult("null").isEmpty())
-        assertTrue(EpubBilingualJs.parseEnumResult("42").isEmpty())        // not an array
-        assertTrue(EpubBilingualJs.parseEnumResult("{not json").isEmpty()) // malformed
+    @Test fun parseEnumResult_acceptsLegacyBareArray() {
+        val r = EpubBilingualJs.parseEnumResult("""[{"id":"b1","text":"Hello"}]""")
+        assertEquals("", r.docId)
+        assertEquals(listOf(EpubBilingualJs.Block("b1", "Hello")), r.blocks)
+    }
+
+    @Test fun parseEnumResult_toleratesNullBlankNonObjectAndMalformed() {
+        assertTrue(EpubBilingualJs.parseEnumResult(null).blocks.isEmpty())
+        assertTrue(EpubBilingualJs.parseEnumResult("").blocks.isEmpty())
+        assertTrue(EpubBilingualJs.parseEnumResult("null").blocks.isEmpty())
+        assertTrue(EpubBilingualJs.parseEnumResult("42").blocks.isEmpty())        // not an object/array
+        assertTrue(EpubBilingualJs.parseEnumResult("{not json").blocks.isEmpty()) // malformed
         // an entry missing id/text or with a blank id is skipped, the rest survive
-        val blocks = EpubBilingualJs.parseEnumResult("""[{"id":"","text":"x"},{"id":"b2"},{"id":"b3","text":"ok"}]""")
-        assertEquals(listOf(EpubBilingualJs.Block("b3", "ok")), blocks)
+        val r = EpubBilingualJs.parseEnumResult(
+            """{"doc":"d","blocks":[{"id":"","text":"x"},{"id":"b2"},{"id":"b3","text":"ok"}]}""",
+        )
+        assertEquals(listOf(EpubBilingualJs.Block("b3", "ok")), r.blocks)
     }
 
     @Test fun parseEnumResult_preservesCjkAndEmptyText() {
-        val blocks = EpubBilingualJs.parseEnumResult("""[{"id":"b1","text":"你好，世界"},{"id":"b2","text":""}]""")
-        assertEquals(listOf(EpubBilingualJs.Block("b1", "你好，世界"), EpubBilingualJs.Block("b2", "")), blocks)
+        val r = EpubBilingualJs.parseEnumResult(
+            """{"doc":"d","blocks":[{"id":"b1","text":"你好，世界"},{"id":"b2","text":""}]}""",
+        )
+        assertEquals(listOf(EpubBilingualJs.Block("b1", "你好，世界"), EpubBilingualJs.Block("b2", "")), r.blocks)
+    }
+
+    @Test fun injectScript_docIdGuard_abortsOnDocMismatch() {
+        val guarded = EpubBilingualJs.injectScript(mapOf("b1" to "T"), allBlockIds = listOf("b1"), docId = "file:///ch1")
+        assertTrue("carries the expected doc", guarded.contains("var expectDoc ="))
+        assertTrue("aborts (return -1) on a doc mismatch", guarded.contains("return -1;"))
+        val unguarded = EpubBilingualJs.injectScript(mapOf("b1" to "T"), allBlockIds = listOf("b1"))
+        assertTrue("an empty docId skips the guard", unguarded.contains("if (expectDoc)"))
     }
 
     // ── inject script — CSP safety + idempotency + parity ─────

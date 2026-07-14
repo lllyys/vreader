@@ -340,12 +340,15 @@ class ReaderActivity : AppCompatActivity() {
             val href = nav.currentLocator.value.href.toString()
             val unit = provider.unitForHref(href) ?: return@launch
             val lang = vm.state.value.targetLanguage.key
-            // A LANGUAGE CHANGE clears the old-language DOM first (bump + clear) so a failed/blank
-            // new-language apply never leaves the previous language visible (Gate-4 High). A fresh
-            // apply follows unconditionally.
+            // A LANGUAGE CHANGE clears the old-language DOM first (bump + verified clear) so a
+            // failed/blank new-language apply never leaves the previous language visible (Gate-4
+            // High). Only advance `bilingualLang`/`bilingualUnit` once the clear VERIFIED 0
+            // remaining decorations — a cancelled/failed clear leaves the transition pending so the
+            // next schedule retries (never records the new language over an un-cleared old DOM).
             val languageChanged = bilingualLang != null && bilingualLang != lang
             if (languageChanged) {
-                controller.shutdown()   // bump session + clear the old-language decorations
+                val cleared = controller.shutdown()   // bump session + verified clear
+                if (!cleared) return@launch           // clear did not finish — retry on the next schedule
                 bilingualUnit = null
             }
             bilingualLang = lang
@@ -1155,7 +1158,7 @@ class ReaderActivity : AppCompatActivity() {
     suspend fun bilingualEnumerateForTest(): List<com.vreader.app.bilingual.EpubBilingualJs.Block> {
         val nav = navigator ?: return emptyList()
         val raw = evalOnMain(nav, com.vreader.app.bilingual.EpubBilingualJs.enumScript)
-        return com.vreader.app.bilingual.EpubBilingualJs.parseEnumResult(raw)
+        return com.vreader.app.bilingual.EpubBilingualJs.parseEnumResult(raw).blocks
     }
 
     /** The current EPUB resource href (for building the epubHref unit a test seeds the cache under). */

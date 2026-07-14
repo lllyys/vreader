@@ -137,7 +137,8 @@ class EpubBilingualControllerTest {
         )
     }
 
-    private val enumTwoBlocks = """[{"id":"b1","text":"Alpha."},{"id":"b2","text":"Beta."}]"""
+    private val enumTwoBlocks =
+        """{"doc":"file:///OEBPS/ch1.xhtml","blocks":[{"id":"b1","text":"Alpha."},{"id":"b2","text":"Beta."}]}"""
 
     private fun controller(
         web: FakeWebView,
