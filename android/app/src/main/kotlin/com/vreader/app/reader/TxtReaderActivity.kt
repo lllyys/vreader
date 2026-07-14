@@ -491,10 +491,14 @@ class TxtReaderActivity : ComponentActivity() {
                         // aiConfigured so the engine strip flips to configured without reopening.
                         if (showAiProviders) {
                             val aiVm = remember(bookKey) { container.aiSettingsViewModel() }
-                            com.vreader.app.bilingual.ReaderAiProvidersSheet(
-                                vm = aiVm,
-                                onDone = { showAiProviders = false; bilingualVm?.refreshAiConfigured() },
-                            )
+                            // Wrap in a BackupSurface so the reused list/editor's LocalBackupTokens follow the
+                            // active reader theme (Gate-4 Medium-1 — otherwise the sheet is always Light).
+                            com.vreader.app.backup.BackupSurface(darkOverride = displaySettings.theme.isDark) {
+                                com.vreader.app.bilingual.ReaderAiProvidersSheet(
+                                    vm = aiVm,
+                                    onDone = { showAiProviders = false; bilingualVm?.refreshAiConfigured() },
+                                )
+                            }
                         }
 
                         TxtReaderChrome(

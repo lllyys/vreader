@@ -145,18 +145,31 @@ class EpubBilingualController(
      * settings changes, so a mid-book language switch would otherwise leave the visible resource showing
      * the OLD language until the user scrolls (the deferred WI-7b finding b). This is the single entry the
      * reader calls on a VM language change: it bumps the session (invalidating any in-flight apply for the
-     * old language + dropping the applied-count anchors so the fresh apply re-injects rather than accepting
-     * a stale probe count), then — for the NEW captured session — runs a full [applyLocked]. `applyLocked`
+     * old language + dropping the applied-count anchors), CLEARS the old-language decorations FIRST (so a
+     * new-language apply that enumerates empty / fails to translate / aborts injection can NEVER leave the
+     * previous language visible — Gate-4 High-3, the same clear-before-apply contract [shutdown] gives the
+     * scroll path), then — for the NEW captured session — runs a full [applyLocked]. `applyLocked`
      * re-enumerates the live resource and passes EVERY enumerated block id to the inject, so a shorter new
-     * translation set REAPS the old-language decorations of blocks not re-translated (no stale-language
-     * decoration leak — the same reconcile-set contract [apply] uses). Race-safe: the bump makes any
-     * concurrent old-session apply discard at its next token re-check, and the mutex serializes this
-     * reconcile against a racing scroll re-apply. A [CancellationException] propagates.
+     * translation set REAPS the old-language decorations of blocks not re-translated. Returns true iff the
+     * old-language clear VERIFIED 0 remaining decorations before the new apply — the caller advances its
+     * recorded language ONLY on true, so a failed clear leaves the transition pending for the next schedule.
+     * Race-safe: the bump makes a concurrent old-session apply discard at its next token re-check, and the
+     * mutex serializes this reconcile against a racing scroll re-apply. A [CancellationException] propagates.
      */
-    suspend fun reconcileLanguageChange(unit: TranslationUnitId, targetLanguage: String) {
+    suspend fun reconcileLanguageChange(unit: TranslationUnitId, targetLanguage: String): Boolean {
         bumpSession()
         val token = session
-        mutex.withLock { applyLocked(unit, targetLanguage, token) }
+        return mutex.withLock {
+            // Clear the old-language DOM under the SAME lock+token before the new apply. A null/failed clear
+            // (-1) means the transition is unfinished — do NOT apply over an un-cleared old DOM; the caller
+            // retries. `clear()` itself takes the mutex, so clear inline here (we already hold it).
+            val remaining = EpubBilingualJs.parseCountResult(evaluateJavascript(EpubBilingualJs.clearScript), default = -1)
+            appliedCount.clear()
+            if (remaining != 0) return@withLock false
+            if (session != token) return@withLock false
+            applyLocked(unit, targetLanguage, token)
+            true
+        }
     }
 
     /** Remove every decoration node from the CURRENT resource DOM (under the mutex). Idempotent — a

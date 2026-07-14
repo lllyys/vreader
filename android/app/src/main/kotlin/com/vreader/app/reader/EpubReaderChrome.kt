@@ -128,6 +128,7 @@ fun EpubTopBand(
                 onDetails = { showMore = false; chromeState.value = chromeState.value.copy(sheet = ReaderSheet.Details) },
                 onShare = { showMore = false; onShareBook() },
                 bilingual = bilingualMoreRow?.dismissingWith { showMore = false },
+                includeDetailsShare = bookDetails != null,
             ),
             onDismiss = { showMore = false },
         )

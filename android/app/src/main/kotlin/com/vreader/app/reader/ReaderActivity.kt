@@ -320,6 +320,18 @@ class ReaderActivity : AppCompatActivity() {
         // feature #131 WI-9 — mirror the VM state into the Compose-observable snapshot the top band's pill
         // + More-menu row read (the ComposeViews recompose when this snapshot changes).
         lifecycleScope.launch { vm.state.collect { bilingualUiState.value = it } }
+        // feature #131 WI-9 — schedule the interlinear apply on the ENABLED false→true transition (Gate-4
+        // High-2). The More-menu toggle's `setEnabled(true)` only ENQUEUES an async VM command, so calling
+        // scheduleBilingual immediately would see enabled=false and no-op with nothing to reschedule. This
+        // state-driven observer (the EPUB analog of TXT's enabled-keyed LaunchedEffect) reschedules once the
+        // command settles enabled=true. `drop(1)` skips the initial emission (open-time apply covers it).
+        lifecycleScope.launch {
+            vm.state
+                .map { it.enabled }
+                .distinctUntilChanged()
+                .drop(1)
+                .collect { enabled -> if (enabled) scheduleBilingual(force = true) }
+        }
         // feature #131 WI-9 — a MID-BOOK language change on a stationary EPUB: the position/display
         // re-apply signals fire only on scroll / settings changes, so reconcile the CURRENT resource's DOM
         // directly when the VM's target language changes while enabled + open. `drop(1)` skips the initial
@@ -352,9 +364,10 @@ class ReaderActivity : AppCompatActivity() {
         bilingualJob = lifecycleScope.launch {
             val nav = navigator ?: return@launch
             val unit = provider.unitForHref(nav.currentLocator.value.href.toString()) ?: return@launch
-            bilingualUnit = unit
-            bilingualLang = newLang
-            controller.reconcileLanguageChange(unit, newLang)
+            // Advance the recorded language/unit ONLY on a successful reconcile (verified clear + apply), so
+            // a failed clear leaves the transition pending for the next schedule (Gate-4 High-3).
+            val ok = controller.reconcileLanguageChange(unit, newLang)
+            if (ok) { bilingualUnit = unit; bilingualLang = newLang }
         }
     }
 
@@ -368,9 +381,10 @@ class ReaderActivity : AppCompatActivity() {
         vm.setEnabled(on)
         if (on) {
             // The VM raises needsSetupSheet AFTER the serial enable command settles → that drives the setup
-            // sheet (BilingualSheets). We do NOT set showBilingualSetup here (it would race the enable command
-            // and re-open the sheet after the user's Turn-on dismiss). Schedule the interlinear apply.
-            scheduleBilingual(force = true)
+            // sheet (BilingualSheets). We do NOT set showBilingualSetup here (it would race the enable
+            // command and re-open the sheet after the user's Turn-on dismiss). The apply is scheduled by the
+            // enabled false→true observer (buildBilingual), NOT here — calling scheduleBilingual now would
+            // no-op against the not-yet-applied enabled state (Gate-4 High-2).
         } else {
             bilingualJob?.cancel()
             bilingualJob = lifecycleScope.launch {
@@ -403,10 +417,14 @@ class ReaderActivity : AppCompatActivity() {
         }
         if (showAiProviders.value) {
             val aiVm = androidx.compose.runtime.remember { container.aiSettingsViewModel() }
-            com.vreader.app.bilingual.ReaderAiProvidersSheet(
-                vm = aiVm,
-                onDone = { showAiProviders.value = false; vm.refreshAiConfigured() },
-            )
+            // Wrap in a BackupSurface so the reused list/editor's LocalBackupTokens follow the active reader
+            // theme (Gate-4 Medium-1 — otherwise the sheet is always Light).
+            com.vreader.app.backup.BackupSurface(darkOverride = chromeTheme.value.isDark) {
+                com.vreader.app.bilingual.ReaderAiProvidersSheet(
+                    vm = aiVm,
+                    onDone = { showAiProviders.value = false; vm.refreshAiConfigured() },
+                )
+            }
         }
     }
 
@@ -1312,9 +1330,8 @@ class ReaderActivity : AppCompatActivity() {
         awaitBilingualState(enabled = true, language = languageKey)
         val nav = navigator ?: return
         val unit = provider.unitForHref(nav.currentLocator.value.href.toString()) ?: return
-        bilingualUnit = unit
-        bilingualLang = languageKey
-        controller.reconcileLanguageChange(unit, languageKey)
+        val ok = controller.reconcileLanguageChange(unit, languageKey)
+        if (ok) { bilingualUnit = unit; bilingualLang = languageKey }
     }
 
     companion object {
