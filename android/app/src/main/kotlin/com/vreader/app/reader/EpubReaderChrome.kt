@@ -45,11 +45,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vreader.app.annotations.AnnotationsReviewSheet
+import com.vreader.app.reader.chrome.BilingualMoreRow
 import com.vreader.app.reader.chrome.BookmarkToggleButton
 import com.vreader.app.reader.chrome.ReaderBottomChrome
 import com.vreader.app.reader.chrome.ReaderChromeState
 import com.vreader.app.reader.chrome.ReaderSheet
 import com.vreader.app.reader.chrome.ReaderTopChrome
+import com.vreader.app.reader.chrome.dismissingWith
 import com.vreader.app.reader.chrome.readerMoreRows
 import com.vreader.app.annotations.BookmarkRecord
 import com.vreader.app.reader.details.BookDetailsSheet
@@ -91,11 +93,18 @@ fun EpubTopBand(
     onSearch: (() -> Unit)? = null,
     isCurrentBookmarked: Boolean = false,
     onToggleBookmark: (() -> Unit)? = null,
+    // feature #131 WI-9 — the bilingual entry: [pillSlot] fills the top-chrome pill next to the title
+    // (WI-7a BilingualPill; null → bilingual off / non-EPUB — no pill) and [bilingualMoreRow] supplies the
+    // More-menu Bilingual Toggle/Disabled row (null → non-EPUB — no row). Nullable/default so the #132/#134/
+    // #135 EPUB callers stay valid.
+    pillSlot: (@Composable () -> Unit)? = null,
+    bilingualMoreRow: BilingualMoreRow? = null,
 ) {
     val chrome by model.collectAsStateWithLifecycle()
     var showMore by remember { mutableStateOf(false) }
-    // More is available only when this book has a Book-details data source (no dead control).
-    val onMore: (() -> Unit)? = if (bookDetails != null) ({ showMore = true }) else null
+    // More is available when this book has a Book-details data source OR (#131 WI-9) a Bilingual row.
+    val hasMoreRows = bookDetails != null || bilingualMoreRow != null
+    val onMore: (() -> Unit)? = if (hasMoreRows) ({ showMore = true }) else null
     // feature #135 WI-5 — the bookmark slot is built only when the host opts in via [onToggleBookmark].
     val bookmarkSlot: (@Composable () -> Unit)? =
         if (onToggleBookmark != null) {
@@ -103,13 +112,22 @@ fun EpubTopBand(
         } else {
             null
         }
-    ReaderTopChrome(theme = theme, title = chrome.title, onBack = onBack, onSearch = onSearch, onMore = onMore, bookmarkSlot = bookmarkSlot)
-    if (showMore && bookDetails != null) {
+    ReaderTopChrome(
+        theme = theme,
+        title = chrome.title,
+        onBack = onBack,
+        onSearch = onSearch,
+        onMore = onMore,
+        bookmarkSlot = bookmarkSlot,
+        pillSlot = pillSlot,
+    )
+    if (showMore && hasMoreRows) {
         MorePopup(
             theme = theme,
             rows = readerMoreRows(
                 onDetails = { showMore = false; chromeState.value = chromeState.value.copy(sheet = ReaderSheet.Details) },
                 onShare = { showMore = false; onShareBook() },
+                bilingual = bilingualMoreRow?.dismissingWith { showMore = false },
             ),
             onDismiss = { showMore = false },
         )

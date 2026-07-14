@@ -227,13 +227,33 @@ class BilingualViewModelPrefetchTest {
         assertTrue("no prefetch while disabled", fake.prefetchInvocations.isEmpty())
     }
 
-    // ── onEpubBlocksEnumerated is inert here (owned by the WI-7b controller) ──
+    // ── onEpubBlocksEnumerated feeds VM render state (WI-9) without triggering a VM prefetch ──
 
-    @Test fun onEpubBlocksEnumerated_isInert() = runTest(dispatcher) {
+    /** WI-9: when ENABLED, the controller's onEpubBlocksEnumerated writes the EPUB unit into the VM's
+     *  translationsByUnit (single-writer render state) WITHOUT the VM ever running a prefetch for it
+     *  (EPUB prefetch stays controller-owned — Medium-1). */
+    @Test fun onEpubBlocksEnumerated_populatesTranslations_noPrefetch() = runTest(dispatcher) {
         val vm = makeEnabledVM(); advanceUntilIdle()
+        val unit = TranslationUnitId(TranslationUnitId.Kind.epubHref, "ch1")
+        vm.onEpubBlocksEnumerated(unit, listOf("译文a", "译文b"))
+        advanceUntilIdle()
+        // the VM's own prefetch is NEVER invoked for an EPUB unit (still controller-owned).
+        assertTrue("EPUB enumerate never drives the VM prefetch", fake.prefetchInvocations.isEmpty())
+        // but the render state now reflects the committed EPUB translation (finding a).
+        assertEquals(listOf("译文a", "译文b"), vm.state.value.translationsByUnit[unit])
+    }
+
+    /** WI-9: a controller commit that lands while bilingual is DISABLED (a stale post-clear callback) is
+     *  IGNORED — it must not re-seed a translation the user turned off. */
+    @Test fun onEpubBlocksEnumerated_whileDisabled_ignored() = runTest(dispatcher) {
+        val vm = BilingualViewModel(
+            bookKey = bookKey, store = perBookStore, prefetcher = concretePrefetcher,
+            snapshotProvider = snapshotProvider, readiness = readiness, dispatcher = dispatcher,
+            prefetching = fake, textProvider = provider,
+        )
+        advanceUntilIdle() // disabled by default
         vm.onEpubBlocksEnumerated(TranslationUnitId(TranslationUnitId.Kind.epubHref, "ch1"), listOf("a", "b"))
         advanceUntilIdle()
-        assertTrue("EPUB enumerate is inert in WI-6", fake.prefetchInvocations.isEmpty())
-        assertTrue(vm.state.value.translationsByUnit.isEmpty())
+        assertTrue("a disabled-state commit is ignored", vm.state.value.translationsByUnit.isEmpty())
     }
 }

@@ -6,8 +6,9 @@
 // dedupes (same-unit → no-op), and prefetches current+next through the injected
 // BilingualPrefetching seam with per-unit single-flight, a monotonic position-request
 // sequence, and a generation guard. retryUnit re-fetches through the same registry.
-// onEpubBlocksEnumerated is present-but-inert — EPUB prefetch is owned by the WI-7b
-// controller (Medium-1); the position path dispatches TXT/MD units ONLY.
+// onEpubBlocksEnumerated (wired in WI-9) is the EPUB controller's single-writer entry into
+// translationsByUnit — EPUB prefetch is owned by the WI-7b controller (Medium-1); the VM's
+// position path dispatches TXT/MD units ONLY, so the two paths never write the same row.
 //
 // State discipline (rule 50 §12): StateFlow, viewModelScope (no GlobalScope), an injected
 // CoroutineDispatcher for store I/O + snapshot reads. Granularity is `paragraph` in v1
@@ -185,13 +186,29 @@ class BilingualViewModel(
     fun retryUnit(unit: TranslationUnitId) = prefetchController.retryUnit(unit)
 
     /**
-     * The EPUB controller's entry into VM render state (WI-7b). Present-but-INERT in WI-6:
-     * the EPUB direct-block enumerate → prefetch → guarded-commit sequence is owned by the
-     * WI-7b controller (Medium-1); the position path dispatches TXT/MD units only.
+     * The EPUB controller's entry into VM render state (WI-7b → wired in WI-9). The EPUB direct-block
+     * enumerate → prefetch → guarded-commit sequence is owned by the WI-7b controller (Medium-1); the
+     * controller is the SOLE writer of an EPUB unit's [BilingualUiState.translationsByUnit] entry (the
+     * VM's own position-driven `prefetch` dispatches TXT/MD units only, so the two paths never write the
+     * same row). The controller calls this after a NON-STALE commit — but only when bilingual is enabled
+     * (a disable/language change clears + bumps generation before the next enumerate), so a late call that
+     * lost the race records nothing over a cleared state: it is ignored while `enabled` is false. Runs on
+     * the main thread (the controller's callback site); the atomic `_state.update` keeps it race-safe
+     * against a concurrent position-path commit. This keeps the pill/state UI honest for EPUB even though
+     * the VISIBLE render is the injected DOM, not the Compose interlinear body.
      */
-    @Suppress("unused")
     fun onEpubBlocksEnumerated(unit: TranslationUnitId, blocks: List<String>) {
-        // Inert in WI-6 — the WI-7b controller owns the EPUB enumerate flow (Medium-1).
+        _state.update { st ->
+            // A disable/language change clears + bumps generation; a stale post-clear commit must not
+            // re-seed a translation the user turned off. Ignore while disabled (the cleared, off state).
+            if (!st.enabled) st
+            else st.copy(
+                translationsByUnit = st.translationsByUnit + (unit to blocks),
+                inFlightUnits = st.inFlightUnits - unit,
+                unavailableUnits = st.unavailableUnits - unit,
+                errorUnit = if (st.errorUnit == unit) null else st.errorUnit,
+            )
+        }
     }
 
     // ── internals ──

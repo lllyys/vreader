@@ -256,4 +256,27 @@ class EpubBilingualControllerTest {
         c.reapplyIfNeeded(unit, lang, expectedCount = 2)
         assertEquals("re-injected after the DOM lost decorations", 2, web.decorations)
     }
+
+    // ── WI-9 finding (b): a mid-book language change reconciles the CURRENT resource ──
+
+    /** reconcileLanguageChange bumps the session AND re-injects the current resource for the new language
+     *  UNCONDITIONALLY (even when the DOM already has the old-language decorations — a probe would wrongly
+     *  skip it), reaping the old-language decorations via the full re-enumerate/re-inject. */
+    @Test fun reconcileLanguageChange_bumpsSession_reinjectsCurrentResource() = runTest {
+        seedCache(listOf("译文1", "译文2"), sourceCount = 2)
+        val web = FakeWebView(enumTwoBlocks)
+        val committed = mutableListOf<Pair<TranslationUnitId, List<String>>>()
+        val c = controller(web, committed)
+        c.apply(unit, lang)
+        val sessionBefore = c.currentSession
+        val injectsBefore = web.evalKinds.count { it == "inject" }
+        // A language change while the DOM STILL has the old decorations — a probe-gated reapply would skip,
+        // but reconcile must re-inject unconditionally so the visible DOM reconciles (finding b).
+        c.reconcileLanguageChange(unit, lang)
+        assertTrue("the session was bumped (old in-flight applies invalidated)", c.currentSession > sessionBefore)
+        assertTrue("reconcile re-injected the current resource",
+            web.evalKinds.count { it == "inject" } > injectsBefore)
+        // the reconciled resource re-committed into VM render state (the pill/state stays honest).
+        assertEquals("re-committed the reconciled unit", unit, committed.last().first)
+    }
 }

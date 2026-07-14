@@ -17,6 +17,11 @@
 // #135). The #129 Display settings, the selection popover, highlight decorations, position save, and the
 // publication close are all preserved.
 //
+// feature #131 WI-9: the bilingual entry is USER-REACHABLE for EPUB — the top band mounts the WI-7a
+// BilingualPill (while ON) + the More-menu Bilingual Toggle/Disabled row wired to the VM; the setup sheet
+// (first-enable / pill-tap) routes "Set up"/"Change…" to the Variant A ReaderAiProvidersSheet, and a
+// mid-book language change reconciles the CURRENT resource's DOM via the controller's reconcile entry.
+//
 // feature #133 WI-11: in-book search reachable from the top bar. A per-session InBookSearchViewModel is built
 // over the LIVE Readium publication (Readium's own SearchService — NOT the #128 FTS index), its state feeds
 // the top band's Search-icon presence (hidden when the publication is not searchable → hidesSearchEntry), and
@@ -81,7 +86,9 @@ import com.vreader.app.search.InBookSearchSheet
 import com.vreader.app.search.InBookSearchViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 import org.readium.r2.navigator.epub.EpubNavigatorFactory
@@ -174,6 +181,14 @@ class ReaderActivity : AppCompatActivity() {
     // slow chapter-A translation can't inject into chapter B (Gate-4 High). The position observer
     // NEVER suspends on translation — it schedules onto this job (chrome updates stay responsive).
     private var bilingualJob: kotlinx.coroutines.Job? = null
+
+    // feature #131 WI-9 — the live bilingual UI state the top band's pill + More-menu row read (mirrored
+    // off the VM's StateFlow so the ComposeViews recompose on change), plus the two host-owned sheet flags:
+    // the setup sheet (raised on first-enable OR a pill tap) and the Variant A AI Providers sheet (opened
+    // from the setup sheet's "Set up"/"Change…"). All in-memory for the reader's lifetime.
+    private val bilingualUiState = mutableStateOf(com.vreader.app.bilingual.BilingualUiState())
+    private val showBilingualSetup = mutableStateOf(false)
+    private val showAiProviders = mutableStateOf(false)
 
     // feature #123 — in-reader highlighting
     private var highlightController: ReaderHighlightController? = null
@@ -302,9 +317,97 @@ class ReaderActivity : AppCompatActivity() {
             targetIsCjk = { vm.state.value.targetLanguage.script == com.vreader.app.bilingual.BilingualScript.cjk },
             targetIsRtl = { vm.state.value.targetLanguage.script == com.vreader.app.bilingual.BilingualScript.rtl },
         )
+        // feature #131 WI-9 — mirror the VM state into the Compose-observable snapshot the top band's pill
+        // + More-menu row read (the ComposeViews recompose when this snapshot changes).
+        lifecycleScope.launch { vm.state.collect { bilingualUiState.value = it } }
+        // feature #131 WI-9 — a MID-BOOK language change on a stationary EPUB: the position/display
+        // re-apply signals fire only on scroll / settings changes, so reconcile the CURRENT resource's DOM
+        // directly when the VM's target language changes while enabled + open. `drop(1)` skips the initial
+        // hydration emission (the open-time apply already covers it); a change reconciles the visible DOM
+        // (bump + full re-enumerate/re-inject, reaping stale-language decorations) on the dedicated job.
+        lifecycleScope.launch {
+            vm.state
+                .map { it.targetLanguage.key }
+                .distinctUntilChanged()
+                .drop(1)
+                .collect { newLang -> reconcileBilingualLanguage(newLang) }
+        }
         // If bilingual is already on for this book (persisted), apply for the opening resource — AFTER
         // the VM hydrates (both enabled + language), so the open-time apply uses the correct language.
         scheduleBilingual(force = true, awaitHydration = true)
+    }
+
+    /** feature #131 WI-9 — reconcile the CURRENT EPUB resource's DOM to [newLang] after a mid-book language
+     *  change (the deferred WI-7b finding b). Runs on the dedicated [bilingualJob] (cancelling any in-flight
+     *  apply so a slow old-language translation can't inject into the new-language DOM) and calls the
+     *  controller's single reconcile entry (bump + re-enumerate/re-inject the current resource). A no-op
+     *  when bilingual is off / the navigator or a resolvable unit is absent; the record of the new language
+     *  advances only through this path so a later scroll re-apply keys off the reconciled language. */
+    private fun reconcileBilingualLanguage(newLang: String) {
+        val controller = bilingualController ?: return
+        val provider = bilingualProvider ?: return
+        val vm = bilingualViewModel ?: return
+        if (!vm.state.value.enabled) return
+        bilingualJob?.cancel()
+        bilingualJob = lifecycleScope.launch {
+            val nav = navigator ?: return@launch
+            val unit = provider.unitForHref(nav.currentLocator.value.href.toString()) ?: return@launch
+            bilingualUnit = unit
+            bilingualLang = newLang
+            controller.reconcileLanguageChange(unit, newLang)
+        }
+    }
+
+    /** feature #131 WI-9 — the More-menu Bilingual toggle. Enabling flips the VM enabled (persisted),
+     *  raises the setup sheet (the first-enable sheet; a re-enable also re-opens it so the user can confirm
+     *  the language), and schedules the interlinear apply for the current resource; disabling flips it off
+     *  and clears the DOM decorations. The VM's setEnabled is the single source of truth; the schedule /
+     *  shutdown drive the live navigator. */
+    private fun onBilingualToggle(on: Boolean) {
+        val vm = bilingualViewModel ?: return
+        vm.setEnabled(on)
+        if (on) {
+            // The VM raises needsSetupSheet AFTER the serial enable command settles → that drives the setup
+            // sheet (BilingualSheets). We do NOT set showBilingualSetup here (it would race the enable command
+            // and re-open the sheet after the user's Turn-on dismiss). Schedule the interlinear apply.
+            scheduleBilingual(force = true)
+        } else {
+            bilingualJob?.cancel()
+            bilingualJob = lifecycleScope.launch {
+                bilingualController?.shutdown()
+                bilingualUnit = null
+                bilingualLang = null
+            }
+        }
+    }
+
+    /** feature #131 WI-9 — the host-owned bilingual modal sheets (rendered in the sheet-layer ComposeView's
+     *  tree, over the fragment). The setup sheet (first-enable OR pill/toggle-opened) drives language +
+     *  turn-on; its "Set up"/"Change…" opens the Variant A AI Providers sheet, which on Save activates the
+     *  provider, pops back, and refreshes the VM's aiConfigured (so the engine strip flips to configured). */
+    @androidx.compose.runtime.Composable
+    private fun BilingualSheets() {
+        val vm = bilingualViewModel ?: return
+        val state = bilingualUiState.value
+        val setupVisible = state.needsSetupSheet || showBilingualSetup.value
+        if (setupVisible) {
+            com.vreader.app.bilingual.BilingualSetupSheet(
+                theme = chromeTheme.value,
+                selectedLanguage = state.targetLanguage,
+                aiConfigured = state.aiConfigured,
+                onSelectLanguage = { vm.setTargetLanguage(it.key) },
+                onSetUp = { showAiProviders.value = true },
+                onTurnOn = { vm.dismissSetupSheet(); showBilingualSetup.value = false },
+                onDismiss = { vm.dismissSetupSheet(); showBilingualSetup.value = false },
+            )
+        }
+        if (showAiProviders.value) {
+            val aiVm = androidx.compose.runtime.remember { container.aiSettingsViewModel() }
+            com.vreader.app.bilingual.ReaderAiProvidersSheet(
+                vm = aiVm,
+                onDone = { showAiProviders.value = false; vm.refreshAiConfigured() },
+            )
+        }
     }
 
     /** feature #131 WI-7b — evaluate [js] against the live navigator ON THE MAIN THREAD (Readium's
@@ -817,6 +920,11 @@ class ReaderActivity : AppCompatActivity() {
                 val searchState = inBookSearchState.value
                 val onSearch: (() -> Unit)? =
                     if (searchState != null && !searchState.hidesSearchEntry) ({ showSearchSheet.value = true }) else null
+                // feature #131 WI-9 — the bilingual pill (only while ON; tap → setup sheet) + the More-menu
+                // Bilingual row (Toggle when AI configured / Disabled "Configure AI provider first" when not),
+                // supplied only for an EPUB book with a built controller (no dead control on non-EPUB).
+                val bili = bilingualUiState.value
+                val bilingualReachable = bilingualController != null
                 EpubTopBand(
                     model = chromeModel,
                     theme = chromeTheme.value,
@@ -828,7 +936,24 @@ class ReaderActivity : AppCompatActivity() {
                     // feature #135 WI-7 — the top-bar bookmark toggle (filled/outline by presence).
                     isCurrentBookmarked = isCurrentBookmarked.value,
                     onToggleBookmark = ::toggleCurrentBookmark,
+                    pillSlot = if (bilingualReachable && bili.enabled) {
+                        {
+                            androidx.compose.foundation.layout.Box(
+                                Modifier.clickable { showBilingualSetup.value = true },
+                            ) {
+                                com.vreader.app.bilingual.BilingualPill(theme = chromeTheme.value, language = bili.targetLanguage)
+                            }
+                        }
+                    } else null,
+                    bilingualMoreRow = if (!bilingualReachable) null
+                        else if (!bili.aiConfigured) com.vreader.app.reader.chrome.BilingualMoreRow.NeedsConfig
+                        else com.vreader.app.reader.chrome.BilingualMoreRow.Ready(
+                            on = bili.enabled,
+                            languageKey = bili.targetLanguage.key,
+                            onToggle = { on -> onBilingualToggle(on) },
+                        ),
                 )
+                BilingualSheets()
             }
         }
         val bottomBand = ComposeView(this).apply {
@@ -1168,6 +1293,29 @@ class ReaderActivity : AppCompatActivity() {
     /** The bilingual VM's current target-language key (the cache-row language a test seeds under). */
     @androidx.annotation.VisibleForTesting
     fun bilingualTargetLanguageForTest(): String? = bilingualViewModel?.state?.value?.targetLanguage?.key
+
+    /** feature #131 WI-9 — whether the VM's `translationsByUnit` carries [unit] (proves the controller's
+     *  `onEpubBlocksEnumerated` fed the VM render state for the EPUB unit — finding a). */
+    @androidx.annotation.VisibleForTesting
+    fun bilingualVmTranslationsContainsForTest(unit: com.vreader.app.bilingual.TranslationUnitId): Boolean =
+        bilingualViewModel?.state?.value?.translationsByUnit?.containsKey(unit) == true
+
+    /** feature #131 WI-9 — drive the mid-book language-change reconcile deterministically: set the VM's
+     *  target language then run the controller reconcile entry for the current resource (the SAME seam the
+     *  production language-change observer uses). Awaits the language flip + the reconcile (finding b). */
+    @androidx.annotation.VisibleForTesting
+    suspend fun reconcileBilingualLanguageForTest(languageKey: String) {
+        val vm = bilingualViewModel ?: return
+        val controller = bilingualController ?: return
+        val provider = bilingualProvider ?: return
+        vm.setTargetLanguage(languageKey)
+        awaitBilingualState(enabled = true, language = languageKey)
+        val nav = navigator ?: return
+        val unit = provider.unitForHref(nav.currentLocator.value.href.toString()) ?: return
+        bilingualUnit = unit
+        bilingualLang = languageKey
+        controller.reconcileLanguageChange(unit, languageKey)
+    }
 
     companion object {
         const val EXTRA_FINGERPRINT_KEY = "fingerprintKey"

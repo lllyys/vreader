@@ -7,6 +7,11 @@
 // params, no signature change later. Renders in the active [ReaderTheme]'s colors (chrome = the theme
 // background + a bottom rule — a local mapping of the design's chrome/rule tokens). The sibling of
 // [ReaderBottomChrome]; same token map + conventions. Pure function of state + callbacks.
+//
+// feature #131 WI-9 — the bilingual pill: [pillSlot] fills the center cluster next to the title
+// (vreader-reader.jsx:489 renders `<BilingualPill/>` inline after the title span when bilingual is on).
+// A null slot renders nothing (bilingual off / not applicable — the #129 no-dead-control rule); the host
+// supplies the WI-7a BilingualPill only while bilingual is enabled.
 package com.vreader.app.reader.chrome
 
 import androidx.compose.foundation.background
@@ -52,6 +57,9 @@ import com.vreader.app.ui.theme.VReaderFonts
  * (#133), [bookmarkSlot] is invoked iff non-null (#135's toggle), [onMore] renders the More icon iff
  * non-null (#134). A null slot renders NOTHING — never a dead/disabled control (the #129 rule).
  * Renders in [theme]'s colors.
+ *
+ * feature #131 WI-9 — [pillSlot] (the WI-7a BilingualPill) renders inline after the title in the center
+ * cluster when non-null (bilingual on); a null slot renders nothing (bilingual off — no dead control).
  */
 @Composable
 fun ReaderTopChrome(
@@ -61,6 +69,7 @@ fun ReaderTopChrome(
     onSearch: (() -> Unit)? = null,
     onMore: (() -> Unit)? = null,
     bookmarkSlot: (@Composable () -> Unit)? = null,
+    pillSlot: (@Composable () -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val ink = theme.ink
@@ -82,21 +91,33 @@ fun ReaderTopChrome(
         ) {
             // Centered — italic-serif title, single-line, ellipsized (design: Source Serif 4 italic, nowrap).
             // The horizontal padding reserves room for the widest possible end cluster (the trailing
-            // Search+bookmark+More = 3 * 48dp = 144dp) so the title never overlaps the controls.
-            Text(
-                title,
-                modifier = Modifier
+            // Search+bookmark+More = 3 * 48dp = 144dp) so the title never overlaps the controls. feature
+            // #131 WI-9 — when [pillSlot] is non-null the WI-7a BilingualPill sits inline AFTER the title
+            // (design vreader-reader.jsx:489); the title takes only the room it needs (weight, ellipsized)
+            // so the pill stays adjacent instead of pushed off-center.
+            Row(
+                Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 144.dp),
-                color = ink,
-                fontFamily = VReaderFonts.Serif,
-                fontStyle = FontStyle.Italic,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                textAlign = TextAlign.Center,
-            )
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center,
+            ) {
+                Text(
+                    title,
+                    modifier = Modifier.weight(1f, fill = false),
+                    color = ink,
+                    fontFamily = VReaderFonts.Serif,
+                    fontStyle = FontStyle.Italic,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center,
+                )
+                if (pillSlot != null) {
+                    Box(Modifier.padding(start = 6.dp).testTag("chrome-bilingual-pill-slot")) { pillSlot() }
+                }
+            }
 
             // Leading — "‹ Library" back control (accent). ≥48dp touch target via the row height.
             Row(

@@ -33,6 +33,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Translate
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
@@ -120,6 +121,11 @@ fun ReaderChromeScaffold(
     bookDetails: BookDetailsUiModel? = null,
     onShareBook: () -> Unit = {},
     onCopyFingerprint: (String) -> Unit = {},
+    // feature #131 WI-9 — the bilingual entry: [pillSlot] fills the top-chrome pill next to the title
+    // (WI-7a BilingualPill; null → no pill, bilingual off), and [bilingualMoreRow] supplies the More-menu
+    // Bilingual Toggle/Disabled row (null → no row — the #132/#134-only callers stay valid).
+    pillSlot: (@Composable () -> Unit)? = null,
+    bilingualMoreRow: BilingualMoreRow? = null,
 ) {
     val state = chromeState.value
 
@@ -144,12 +150,14 @@ fun ReaderChromeScaffold(
         if (tocEntries.isEmpty()) null else { { openSheet(ReaderSheet.Toc) } }
     val onOpenNotes: () -> Unit = { openSheet(ReaderSheet.Notes) }
 
-    // feature #134 WI-5 — the More menu is available only when this host has a Book-details data source.
-    // The scaffold owns the popup-open state so the More button toggles it; a null [bookDetails] omits the
-    // button (no dead control), falling back to any caller-supplied [onOpenMore].
+    // feature #134 WI-5 — the More menu is available when this host has a Book-details data source OR
+    // (feature #131 WI-9) a Bilingual row to offer. The scaffold owns the popup-open state so the More
+    // button toggles it; when neither source is present the button is omitted (no dead control), falling
+    // back to any caller-supplied [onOpenMore].
     var showMore by remember { mutableStateOf(false) }
+    val hasMoreRows = bookDetails != null || bilingualMoreRow != null
     val onMore: (() -> Unit)? = when {
-        bookDetails != null -> { { showMore = true } }
+        hasMoreRows -> { { showMore = true } }
         else -> onOpenMore
     }
 
@@ -162,6 +170,7 @@ fun ReaderChromeScaffold(
                 onSearch = onOpenSearch,
                 onMore = onMore,
                 bookmarkSlot = bookmarkSlot,
+                pillSlot = pillSlot,
             )
         }
 
@@ -182,14 +191,17 @@ fun ReaderChromeScaffold(
         }
     }
 
-    // feature #134 WI-5 — the More popover (Details + Share only). Details opens the Details sheet; Share
-    // fires the host's book-share flow. Dismisses on a backdrop tap or after either action.
-    if (showMore && bookDetails != null) {
+    // feature #134 WI-5 / #131 WI-9 — the More popover. #134's Details + Share rows (Details opens the
+    // Details sheet, Share fires the host's book-share flow) + #131's Bilingual Toggle/Disabled row when
+    // supplied. The toggle/configure callbacks are the host's (they route to the setup / AI-providers
+    // sheets); toggling/configuring dismisses the popup. Dismisses on a backdrop tap or after any action.
+    if (showMore && hasMoreRows) {
         MorePopup(
             theme = theme,
             rows = readerMoreRows(
                 onDetails = { showMore = false; openSheet(ReaderSheet.Details) },
                 onShare = { showMore = false; onShareBook() },
+                bilingual = bilingualMoreRow?.dismissingWith { showMore = false },
             ),
             onDismiss = { showMore = false },
         )
@@ -247,12 +259,71 @@ fun ReaderChromeScaffold(
 
 /**
  * feature #134 WI-5 — the reader More-menu rows the scaffold + the EPUB chrome feed to the WI-3
- * [MorePopup]. #134 owns ONLY the Details + Share rows (the design's `vreader-more.jsx` `Book details` /
- * `Share book` actions); TTS / Auto-turn / Bilingual / Export are OTHER features' rows and are never
- * invented here (the §more-row-ownership contract + the #129 no-dead-control rule — the popup renders only
- * the rows it is given). Pure function of its two callbacks (no Compose runtime beyond the icon refs).
+ * [MorePopup]. #134 owns the Details + Share rows (the design's `vreader-more.jsx` `Book details` /
+ * `Share book` actions). feature #131 WI-9 owns the Bilingual row: it is supplied ONLY when [bilingual]
+ * is non-null, mirroring the design's conditional (`vreader-more.jsx:91–102`) — a [BilingualMoreRow.Ready]
+ * (AI configured) renders `MoreRow.Toggle(BILINGUAL, on=…, sub="English ↔ <lang>" | "Translate inline")`,
+ * an [BilingualMoreRow.NeedsConfig] (no AI) renders the design's DISABLED `MoreRow.Disabled("Configure AI
+ * provider first")` — non-interactive + informational, EXACTLY as the design renders it (`vreader-more.jsx`
+ * makes the disabled row's onClick `undefined`). A null [bilingual] supplies no Bilingual row (the
+ * #132/#134-only callers). TTS / Auto-turn / Export remain OTHER features' rows and are never invented here
+ * (the §more-row-ownership contract + the #129 no-dead-control rule — the popup renders only the rows it is
+ * given). In design order the Bilingual row precedes the Details/Share group. Pure function of its callbacks.
  */
-internal fun readerMoreRows(onDetails: () -> Unit, onShare: () -> Unit): List<MoreRow> = listOf(
-    MoreRow.Action(id = MoreActionId.DETAILS, label = "Book details", icon = Icons.Filled.Info, onTap = onDetails),
-    MoreRow.Action(id = MoreActionId.SHARE, label = "Share book", icon = Icons.Filled.Share, onTap = onShare),
-)
+internal fun readerMoreRows(
+    onDetails: () -> Unit,
+    onShare: () -> Unit,
+    bilingual: BilingualMoreRow? = null,
+): List<MoreRow> = buildList {
+    when (bilingual) {
+        null -> Unit
+        is BilingualMoreRow.Ready -> add(
+            MoreRow.Toggle(
+                id = MoreActionId.BILINGUAL,
+                label = "Bilingual mode",
+                icon = Icons.Filled.Translate,
+                sub = if (bilingual.on) "English ↔ ${bilingual.languageKey}" else "Translate inline",
+                on = bilingual.on,
+                onToggle = bilingual.onToggle,
+            ),
+        )
+        // The design's UNCONFIGURED state: an informational, NON-interactive disabled row (the committed
+        // `vreader-more.jsx` renders `onClick={disabled ? undefined : on}` — the disabled row is not
+        // tappable). [MorePopup] renders [MoreRow.Disabled] non-clickable, so the onTap is a no-op stub
+        // (rule 51 — reproduce the design's non-interactive disabled row, do NOT invent a tappable one).
+        is BilingualMoreRow.NeedsConfig -> add(
+            MoreRow.Disabled(
+                id = MoreActionId.BILINGUAL,
+                label = "Bilingual mode",
+                icon = Icons.Filled.Translate,
+                sub = "Configure AI provider first",
+                onTap = {},
+            ),
+        )
+    }
+    add(MoreRow.Action(id = MoreActionId.DETAILS, label = "Book details", icon = Icons.Filled.Info, onTap = onDetails))
+    add(MoreRow.Action(id = MoreActionId.SHARE, label = "Share book", icon = Icons.Filled.Share, onTap = onShare))
+}
+
+/**
+ * feature #131 WI-9 — the host-neutral model for the More-menu Bilingual row (design `vreader-more.jsx`
+ * conditional). [Ready] = an AI provider is configured → a [MoreRow.Toggle] reflecting [on] (sub =
+ * "English ↔ <lang>" on / "Translate inline" off; toggling routes to the setup sheet — nav model
+ * "first toggle on → BilingualSetupSheet"); [NeedsConfig] = no provider → the design's informational
+ * DISABLED row (non-interactive). Null (the default in [readerMoreRows]) supplies no Bilingual row —
+ * the #132/#134-only callers stay valid.
+ */
+sealed interface BilingualMoreRow {
+    data class Ready(val on: Boolean, val languageKey: String, val onToggle: (Boolean) -> Unit) : BilingualMoreRow
+    data object NeedsConfig : BilingualMoreRow
+}
+
+/**
+ * feature #131 WI-9 — wrap a [BilingualMoreRow.Ready] toggle so it ALSO runs [dismiss] (closing the More
+ * popup) before the host's toggle — the popup dismisses the same tap that acts, mirroring the Details/Share
+ * rows (`showMore = false; …`). [NeedsConfig] is non-interactive so it is returned unchanged. Pure.
+ */
+internal fun BilingualMoreRow.dismissingWith(dismiss: () -> Unit): BilingualMoreRow = when (this) {
+    is BilingualMoreRow.Ready -> copy(onToggle = { on -> dismiss(); onToggle(on) })
+    BilingualMoreRow.NeedsConfig -> this
+}

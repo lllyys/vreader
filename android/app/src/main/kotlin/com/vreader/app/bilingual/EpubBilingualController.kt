@@ -12,7 +12,10 @@
 // commit). A stale token discards silently — no commit, no inject, and NEVER an `errorUnit` (a
 // superseded apply is not a failure). `bumpSession()` is called on navigator-recreate /
 // language-change / bilingual-off; `shutdown()` (a bump + a mutex-held clear) runs BEFORE
-// publication teardown so no late apply reaches a torn-down navigator.
+// publication teardown so no late apply reaches a torn-down navigator. `reconcileLanguageChange`
+// (WI-9) is the mid-book language-switch entry: a bump + a full re-enumerate/re-inject of the
+// CURRENT resource so a language change on a STATIONARY EPUB reconciles the visible DOM (not just
+// future resources) — the enumerate's all-block-ids reconcile set reaps stale-language decorations.
 //
 // ALL `evaluateJavascript` runs on the main thread — the caller wraps the navigator eval in
 // `withContext(Dispatchers.Main.immediate)` so R2BasicWebView.checkThread does not throw
@@ -134,6 +137,26 @@ class EpubBilingualController(
             if (expectedCount > 0 && current >= expectedCount) return
             applyLocked(unit, targetLanguage, token)
         }
+    }
+
+    /**
+     * feature #131 WI-9 — reconcile the CURRENT resource's DOM after a language (or provider) change while
+     * an EPUB is open + STATIONARY. The reader's position/display re-apply signals fire only on scroll /
+     * settings changes, so a mid-book language switch would otherwise leave the visible resource showing
+     * the OLD language until the user scrolls (the deferred WI-7b finding b). This is the single entry the
+     * reader calls on a VM language change: it bumps the session (invalidating any in-flight apply for the
+     * old language + dropping the applied-count anchors so the fresh apply re-injects rather than accepting
+     * a stale probe count), then — for the NEW captured session — runs a full [applyLocked]. `applyLocked`
+     * re-enumerates the live resource and passes EVERY enumerated block id to the inject, so a shorter new
+     * translation set REAPS the old-language decorations of blocks not re-translated (no stale-language
+     * decoration leak — the same reconcile-set contract [apply] uses). Race-safe: the bump makes any
+     * concurrent old-session apply discard at its next token re-check, and the mutex serializes this
+     * reconcile against a racing scroll re-apply. A [CancellationException] propagates.
+     */
+    suspend fun reconcileLanguageChange(unit: TranslationUnitId, targetLanguage: String) {
+        bumpSession()
+        val token = session
+        mutex.withLock { applyLocked(unit, targetLanguage, token) }
     }
 
     /** Remove every decoration node from the CURRENT resource DOM (under the mutex). Idempotent — a

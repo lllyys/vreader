@@ -466,17 +466,34 @@ class TxtReaderActivity : ComponentActivity() {
                                 .map { s.document.offsetForChunk(it) }
                                 .collect { vm.onPositionChanged(it) }
                         }
-                        // The first-enable setup sheet — driven by the VM's needsSetupSheet flag (raised on
-                        // the first was-off→on enable). Dismiss lowers the flag (config already persisted).
-                        if (bilingualVm != null && bilingualState.needsSetupSheet) {
+                        // feature #131 WI-9 — the bilingual setup sheet is shown when EITHER the VM's
+                        // needsSetupSheet flag is raised (first was-off→on enable) OR the user re-opens it
+                        // from the pill (an already-enabled book). One host-owned flag ORs the two so the
+                        // sheet's dismiss path is uniform; a first-enable ALSO lowers the VM flag. The
+                        // engine strip's "Set up"/"Change…" opens the Variant A AI Providers sheet.
+                        var showBilingualSetup by remember(bookKey) { mutableStateOf(false) }
+                        var showAiProviders by remember(bookKey) { mutableStateOf(false) }
+                        val setupVisible = bilingualVm != null && (bilingualState.needsSetupSheet || showBilingualSetup)
+                        if (setupVisible) {
                             com.vreader.app.bilingual.BilingualSetupSheet(
                                 theme = displaySettings.theme,
                                 selectedLanguage = bilingualState.targetLanguage,
                                 aiConfigured = bilingualState.aiConfigured,
-                                onSelectLanguage = { bilingualVm.setTargetLanguage(it.key) },
-                                onSetUp = { /* WI-9 routes to the Variant A AI Providers sheet */ },
-                                onTurnOn = { bilingualVm.dismissSetupSheet() },
-                                onDismiss = { bilingualVm.dismissSetupSheet() },
+                                onSelectLanguage = { bilingualVm!!.setTargetLanguage(it.key) },
+                                onSetUp = { showAiProviders = true },
+                                onTurnOn = { bilingualVm!!.dismissSetupSheet(); showBilingualSetup = false },
+                                onDismiss = { bilingualVm!!.dismissSetupSheet(); showBilingualSetup = false },
+                            )
+                        }
+                        // feature #131 WI-9 — the Variant A AI Providers sheet, pushed inside the bilingual
+                        // flow (WI-AIP). One AiSettingsViewModel per reader session; on a Save it activates
+                        // the saved provider then pops back (the sheet's onDone), and refreshes the VM's
+                        // aiConfigured so the engine strip flips to configured without reopening.
+                        if (showAiProviders) {
+                            val aiVm = remember(bookKey) { container.aiSettingsViewModel() }
+                            com.vreader.app.bilingual.ReaderAiProvidersSheet(
+                                vm = aiVm,
+                                onDone = { showAiProviders = false; bilingualVm?.refreshAiConfigured() },
                             )
                         }
 
@@ -519,6 +536,31 @@ class TxtReaderActivity : ComponentActivity() {
                                 }
                             },
                             onShareAnnotations = { shareAnnotations(annotationsSnapshot) },
+                            // feature #131 WI-9 — the top-chrome pill (only while bilingual is ON; tapping it
+                            // opens the setup sheet) + the More-menu Bilingual row (Toggle when AI is
+                            // configured / Disabled "Configure AI provider first" when not). Only supplied
+                            // for a TXT/MD book (bilingualVm != null); a null pill/row for any other format.
+                            pillSlot = if (bilingualVm != null && bilingualState.enabled) {
+                                {
+                                    Box(Modifier.clickable { showBilingualSetup = true }) {
+                                        com.vreader.app.bilingual.BilingualPill(theme = displaySettings.theme, language = bilingualState.targetLanguage)
+                                    }
+                                }
+                            } else null,
+                            bilingualMoreRow = if (bilingualVm == null) null
+                                else if (!bilingualState.aiConfigured) com.vreader.app.reader.chrome.BilingualMoreRow.NeedsConfig
+                                else com.vreader.app.reader.chrome.BilingualMoreRow.Ready(
+                                    on = bilingualState.enabled,
+                                    languageKey = bilingualState.targetLanguage.key,
+                                    onToggle = { on ->
+                                        // Nav model: first toggle ON → the setup sheet. Enabling raises the
+                                        // VM's needsSetupSheet AFTER the serial enable command settles, which
+                                        // drives the sheet — so we do NOT also set showBilingualSetup here
+                                        // (that would race the enable command and re-open the sheet after the
+                                        // user's Turn-on dismiss). OFF → disable. The VM is the source of truth.
+                                        bilingualVm!!.setEnabled(on)
+                                    },
+                                ),
                             // feature #133 WI-10 — the Search entry + sheet. The icon is hidden only when the
                             // index-state gate says Unsupported (a skipped-unsupported TXT/MD book — no dead
                             // control); otherwise tapping it opens the sheet for THIS book.
@@ -1037,6 +1079,10 @@ internal fun TxtReaderChrome(
     currentLocator: vreader.contracts.Locator? = null,
     bookmarks: List<BookmarkRowItem> = emptyList(),
     onJumpBookmark: ((BookmarkRecord) -> JumpResult)? = null,
+    // feature #131 WI-9 — the bilingual entry: the top-chrome pill (null → off) + the More-menu Bilingual
+    // row (null → non-TXT/MD, no row). Nullable/default so #132/#134/#135 callers stay valid.
+    pillSlot: (@Composable () -> Unit)? = null,
+    bilingualMoreRow: com.vreader.app.reader.chrome.BilingualMoreRow? = null,
 ) {
     Column(Modifier.fillMaxSize().background(theme.background).systemBarsPadding()) {
         ReaderChromeScaffold(
@@ -1065,6 +1111,9 @@ internal fun TxtReaderChrome(
             currentLocator = currentLocator,
             bookmarks = bookmarks,
             onJumpBookmark = onJumpBookmark,
+            // feature #131 WI-9 — the bilingual pill + More-menu row.
+            pillSlot = pillSlot,
+            bilingualMoreRow = bilingualMoreRow,
         )
     }
     // feature #133 WI-10 — the in-book search sheet overlay (a ModalBottomSheet; the host renders it when
