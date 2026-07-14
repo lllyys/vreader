@@ -297,4 +297,16 @@ class EpubBilingualControllerTest {
         assertEquals("the old-language decorations were cleared (no stale leak)", 0, emptyWeb.decorations)
         assertFalse("no inject on an empty enumeration", emptyWeb.evalKinds.contains("inject"))
     }
+
+    /** Gate-4 r2 Medium: a session bumped DURING the reconcile's translate (a superseded apply) makes
+     *  reconcileLanguageChange report FALSE — so the caller does NOT advance its recorded language. */
+    @Test fun reconcileLanguageChange_supersededDuringTranslate_returnsFalse() = runTest {
+        addActiveProfile()   // cache miss → the provider translate runs (where onChat fires)
+        val web = FakeWebView(enumTwoBlocks)
+        val c = controller(web)
+        // Bump the session mid-translate (the provider call), superseding this reconcile's apply.
+        onChat = { c.bumpSession() }
+        val ok = c.reconcileLanguageChange(unit, lang)
+        assertFalse("a reconcile superseded during translate reports failure", ok)
+    }
 }

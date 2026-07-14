@@ -168,7 +168,10 @@ class EpubBilingualController(
             if (remaining != 0) return@withLock false
             if (session != token) return@withLock false
             applyLocked(unit, targetLanguage, token)
-            true
+            // `applyLocked` silently returns early if the token changed mid-translation/inject (a superseded
+            // apply). Report success ONLY when the session is STILL the one we captured — otherwise the apply
+            // was superseded and the caller must NOT advance its recorded language/unit (Gate-4 r2 Medium).
+            session == token
         }
     }
 
