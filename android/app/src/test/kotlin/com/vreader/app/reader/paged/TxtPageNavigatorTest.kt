@@ -166,6 +166,41 @@ class TxtPageNavigatorTest {
         assertEquals(2, nav.index!!.pageCount)
     }
 
+    @Test fun supersededReflow_generationGuard_dropsAStaleSuccessEvenIfTokenNotTheDropReason() = runTest {
+        // Isolate the GENERATION-NUMBER guard from the token-cancel guard. A measurer that does NOT
+        // consult the token would let an older pass run to a SUCCESSFUL completion; the generation
+        // guard must still drop it so only the newest pass publishes. We simulate an interleaved
+        // completion order by running both passes on an UnconfinedTestDispatcher (they complete in
+        // launch order) but asserting the FINAL published index is the newest one.
+        val dispatcher = UnconfinedTestDispatcher(testScheduler)
+        val doc = sixLineDoc()
+        val nav = TxtPageNavigator(TxtPaginator(dispatcher))
+        nav.reconcileAfterReflow(doc, style, box(30f), big, isMarkdown = false, scope = this)   // bootstrap 2 pages
+        advanceUntilIdle()
+        nav.onPagerPageChanged(1)
+
+        // A (older, 6 pages) then B (newer, 2 pages). Even if A completes, generation guard drops it.
+        nav.reconcileAfterReflow(doc, style, box(10f), big, isMarkdown = false, scope = this)   // A → 6 pages
+        nav.reconcileAfterReflow(doc, style, box(30f), big, isMarkdown = false, scope = this)   // B → 2 pages (newest)
+        advanceUntilIdle()
+        assertEquals("newest generation wins", 2, nav.index!!.pageCount)
+    }
+
+    @Test fun reflow_setsPendingScrollTarget_toReconciledPage_onEveryReflowPath() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val doc = sixLineDoc()
+        val nav = TxtPageNavigator(TxtPaginator(dispatcher))
+        nav.reconcileAfterReflow(doc, style, box(10f), big, isMarkdown = false, scope = this)  // 6 pages
+        advanceUntilIdle()
+        nav.onPagerPageChanged(4)   // source offset 24
+        // GROW → 2 pages; captured source 24 → page 1. Both currentPage AND pendingScrollTarget = 1.
+        nav.reconcileAfterReflow(doc, style, box(30f), big, isMarkdown = false, scope = this)
+        advanceUntilIdle()
+        assertEquals(1, nav.currentPage)
+        assertEquals(1, nav.pendingScrollTarget)
+        assertEquals(1, nav.consumePendingScrollTarget())
+    }
+
     @Test fun supersededReflow_tokenIsCancelled_forTheOlderPass() = runTest {
         val dispatcher = StandardTestDispatcher(testScheduler)
         val doc = sixLineDoc()

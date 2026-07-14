@@ -30,8 +30,16 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 
 /**
- * Plain (Compose-free) page-navigation state over a [TxtPaginator]. Construct with the same
- * paginator the host uses; call [reconcileAfterReflow] on every re-pagination trigger.
+ * Plain page-navigation state over a [TxtPaginator]. Construct with the same paginator the host
+ * uses; call [reconcileAfterReflow] on every re-pagination trigger.
+ *
+ * Compose-independent by design: the navigation LOGIC (offset↔page delegation, the generation guard,
+ * the clamp-to-`pageContaining` reconciliation, and the pager seam) uses no Compose runtime and is
+ * JVM-testable without one. The single Compose reference is the `TextStyle` parameter threaded
+ * straight through [reconcileAfterReflow] to [TxtPaginator.index] (WI-4's read-only signature
+ * requires it for line measurement); it is never inspected here, and tests construct a trivial
+ * `TextStyle()` with no Compose runtime. No `PagerState`/`HorizontalPager`/Compose-state holder
+ * leaks in — the WI-6a host owns those and binds them to [currentPage]/[pendingScrollTarget].
  *
  * NOT thread-safe by design — every mutator (setIndex/onPagerPageChanged/jumpToOffset/
  * reconcileAfterReflow and the reflow's publish continuation) runs on the UI thread / test scheduler,
@@ -134,7 +142,10 @@ class TxtPageNavigator(private val paginator: TxtPaginator) {
      *     [currentPage]/[pendingScrollTarget] to `newIndex.pageContaining(capturedOffset)`. A degenerate
      *     or empty new index degrades safely — `pageContaining` returns 0, no crash.
      *
-     * A [CancellationException] from a superseded pass is swallowed (that pass is intentionally dead).
+     * A [CancellationException] from a pass THIS navigator superseded (its token was cancelled or a
+     * newer generation started) is swallowed — that pass is intentionally dead. A cancellation from
+     * ANY OTHER source (parent scope/job cancelled) is RE-THROWN so structured concurrency is honored
+     * and a genuine cancel is never masked as normal completion.
      */
     fun reconcileAfterReflow(
         document: TxtDocument,
@@ -157,12 +168,21 @@ class TxtPageNavigator(private val paginator: TxtPaginator) {
             val newIndex = try {
                 paginator.index(document, style, contentBox, measurer, token, isMarkdown)
             } catch (e: CancellationException) {
-                // A superseded / cancelled pass — never publishes. Drop it.
-                return@launch
+                // Only swallow OUR OWN supersession (token cancelled or a newer generation started);
+                // clear the stale active-token pointer if it still points at this dead pass. Any
+                // other cancellation (parent scope/job) is genuine — rethrow it.
+                if (token.isCancelled || myGeneration != generation) {
+                    if (activeToken === token) activeToken = null
+                    return@launch
+                }
+                throw e
             }
             // 3. Publish ONLY if this is still the newest generation (guards against an out-of-order
             //    completion that the token-cancel alone might race).
-            if (myGeneration != generation) return@launch
+            if (myGeneration != generation) {
+                if (activeToken === token) activeToken = null
+                return@launch
+            }
             publishReflow(newIndex, capturedOffset, token)
         }
     }
