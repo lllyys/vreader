@@ -263,6 +263,7 @@ class TxtReaderActivity : ComponentActivity() {
                             testPagedBodyMounted = pagedBodyMounted
                             testPagedJumpRequest = pagedJumpRequest
                             testPagedBook = s.book
+                            testPagedDocLength = s.document.text.length
                         }
 
                         // onStop flush — the PAGED body flushes its current page-start offset; the scroll
@@ -351,8 +352,12 @@ class TxtReaderActivity : ComponentActivity() {
                         // firstVisibleItemScrollOffset (round-4 audit High-2): scrolling WITHIN a tall
                         // source+translation item changes the offset while the index stays put, and that is
                         // exactly the translation-only-visible case where the SOURCE has left the viewport.
-                        LaunchedEffect(spokenChunk, listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset) {
-                            if (spokenChunk < 0) return@LaunchedEffect
+                        // feature #137 WI-9 — the SCROLL auto-scroll only runs when the SCROLL body is mounted
+                        // (pagedBodyMounted == false). In paged mode the scroll LazyListState is hidden, so
+                        // animating it would be a wasted no-op; the paged pager-follow effect (below, after
+                        // usePaged/jumpToOffset are in scope) drives the spoken page instead.
+                        LaunchedEffect(spokenChunk, listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset, pagedBodyMounted.value) {
+                            if (spokenChunk < 0 || pagedBodyMounted.value) return@LaunchedEffect
                             val visible = selectionController?.isSourceChunkInViewport(spokenChunk)
                                 ?: listState.layoutInfo.visibleItemsInfo.any { it.index == spokenChunk }
                             if (!visible) runCatching { listState.animateScrollToItem(spokenChunk) }
@@ -579,6 +584,26 @@ class TxtReaderActivity : ComponentActivity() {
                             }
                         }
 
+                        // feature #137 WI-9 — PAGED TTS follow: auto-advance the pager to the page containing
+                        // the currently-spoken SOURCE offset (tts.charStart, the SAME signal spokenChunk is
+                        // derived from). Keyed ONLY on the NARRATION signal (tts.phase + tts.charStart) — NOT
+                        // on the live page offset — so it fires when the narration MOVES to a new sentence but
+                        // does NOT re-fire on a user swipe (a swipe changes pagedOffset, not charStart, so the
+                        // reader can page freely while listening; the follow re-tracks only when the narration
+                        // next advances — Gate-4 R1 High: do not fight user swipes). The pure pagedTtsFollowTarget
+                        // skips the jump when narration is already on the shown page (never yanks a page the
+                        // narration is already on) and before an index publishes. Routes through the SAME
+                        // pager-jump seam the chrome jumps use (pagedJumpRequest).
+                        LaunchedEffect(usePaged, tts.phase, tts.charStart) {
+                            if (!usePaged || tts.phase != TtsPhase.speaking) return@LaunchedEffect
+                            val target = pagedTtsFollowTarget(
+                                spokenOffset = tts.charStart,
+                                currentPage = pagedNavigator.currentPage,
+                                index = pagedNavigator.index,
+                            ) ?: return@LaunchedEffect
+                            pagedJumpRequest.value = target
+                        }
+
                         TxtReaderChrome(
                             theme = displaySettings.theme,
                             title = s.title,
@@ -714,10 +739,11 @@ class TxtReaderActivity : ComponentActivity() {
                                     extraSlot = {
                                         ReadAloudChromeSlot(
                                             theme = displaySettings.theme,
-                                            // feature #137 WI-6a — read-aloud (TTS) stays INERT in paged mode
-                                            // (WI-9 re-integrates it); disabling the entry avoids starting TTS
-                                            // that would drive the hidden scroll list (Gate-4 High-2).
-                                            enabled = !usePaged && !starting && s.document.text.isNotBlank(),
+                                            // feature #137 WI-9 — read-aloud (TTS) is now LIVE in paged mode:
+                                            // WI-6a disabled it as a placeholder; the paged TTS-follow effect
+                                            // (below) auto-advances the pager to the spoken page, so the entry
+                                            // is enabled in BOTH modes.
+                                            enabled = !starting && s.document.text.isNotBlank(),
                                         ) {
                                             starting = true
                                             ttsScope.launch {
@@ -1200,6 +1226,9 @@ class TxtReaderActivity : ComponentActivity() {
     @Volatile private var testPagedBodyMounted: androidx.compose.runtime.MutableState<Boolean>? = null
     @Volatile private var testPagedJumpRequest: androidx.compose.runtime.MutableState<Int?>? = null
     @Volatile private var testPagedBook: Book? = null
+    // feature #137 WI-8/9 — the document's source length, so pagedJumpToOffsetForTest clamps an
+    // out-of-range jump exactly like the live jumpToOffset (offset.coerceIn(0, text.length-1)).
+    @Volatile private var testPagedDocLength: Int = 0
 
     /** The published page count (0 before phase-1 finishes, or when the paged body isn't mounted). */
     @androidx.annotation.VisibleForTesting
@@ -1246,6 +1275,70 @@ class TxtReaderActivity : ComponentActivity() {
         if (nav.index == null) return
         savePositionOffset(book, nav.currentSourceOffset())
     }
+
+    // ---- feature #137 WI-8/9 — paged CHROME (bookmark / find / scrubber / TTS-follow) test seams. The
+    // harness cannot express a horizontal swipe on the virtual display, so a jump / follow is driven by
+    // raising the SAME pagedJumpRequest the chrome jumps + the TTS-follow effect raise. Set by the
+    // composition alongside the paged-body seams above. ----
+
+    /** feature #137 WI-8/9 — request a paged jump to the page containing source [offset] (the SAME seam
+     *  the bookmark / annotation / search-hit / scrubber jumps route through in paged mode: clamp the
+     *  offset, raise pagedJumpRequest to `pageContaining(offset)`). No-op before an index publishes. */
+    @androidx.annotation.VisibleForTesting
+    fun pagedJumpToOffsetForTest(offset: Int) {
+        val nav = testPagedNavigator ?: return
+        val idx = nav.index ?: return
+        val req = testPagedJumpRequest ?: return
+        val docEnd = testPagedDocLength
+        val target = offset.coerceIn(0, (docEnd - 1).coerceAtLeast(0))
+        req.value = idx.pageContaining(target)
+    }
+
+    /** feature #137 WI-9 — drive the PAGED TTS-follow with a simulated spoken SOURCE [spokenOffset]
+     *  through the EXACT production decision (pagedTtsFollowTarget over the live navigator) + jump seam.
+     *  Returns the page it advanced to, or null when the helper decided NOT to follow (spoken text on the
+     *  current page / no index / non-positive). Lets the connected test exercise the real follow path
+     *  without a real TTS engine speaking (voice data unavailable on the emulator). */
+    @androidx.annotation.VisibleForTesting
+    fun simulatePagedTtsFollowForTest(spokenOffset: Int): Int? {
+        val nav = testPagedNavigator ?: return null
+        val req = testPagedJumpRequest ?: return null
+        val target = pagedTtsFollowTarget(spokenOffset, nav.currentPage, nav.index) ?: return null
+        req.value = target
+        return target
+    }
+
+    /** feature #137 WI-8 — the live bookmark locator at the CURRENT paged page-start offset (the mode-aware
+     *  toggle/presence anchor): the SAME `txtBookmarkLocator(book, currentPageStartOffset)` the top-bar
+     *  toggle uses in paged mode. Null before an index publishes. */
+    @androidx.annotation.VisibleForTesting
+    fun pagedBookmarkLocatorForTest(): vreader.contracts.Locator? {
+        val nav = testPagedNavigator ?: return null
+        val book = testPagedBook ?: return null
+        if (nav.index == null) return null
+        return txtBookmarkLocator(book, nav.currentSourceOffset())
+    }
+
+    /** feature #137 WI-8 — toggle a bookmark at the current paged page (returns the toggle result), then
+     *  the presence read below reflects it. Drives the SAME repository seam the top-bar toggle uses. */
+    @androidx.annotation.VisibleForTesting
+    suspend fun pagedToggleBookmarkForTest(): com.vreader.app.annotations.BookmarkToggleResult? {
+        val book = testPagedBook ?: return null
+        val locator = pagedBookmarkLocatorForTest() ?: return null
+        return container.annotationsRepository.toggleBookmark(book.fingerprintKey, title = null, locator = locator)
+    }
+
+    /** feature #137 WI-8 — whether the CURRENT paged page is bookmarked (the top-bar filled/empty state). */
+    @androidx.annotation.VisibleForTesting
+    suspend fun pagedIsBookmarkedForTest(): Boolean {
+        val book = testPagedBook ?: return false
+        val locator = pagedBookmarkLocatorForTest() ?: return false
+        return container.annotationsRepository.isBookmarked(book.fingerprintKey, locator)
+    }
+
+    /** feature #137 WI-8/9 — the loaded document's source length (the scrubber-fraction→offset denominator). */
+    @androidx.annotation.VisibleForTesting
+    fun pagedDocLengthForTest(): Int = testPagedDocLength
 
     companion object {
         const val EXTRA_FINGERPRINT_KEY = "fingerprintKey"
@@ -1399,6 +1492,30 @@ private fun TxtLoadingScaffold(theme: ReaderTheme) {
 internal fun annotationScrollOffset(item: AnnotationItem): Int {
     val loc = item.locator
     return (loc.charRangeStartUTF16 ?: loc.charOffsetUTF16 ?: 0).coerceAtLeast(0)
+}
+
+/**
+ * feature #137 WI-9 — the paged TTS-follow decision: the PAGE the pager should auto-advance to so the
+ * currently-spoken SOURCE sentence stays on screen, or null when NO follow should happen. The pager
+ * follows ONLY when the spoken offset falls on a DIFFERENT page than the one currently shown — so
+ * narration on the page the user is already reading never yanks it (the page-granularity analog of the
+ * scroll body's `isSourceChunkInViewport`-then-scroll guard). Returns null before phase-1 publishes an
+ * [index] (nothing to follow), for a NEGATIVE [spokenOffset] (never a real position — the caller already
+ * gates on `tts.phase == speaking`, so offset 0 IS the valid first-sentence position and DOES follow back
+ * to page 0), and for an empty/degenerate index (no pages). A spoken offset past the doc end clamps to the
+ * last page (via [com.vreader.app.reader.paged.TxtPageIndex.pageContaining]). Pure/JVM-testable; the host
+ * effect + a connected simulated-offset seam drive the SAME helper.
+ */
+internal fun pagedTtsFollowTarget(
+    spokenOffset: Int,
+    currentPage: Int,
+    index: com.vreader.app.reader.paged.TxtPageIndex?,
+): Int? {
+    val idx = index ?: return null
+    if (idx.isEmpty) return null
+    if (spokenOffset < 0) return null
+    val target = idx.pageContaining(spokenOffset)
+    return if (target == currentPage) null else target
 }
 
 /** The plain-text blob shared by the review sheet's sheet-level Share (feature #132 WI-6): each highlight
