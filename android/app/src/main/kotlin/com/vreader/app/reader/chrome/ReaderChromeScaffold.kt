@@ -30,9 +30,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Share
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
@@ -47,9 +44,7 @@ import com.vreader.app.annotations.AnnotationsSnapshot
 import com.vreader.app.reader.details.BookDetailsSheet
 import com.vreader.app.reader.details.BookDetailsUiModel
 import com.vreader.app.annotations.BookmarkRecord
-import com.vreader.app.reader.more.MoreActionId
 import com.vreader.app.reader.more.MorePopup
-import com.vreader.app.reader.more.MoreRow
 import com.vreader.app.reader.nav.BookmarkRowItem
 import com.vreader.app.reader.nav.JumpResult
 import com.vreader.app.reader.nav.TocBookmarksSheet
@@ -120,6 +115,11 @@ fun ReaderChromeScaffold(
     bookDetails: BookDetailsUiModel? = null,
     onShareBook: () -> Unit = {},
     onCopyFingerprint: (String) -> Unit = {},
+    // feature #131 WI-9 — the bilingual entry: [pillSlot] fills the top-chrome pill next to the title
+    // (WI-7a BilingualPill; null → no pill, bilingual off), and [bilingualMoreRow] supplies the More-menu
+    // Bilingual Toggle/Disabled row (null → no row — the #132/#134-only callers stay valid).
+    pillSlot: (@Composable () -> Unit)? = null,
+    bilingualMoreRow: BilingualMoreRow? = null,
 ) {
     val state = chromeState.value
 
@@ -144,12 +144,14 @@ fun ReaderChromeScaffold(
         if (tocEntries.isEmpty()) null else { { openSheet(ReaderSheet.Toc) } }
     val onOpenNotes: () -> Unit = { openSheet(ReaderSheet.Notes) }
 
-    // feature #134 WI-5 — the More menu is available only when this host has a Book-details data source.
-    // The scaffold owns the popup-open state so the More button toggles it; a null [bookDetails] omits the
-    // button (no dead control), falling back to any caller-supplied [onOpenMore].
+    // feature #134 WI-5 — the More menu is available when this host has a Book-details data source OR
+    // (feature #131 WI-9) a Bilingual row to offer. The scaffold owns the popup-open state so the More
+    // button toggles it; when neither source is present the button is omitted (no dead control), falling
+    // back to any caller-supplied [onOpenMore].
     var showMore by remember { mutableStateOf(false) }
+    val hasMoreRows = bookDetails != null || bilingualMoreRow != null
     val onMore: (() -> Unit)? = when {
-        bookDetails != null -> { { showMore = true } }
+        hasMoreRows -> { { showMore = true } }
         else -> onOpenMore
     }
 
@@ -162,6 +164,7 @@ fun ReaderChromeScaffold(
                 onSearch = onOpenSearch,
                 onMore = onMore,
                 bookmarkSlot = bookmarkSlot,
+                pillSlot = pillSlot,
             )
         }
 
@@ -182,14 +185,18 @@ fun ReaderChromeScaffold(
         }
     }
 
-    // feature #134 WI-5 — the More popover (Details + Share only). Details opens the Details sheet; Share
-    // fires the host's book-share flow. Dismisses on a backdrop tap or after either action.
-    if (showMore && bookDetails != null) {
+    // feature #134 WI-5 / #131 WI-9 — the More popover. #134's Details + Share rows (Details opens the
+    // Details sheet, Share fires the host's book-share flow) + #131's Bilingual Toggle/Disabled row when
+    // supplied. The toggle/configure callbacks are the host's (they route to the setup / AI-providers
+    // sheets); toggling/configuring dismisses the popup. Dismisses on a backdrop tap or after any action.
+    if (showMore && hasMoreRows) {
         MorePopup(
             theme = theme,
             rows = readerMoreRows(
                 onDetails = { showMore = false; openSheet(ReaderSheet.Details) },
                 onShare = { showMore = false; onShareBook() },
+                bilingual = bilingualMoreRow?.dismissingWith { showMore = false },
+                includeDetailsShare = bookDetails != null,
             ),
             onDismiss = { showMore = false },
         )
@@ -245,14 +252,5 @@ fun ReaderChromeScaffold(
     }
 }
 
-/**
- * feature #134 WI-5 — the reader More-menu rows the scaffold + the EPUB chrome feed to the WI-3
- * [MorePopup]. #134 owns ONLY the Details + Share rows (the design's `vreader-more.jsx` `Book details` /
- * `Share book` actions); TTS / Auto-turn / Bilingual / Export are OTHER features' rows and are never
- * invented here (the §more-row-ownership contract + the #129 no-dead-control rule — the popup renders only
- * the rows it is given). Pure function of its two callbacks (no Compose runtime beyond the icon refs).
- */
-internal fun readerMoreRows(onDetails: () -> Unit, onShare: () -> Unit): List<MoreRow> = listOf(
-    MoreRow.Action(id = MoreActionId.DETAILS, label = "Book details", icon = Icons.Filled.Info, onTap = onDetails),
-    MoreRow.Action(id = MoreActionId.SHARE, label = "Share book", icon = Icons.Filled.Share, onTap = onShare),
-)
+// feature #134 WI-5 / #131 WI-9 — the More-menu row assembly ([readerMoreRows] + [BilingualMoreRow] +
+// [dismissingWith]) lives in BilingualMoreRow.kt (split to keep this file under the ~300-line bar).

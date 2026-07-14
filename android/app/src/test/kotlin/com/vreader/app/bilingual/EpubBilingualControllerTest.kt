@@ -256,4 +256,57 @@ class EpubBilingualControllerTest {
         c.reapplyIfNeeded(unit, lang, expectedCount = 2)
         assertEquals("re-injected after the DOM lost decorations", 2, web.decorations)
     }
+
+    // ── WI-9 finding (b): a mid-book language change reconciles the CURRENT resource ──
+
+    /** reconcileLanguageChange bumps the session, CLEARS the old-language DOM, then re-injects the current
+     *  resource for the new language UNCONDITIONALLY (even when the DOM already has the old-language
+     *  decorations — a probe would wrongly skip it), reaping the old-language decorations. Returns true. */
+    @Test fun reconcileLanguageChange_bumpsSession_clearsThenReinjects() = runTest {
+        seedCache(listOf("译文1", "译文2"), sourceCount = 2)
+        val web = FakeWebView(enumTwoBlocks)
+        val committed = mutableListOf<Pair<TranslationUnitId, List<String>>>()
+        val c = controller(web, committed)
+        c.apply(unit, lang)
+        val sessionBefore = c.currentSession
+        val injectsBefore = web.evalKinds.count { it == "inject" }
+        // A language change while the DOM STILL has the old decorations — a probe-gated reapply would skip,
+        // but reconcile clears then re-injects unconditionally so the visible DOM reconciles (finding b).
+        val ok = c.reconcileLanguageChange(unit, lang)
+        assertTrue("reconcile reports success (verified clear + apply)", ok)
+        assertTrue("the session was bumped (old in-flight applies invalidated)", c.currentSession > sessionBefore)
+        assertTrue("reconcile CLEARED before re-inject", web.evalKinds.contains("clear"))
+        assertTrue("reconcile re-injected the current resource",
+            web.evalKinds.count { it == "inject" } > injectsBefore)
+        assertEquals("re-committed the reconciled unit", unit, committed.last().first)
+    }
+
+    /** Gate-4 High-3: when the CURRENT resource enumerates EMPTY for the new language, reconcile still
+     *  CLEARS the old-language DOM (so no stale-language decoration lingers) and does NOT inject. */
+    @Test fun reconcileLanguageChange_emptyEnumeration_clearsOldDom_noStaleLeak() = runTest {
+        // A resource that enumerates EMPTY but still carries 2 old-language decorations in its DOM.
+        val emptyWeb = FakeWebView("""{"doc":"file:///OEBPS/ch1.xhtml","blocks":[]}""")
+        emptyWeb.decorations = 2
+        val c = EpubBilingualController(
+            evaluateJavascript = { emptyWeb.eval(it) },
+            prefetcher = prefetcher(),
+            onEpubBlocksEnumerated = { _, _ -> },
+        )
+        val ok = c.reconcileLanguageChange(unit, "ja")
+        assertTrue("reconcile succeeds (clear verified) even with an empty new enumeration", ok)
+        assertEquals("the old-language decorations were cleared (no stale leak)", 0, emptyWeb.decorations)
+        assertFalse("no inject on an empty enumeration", emptyWeb.evalKinds.contains("inject"))
+    }
+
+    /** Gate-4 r2 Medium: a session bumped DURING the reconcile's translate (a superseded apply) makes
+     *  reconcileLanguageChange report FALSE — so the caller does NOT advance its recorded language. */
+    @Test fun reconcileLanguageChange_supersededDuringTranslate_returnsFalse() = runTest {
+        addActiveProfile()   // cache miss → the provider translate runs (where onChat fires)
+        val web = FakeWebView(enumTwoBlocks)
+        val c = controller(web)
+        // Bump the session mid-translate (the provider call), superseding this reconcile's apply.
+        onChat = { c.bumpSession() }
+        val ok = c.reconcileLanguageChange(unit, lang)
+        assertFalse("a reconcile superseded during translate reports failure", ok)
+    }
 }

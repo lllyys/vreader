@@ -12,7 +12,10 @@
 // commit). A stale token discards silently — no commit, no inject, and NEVER an `errorUnit` (a
 // superseded apply is not a failure). `bumpSession()` is called on navigator-recreate /
 // language-change / bilingual-off; `shutdown()` (a bump + a mutex-held clear) runs BEFORE
-// publication teardown so no late apply reaches a torn-down navigator.
+// publication teardown so no late apply reaches a torn-down navigator. `reconcileLanguageChange`
+// (WI-9) is the mid-book language-switch entry: a bump + a full re-enumerate/re-inject of the
+// CURRENT resource so a language change on a STATIONARY EPUB reconciles the visible DOM (not just
+// future resources) — the enumerate's all-block-ids reconcile set reaps stale-language decorations.
 //
 // ALL `evaluateJavascript` runs on the main thread — the caller wraps the navigator eval in
 // `withContext(Dispatchers.Main.immediate)` so R2BasicWebView.checkThread does not throw
@@ -133,6 +136,42 @@ class EpubBilingualController(
             // lost them). An unknown expected (<=0) always re-applies; a satisfied DOM is skipped.
             if (expectedCount > 0 && current >= expectedCount) return
             applyLocked(unit, targetLanguage, token)
+        }
+    }
+
+    /**
+     * feature #131 WI-9 — reconcile the CURRENT resource's DOM after a language (or provider) change while
+     * an EPUB is open + STATIONARY. The reader's position/display re-apply signals fire only on scroll /
+     * settings changes, so a mid-book language switch would otherwise leave the visible resource showing
+     * the OLD language until the user scrolls (the deferred WI-7b finding b). This is the single entry the
+     * reader calls on a VM language change: it bumps the session (invalidating any in-flight apply for the
+     * old language + dropping the applied-count anchors), CLEARS the old-language decorations FIRST (so a
+     * new-language apply that enumerates empty / fails to translate / aborts injection can NEVER leave the
+     * previous language visible — Gate-4 High-3, the same clear-before-apply contract [shutdown] gives the
+     * scroll path), then — for the NEW captured session — runs a full [applyLocked]. `applyLocked`
+     * re-enumerates the live resource and passes EVERY enumerated block id to the inject, so a shorter new
+     * translation set REAPS the old-language decorations of blocks not re-translated. Returns true iff the
+     * old-language clear VERIFIED 0 remaining decorations before the new apply — the caller advances its
+     * recorded language ONLY on true, so a failed clear leaves the transition pending for the next schedule.
+     * Race-safe: the bump makes a concurrent old-session apply discard at its next token re-check, and the
+     * mutex serializes this reconcile against a racing scroll re-apply. A [CancellationException] propagates.
+     */
+    suspend fun reconcileLanguageChange(unit: TranslationUnitId, targetLanguage: String): Boolean {
+        bumpSession()
+        val token = session
+        return mutex.withLock {
+            // Clear the old-language DOM under the SAME lock+token before the new apply. A null/failed clear
+            // (-1) means the transition is unfinished — do NOT apply over an un-cleared old DOM; the caller
+            // retries. `clear()` itself takes the mutex, so clear inline here (we already hold it).
+            val remaining = EpubBilingualJs.parseCountResult(evaluateJavascript(EpubBilingualJs.clearScript), default = -1)
+            appliedCount.clear()
+            if (remaining != 0) return@withLock false
+            if (session != token) return@withLock false
+            applyLocked(unit, targetLanguage, token)
+            // `applyLocked` silently returns early if the token changed mid-translation/inject (a superseded
+            // apply). Report success ONLY when the session is STILL the one we captured — otherwise the apply
+            // was superseded and the caller must NOT advance its recorded language/unit (Gate-4 r2 Medium).
+            session == token
         }
     }
 
