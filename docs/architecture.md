@@ -535,6 +535,25 @@ xcodegen/`project.yml` at the repo root; the two builds never overlap).
 | `:app` | Android application | Compose UI shell + the Room data layer + reader plumbing. `com.vreader.app`. |
 | `:identity` | pure Kotlin/JVM (no Android deps) | The shared canonical contracts — `Identity` (fingerprint canonical key), `CanonicalLocator` (engine-neutral canonical JSON), `DocumentFingerprint` (streaming SHA-256 + format detection), and the `Locator` / `VReaderLocator` / `ReaderLocatorEngine` value types. **Both `:app` AND the `contracts/conformance` lane depend on this one module**, so the golden-vector conformance test proves the SAME code the app runs. |
 
+### Bilingual interlinear (feature #131 — `com.vreader.app.bilingual`)
+
+Per-book bilingual reader mode renders each source paragraph followed by an
+AI-backed translation, cached to disk. It is user-reachable via the reader
+top-chrome `BilingualPill` (`vreader-reader.jsx`) + the More-menu Bilingual
+Toggle / non-interactive "Configure AI provider first" Disabled row
+(`vreader-more.jsx`); the setup sheet's "Set up"/"Change…" pushes the Variant-A
+`ReaderAiProvidersSheet` (reuses the #118 `AiProviderEditSheet` + a
+reader-scoped list over `AiSettingsViewModel`). The pipeline
+(`chapter_translations` Room table added at DB v9, `AiProviderStore` +
+`BilingualServices` in `AppContainer`, `ChapterTranslationStore` / `Service` /
+`Prefetcher`, `PerBookBilingualStore`, `BilingualViewModel`) caches per
+unit+lang+promptVersion. **TXT/MD** render interlinear `Text` children inside
+each chunk's `Column` (`TxtReaderActivity`, one lazy item per chunk so
+lazy-index == chunk-index holds); **EPUB** injects translation nodes into the
+live Readium WebView DOM via `EpubBilingualController` (session-token-guarded
+single writer, main-thread `evaluateJavascript`, clear-before-apply mid-book
+language reconcile).
+
 ### Data layer (`com.vreader.app.data`) — the iOS `PersistenceActor` analog
 
 - **Room** is the SwiftData analog. `VReaderDatabase` (`@Database` v4,
