@@ -19,14 +19,21 @@
 //     clamps the pager to the page containing the captured source offset.
 //
 // Selection / highlights / bookmarks / TTS / find are NOT re-integrated into the paged body yet — those
-// are WI-7a/7b/8/9 (the paged mode leaves them inert; the scroll path keeps them). Tap-zones + the
-// first-open hint are WI-6b (this WI uses HorizontalPager's native horizontal swipe as the page-turn).
+// are WI-7a/7b/8/9 (the paged mode leaves them inert; the scroll path keeps them).
+//
+// feature #137 WI-6b — the designed page-turn AFFORDANCES on [TxtPagedBody]: the 30/40/30 tap-zones
+// (paged/PagedTapZones.pagedTapZones on the pager — LEFT→prev, RIGHT→next via animateScrollToPage, CENTER
+// →the host's EXISTING chrome toggle via [onToggleChrome]) alongside the preserved native horizontal
+// SWIPE, and the first-open [TapZoneHint] discoverability overlay (shown once, persisted via
+// ReaderSettingsStore.tapHintSeen/markTapHintSeen; dismissed on the first interaction). The tap gesture is
+// one detectTapGestures classifier whose onLongPress hook is the WI-7a paged-selection seam (inert now).
 //
 // @coordinates-with: TxtReaderActivity.kt (the host — branches layout==Paged→TxtPagedBody else TxtBody,
-//   owns the TxtPageNavigator + save seam), paged/TxtPaginator.kt + TxtPageIndex.kt + TxtPageNavigator.kt
-//   + PageOffsetMap.kt (WI-4/WI-5 engine), paged/ComposeLineMeasurer.kt (the production measurer),
-//   ChunkTextMapper.kt (the UI render+cache seam), TxtDocument.kt (the chunk source),
-//   settings/ReaderTextStyles.kt (bodyTextStyle both paths apply).
+//   owns the TxtPageNavigator + save seam + supplies [onToggleChrome]), paged/TxtPaginator.kt +
+//   TxtPageIndex.kt + TxtPageNavigator.kt + PageOffsetMap.kt (WI-4/WI-5 engine), paged/PagedTapZones.kt
+//   (WI-6b tap-zones + hint), paged/ComposeLineMeasurer.kt (the production measurer), ChunkTextMapper.kt
+//   (the UI render+cache seam), TxtDocument.kt (the chunk source), settings/ReaderTextStyles.kt
+//   (bodyTextStyle both paths apply), settings/ReaderSettingsStore.kt (the tap-hint-seen flag).
 package com.vreader.app.reader
 
 import androidx.compose.foundation.background
@@ -51,7 +58,9 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -61,6 +70,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFontFamilyResolver
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -76,10 +86,13 @@ import androidx.compose.ui.unit.dp
 import com.vreader.app.reader.paged.ComposeLineMeasurer
 import com.vreader.app.reader.paged.PageContentBox
 import com.vreader.app.reader.paged.PageOffsetMap
+import com.vreader.app.reader.paged.TapZoneHint
 import com.vreader.app.reader.paged.TxtPageNavigator
 import com.vreader.app.reader.paged.TxtPaginator
+import com.vreader.app.reader.paged.pagedTapZones
 import com.vreader.app.ui.theme.VReaderColors
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.launch
 import vreader.contracts.BookFormat
 
 /**
@@ -114,6 +127,11 @@ internal fun TxtPagedBody(
     renderCache: PagedRenderCache,
     initialSourceOffset: Int,
     onSaveSourceOffset: (Int) -> Unit,
+    // feature #137 WI-6b — the CENTER tap-zone chrome toggle. The host passes its EXISTING chrome-visibility
+    // toggle (chromeState.copy(chromeVisible = !)) — the SAME mechanism the scaffold's own center-tap uses.
+    // detectTapGestures consumes the tap so the scaffold's fall-through won't fire; this callback keeps the
+    // single chrome mechanism. Defaulted to a no-op so #129/WI-6a call sites / previews stay valid.
+    onToggleChrome: () -> Unit = {},
     // An external programmatic page jump (the test-seam page turn; future bookmark/search jumps). The host
     // raises it to a target PAGE; the body scrolls, persists, then calls [onJumpConsumed] to clear it.
     jumpRequest: Int? = null,
@@ -135,6 +153,37 @@ internal fun TxtPagedBody(
     // input changes (a config change swaps density/direction), which is exactly when a reflow is due.
     val measurer = remember(fontResolver, density, layoutDirection) {
         ComposeLineMeasurer(TextMeasurer(fontResolver, density, layoutDirection))
+    }
+
+    // feature #137 WI-6b — the designed page-turn affordances (30/40/30 tap-zones + first-open hint). The
+    // hint's THEME + persisted seen flag are read here from the ReaderSettingsStore via the app container
+    // (LocalContext) — a device-local read, no host plumbing for the hint. (The only host coupling this WI
+    // adds is [onToggleChrome], so the CENTER zone reuses the host's existing chrome-visibility toggle.) The
+    // theme drives ONLY the non-interactive hint overlay's colors (the pager text uses [effectiveStyle]); it
+    // is NOT a re-render trigger for the page body (that keys on effectiveStyle/marginDp/contentBox).
+    val appContext = LocalContext.current.applicationContext
+    val appContainer = remember(appContext) {
+        (appContext as com.vreader.app.VReaderApp).container
+    }
+    val settingsStore = appContainer.readerSettingsStore
+    // The hint's theme: collected from the store's live settings (the SAME source #129 uses). Default until
+    // the first emission; the hint only shows AFTER phase-1 anyway, so the theme is settled by then.
+    val hintTheme by settingsStore.settings.collectAsState(null)
+    // The persisted first-open gate — read ONCE per document; the hint is eligible only when NOT yet seen.
+    val hintSeenInitially by produceState<Boolean?>(null, document) { value = settingsStore.tapHintSeen() }
+    // Whether the hint is currently visible for THIS open. Becomes true once phase-1 publishes an index AND
+    // the persisted flag says not-seen; lowered (+ persisted) on the first interaction or the auto-dismiss.
+    var showHint by remember(document) { mutableStateOf(false) }
+    var hintArmed by remember(document) { mutableStateOf(true) }   // guards a re-show after dismissal
+    // Persist + hide the hint (idempotent). Called on the first tap OR the auto-dismiss timeline's onDone.
+    // The persistence write runs on the APP scope (not a composition scope) so a dismiss-then-leave can't
+    // cancel the "seen" write and let the hint reappear next open (Gate-4 R1 Low — the position-save pattern).
+    val dismissHint: () -> Unit = {
+        if (showHint || hintArmed) {
+            showHint = false
+            hintArmed = false
+            appContainer.appScope.launch { settingsStore.markTapHintSeen() }
+        }
     }
     // Chrome-aware content box: the paged Box's laid-out size minus the horizontal margin padding + the
     // vertical page padding (matches the scroll body's contentPadding: horizontal = marginDp, vertical
@@ -221,6 +270,34 @@ internal fun TxtPagedBody(
                     initialPage = navigator.currentPage.coerceIn(0, (pageCount - 1).coerceAtLeast(0)),
                     pageCount = { pageCount },
                 )
+                // feature #137 WI-6b — the page-turn scope + the tap-zone page-turn helpers. A LEFT/RIGHT
+                // zone tap animates the pager one page (the design's pager.animateScrollToPage(current±1)),
+                // clamped to the valid range.
+                val pagerScope = rememberCoroutineScope()
+                val turnPrev: () -> Unit = {
+                    val to = (pagerState.currentPage - 1).coerceAtLeast(0)
+                    if (to != pagerState.currentPage) pagerScope.launch { runCatching { pagerState.animateScrollToPage(to) } }
+                }
+                val turnNext: () -> Unit = {
+                    val to = (pagerState.currentPage + 1).coerceAtMost((pageCount - 1).coerceAtLeast(0))
+                    if (to != pagerState.currentPage) pagerScope.launch { runCatching { pagerState.animateScrollToPage(to) } }
+                }
+                // The pagedTapZones modifier's pointerInput does NOT restart on recomposition (keyed on
+                // isRtl only) — so wrap the turn / toggle / first-interaction callbacks in
+                // rememberUpdatedState (the codebase's TxtBody pattern) and hand pagedTapZones STABLE
+                // trampolines that always invoke the LIVE closure. Without this, a font/margin/rotation
+                // reflow (a new pageCount + new turnNext closure) would leave the gesture calling the stale
+                // clamp from the first pagination (Gate-4 R1 Medium).
+                val liveTurnPrev by rememberUpdatedState(turnPrev)
+                val liveTurnNext by rememberUpdatedState(turnNext)
+                val liveToggleChrome by rememberUpdatedState(onToggleChrome)
+                val liveDismissHint by rememberUpdatedState(dismissHint)
+                // Arm the first-open hint ONCE the paged surface exists AND the persisted flag says not-seen.
+                // (The hint shows over the real pager, never the loading/degenerate surfaces.) Auto-lowered
+                // by the hint's own timeline (onDone → dismissHint) or the first tap.
+                LaunchedEffect(hintSeenInitially, hintArmed) {
+                    if (hintSeenInitially == false && hintArmed) showHint = true
+                }
                 // A user swipe reports the settled page back to the navigator (so the save seam + a later
                 // reflow see the right anchor). Only settled pages (not a mid-drag target) update state.
                 // Skip the SAVE while a programmatic scroll is still pending (a reflow just published a new
@@ -272,7 +349,26 @@ internal fun TxtPagedBody(
 
                 HorizontalPager(
                     state = pagerState,
-                    modifier = Modifier.fillMaxSize().testTag("txt-pager"),
+                    // feature #137 WI-6b — the designed 30/40/30 tap-zones: LEFT→prev, RIGHT→next (both
+                    // consume so the scaffold's center-tap chrome toggle does not also fire), CENTER→leave
+                    // unconsumed so the scaffold's existing toggle flips chrome (reuse; no new chrome). ANY
+                    // tap dismisses the first-open hint. The long-press hook is the WI-7a selection seam
+                    // (a no-op now — paged selection stays inert this WI). The gesture sits BEFORE the pager's
+                    // own drag handling in the modifier chain, so a horizontal SWIPE (a drag) still turns the
+                    // page natively (a drag consumes the down → the tap classifier bows out).
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .testTag("txt-pager")
+                        .pagedTapZones(
+                            // Stable trampolines → the LIVE closures (rememberUpdatedState) so a reflow's
+                            // new pageCount/callbacks are always used even though the pointerInput never
+                            // restarts.
+                            onPrevPage = { liveTurnPrev() },
+                            onNextPage = { liveTurnNext() },
+                            onToggleChrome = { liveToggleChrome() },
+                            onFirstInteraction = { liveDismissHint() },
+                            isRtl = layoutDirection == androidx.compose.ui.unit.LayoutDirection.Rtl,
+                        ),
                     // Bound the rendered window: HorizontalPager keeps ± beyondViewportPageCount pages
                     // COMPOSED; combined with the LRU render cache the whole book is never rendered.
                     beyondViewportPageCount = 1,
@@ -300,6 +396,15 @@ internal fun TxtPagedBody(
                             modifier = Modifier.fillMaxSize().testTag("txt-page-$page"),
                         )
                     }
+                }
+                // feature #137 WI-6b — the first-open discoverability hint, overlaid on the pager (a
+                // NON-interactive overlay — see TapZoneHint; it never steals a tap). Rendered only while
+                // showHint; its own timeline (or the first tap) lowers it + persists the seen flag. The
+                // theme comes from the live Display settings (settled by the time phase-1 finishes); until
+                // the first emission the hint waits (showHint is only armed after the index publishes).
+                val theme = hintTheme?.theme
+                if (showHint && theme != null) {
+                    TapZoneHint(theme = theme, visible = showHint, onDone = dismissHint)
                 }
             }
         }

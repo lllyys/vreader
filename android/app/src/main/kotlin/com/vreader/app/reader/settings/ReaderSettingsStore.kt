@@ -7,6 +7,7 @@ package com.vreader.app.reader.settings
 
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import kotlinx.coroutines.flow.Flow
@@ -65,6 +66,22 @@ class ReaderSettingsStore(
     /** A one-shot read (the current settings) — for a host's initial config at open. */
     suspend fun current(): ReaderSettings = read(dataStore.data.first()).toSettings()
 
+    // feature #137 WI-6b — the first-open paged tap-zone hint's one-shot discoverability flag
+    // (vreader-reader.jsx:29 `localStorage.getItem('vreader.tap-hint-seen')` analog). Persisted under
+    // its OWN preference key, NOT inside the display-settings JSON — so this device-local flag is
+    // independent of the live-collected typography flow (reading/writing it never re-renders the reader
+    // body). Default false → the hint shows once per install until dismissed.
+
+    /** True once the first-open paged tap-zone hint has been shown + dismissed (persisted). */
+    suspend fun tapHintSeen(): Boolean = dataStore.data.first()[TAP_HINT_SEEN_KEY] ?: false
+
+    /** Mark the paged tap-zone hint as seen so it never shows again (idempotent). */
+    suspend fun markTapHintSeen() { dataStore.edit { it[TAP_HINT_SEEN_KEY] = true } }
+
+    /** Reset the seen flag (test-only — restores the first-open hint eligibility). */
+    @androidx.annotation.VisibleForTesting
+    suspend fun resetTapHintSeenForTest() { dataStore.edit { it[TAP_HINT_SEEN_KEY] = false } }
+
     // Each setter takes an optional pre-stamped submission [order]. Concurrent callers (the reader's
     // per-slider launches) MUST pass an order from nextSeq() taken at the synchronous UI callback;
     // sequential callers (tests) may omit it and get an entry-time stamp (order == call order there).
@@ -111,5 +128,7 @@ class ReaderSettingsStore(
 
     companion object {
         private val KEY = stringPreferencesKey("reader_settings_json")
+        // feature #137 WI-6b — a SEPARATE key from the display-settings JSON (see tapHintSeen).
+        private val TAP_HINT_SEEN_KEY = booleanPreferencesKey("paged_tap_hint_seen")
     }
 }

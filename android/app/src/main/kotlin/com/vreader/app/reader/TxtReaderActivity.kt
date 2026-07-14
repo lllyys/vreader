@@ -760,6 +760,12 @@ class TxtReaderActivity : ComponentActivity() {
                                             pagedOffset.value = offset
                                             savePositionOffset(s.book, offset)
                                         },
+                                        // feature #137 WI-6b — the CENTER tap-zone reuses the EXISTING chrome
+                                        // toggle (the SAME chromeState flip the scaffold's own center-tap
+                                        // does), routed here because detectTapGestures consumes the tap.
+                                        onToggleChrome = {
+                                            chromeState.value = chromeState.value.copy(chromeVisible = !chromeState.value.chromeVisible)
+                                        },
                                         jumpRequest = pagedJumpRequest.value,
                                         onJumpConsumed = { pagedJumpRequest.value = null },
                                     )
