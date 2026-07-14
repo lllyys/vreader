@@ -71,7 +71,7 @@ Build order is roughly reuse-leverage / dependency order.
   GH #1927 closed; evidence `dev-docs/verification/feature-135-20260712.md` — live-WebDAV bookmark
   round-trip UUID-preserving + toggle/list/jump across all 5 formats).
 
-- [~] **C. Library management — collections + search** — a collections shelf-bar over the grid +
+- [x] **C. Library management — collections + search** — a collections shelf-bar over the grid +
   manage/assign sheets + search (metadata hits split from in-text hits).
   Design: `vreader-library-android.jsx` (+ `vreader-search.jsx`).
   Needs: a collections Room schema (+ book↔collection join) + a search index. iOS parity: #60.
@@ -80,14 +80,16 @@ Build order is roughly reuse-leverage / dependency order.
   proven end-to-end over live WebDAV; delete UI deferred to needs-design #1875) + #128 search (Android
   `Book` has no author field + no cross-format FTS → search design/data gap, filed separately — NOT yet
   done). Box C checks when BOTH #127 and #128 are VERIFIED — #127 ✓, #128 remains.**
+  **COMPLETE 2026-07-14: #128 search VERIFIED (GH #1901) — the "NOT yet done" note above is stale; both #127 and #128 VERIFIED, box C COMPLETE.**
 
-- [ ] **D. Bilingual interlinear reading** — interlinear original+translation rendering + the bilingual
+- [x] **D. Bilingual interlinear reading** — interlinear original+translation rendering + the bilingual
   setup sheet (languages · provider · model · style), building on the #118 AI provider.
   Design: `vreader-ai-android.jsx` (BilingualReader/BilingualSetupSheet) + `vreader-bilingual.jsx`.
   Note: the pipeline + UI are buildable autonomously; LIVE translation verification is
   AI-credential-gated (a mock/integration path verifies the pipeline). iOS parity: #56/#100.
+  **VERIFIED 2026-07-14 — #131 (GH #1923 closed, `android/v0.19.0`); box D COMPLETE.**
 
-- [ ] **E. Reader display settings** — the Aa sheet: theme (the 5 reader themes), font family/size,
+- [~] **E. Reader display settings** — the Aa sheet: theme (the 5 reader themes), font family/size,
   line spacing, layout (scroll/paged) — applied across the EPUB/TXT/MD/PDF readers.
   Design: `vreader-themes.jsx` + `vreader-panels.jsx` (+ `vreader-reader.jsx` chrome).
   Needs: an Android `ReaderSettingsStore` (DataStore) + per-host application. iOS parity: #60 WI-10.
@@ -96,8 +98,9 @@ Build order is roughly reuse-leverage / dependency order.
   Display slot); the LAYOUT (scroll/paged) toggle is a separate tracked follow-up (TXT/MD are scroll-only
   Compose hosts → needs a paged renderer first; a layout toggle there would be a non-functional control).
   Box E checks when BOTH #129 AND the layout follow-up are VERIFIED.**
+  **RECONCILED 2026-07-14: #129 typography VERIFIED (GH #1879); the LAYOUT (scroll/paged) toggle is now filed as **feature #137** (PLANNED — Gate-1 v4 + Gate-2 passed 3 Codex rounds, GH #1990; 12 WIs, incl. a new Compose paged text renderer for TXT/MD). Box E checks when #137 VERIFIED.**
 
-- [~] **F. Reader navigation chrome** — the designed top/bottom reader bars hosting: Contents (TOC) +
+- [x] **F. Reader navigation chrome** — the designed top/bottom reader bars hosting: Contents (TOC) +
   bookmarks, find-in-book (in-reader text search), and the More menu (book details · share · export).
   Design: `vreader-reader.jsx` + `vreader-panels.jsx` + `vreader-more.jsx` + `vreader-book-details.jsx`
   + `vreader-search.jsx`. (The TTS Read-aloud entry from #121 already added the bottom-bar slot.)
@@ -106,8 +109,8 @@ Build order is roughly reuse-leverage / dependency order.
   Status: **IN PROGRESS** — the chrome shell + Contents/TOC (**#132 VERIFIED 2026-07-11**, `android/v0.15.3`,
   GH #1924), the More menu + Book Details + Share (**#134 VERIFIED 2026-07-11**, `android/v0.16.1`, GH #1926),
   and Contents+**bookmarks** (**#135 VERIFIED 2026-07-12**, `android/v0.17.2`, GH #1927) are all VERIFIED.
-  **Remaining for box F: find-in-book (#133)** — needs a Gate-2 round-2 plan (search-anchor strategy).
-  Box checks when #133 is VERIFIED.
+  **Box F COMPLETE 2026-07-14: find-in-book #133 VERIFIED** (`android/v0.18.2`, GH #1925 closed). All box-F
+  sub-features — TOC/bookmarks (#132/#135), More/Details/Share (#134), find-in-book (#133) — are VERIFIED.
 
 ### Deferred (explicit go/no-go — not autonomously startable)
 
@@ -129,6 +132,7 @@ Build order is roughly reuse-leverage / dependency order.
 ## Definition of done
 
 - **Autonomous parity reached** when A–F are all `[x] VERIFIED`.
+- **STATUS 2026-07-14:** A/B/C/D/F ✅ VERIFIED; AZW3 ✅ (GO, #126). **The ONLY remaining box is E's layout (scroll/paged) toggle → feature #137** (PLANNED, GH #1990; Gate-2 passed 3 Codex rounds; 12 WIs incl. a new Compose paged text renderer for TXT/MD). When #137 reaches VERIFIED, box E checks and **all boxes complete → driver #110 → DONE.**
 - **Full parity** additionally requires the AZW3 go/no-go decision (the one DEFERRED row).
 - Each item, when started: file a `docs/features.md` row (status → `PLANNED` after its Gate-2 plan
   audit) + a GH issue, run the 6 gates, then check its box here on VERIFIED.
