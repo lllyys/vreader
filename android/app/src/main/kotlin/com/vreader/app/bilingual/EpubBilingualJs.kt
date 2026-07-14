@@ -161,96 +161,7 @@ object EpubBilingualJs {
         allBlockIds: List<String>,
         targetIsCjk: Boolean = false,
         rtl: Boolean = false,
-    ): String {
-        // Two ARRAYS (not a JS object) so a book-supplied `__proto__` bid is an ordinary array
-        // element — it can neither collapse the map (a `{__proto__:…}` literal has no own key)
-        // nor pollute Object.prototype. Both are JSON-encoded (CSP-safe). The two are index-paired
-        // (ids[i] → texts[i]); the reconcile set is the FULL enumerated id list so a block whose
-        // translation is now blank/absent has its owned decoration removed (Gate-4 High).
-        val ids = translationsById.keys.toList()
-        val texts = ids.map { translationsById.getValue(it) }
-        val idsLiteral = JSONObject().put("v", org.json.JSONArray(ids)).getJSONArray("v").toString()
-        val textsLiteral = JSONObject().put("v", org.json.JSONArray(texts)).getJSONArray("v").toString()
-        val allLiteral = JSONObject().put("v", org.json.JSONArray(allBlockIds)).getJSONArray("v").toString()
-        return """
-            (function() {
-                var ids = $idsLiteral;
-                var texts = $textsLiteral;
-                var allIds = $allLiteral;
-                $BID_SELECTOR_ESCAPE_JS
-                function findBlock(bid) {
-                    try {
-                        return document.querySelector(
-                            '[$BLOCK_ID_ATTRIBUTE="' + __vreaderBidEsc(bid) + '"]'
-                        );
-                    } catch (e) { return null; }
-                }
-                function ownedDecoration(block) {
-                    var e = block ? block.nextElementSibling : null;
-                    return (e && e.hasAttribute && e.hasAttribute('$DECORATION_ATTRIBUTE')
-                        && e.classList && e.classList.contains('$BLOCK_CLASS')) ? e : null;
-                }
-                var TARGET_CJK = ${if (targetIsCjk) "true" else "false"};
-                var DIR = ${if (rtl) "'rtl'" else "'auto'"};
-                function isHeading(el) {
-                    return !!(el && /^H[1-6]${'$'}/i.test(el.tagName || ''));
-                }
-                function headingClasses(el) {
-                    if (!isHeading(el)) { return ''; }
-                    return ' $HEADING_CLASS' + (TARGET_CJK ? ' $CJK_CLASS' : '');
-                }
-                function makeBlock(text, sourceBlock) {
-                    var div = document.createElement('div');
-                    div.className = '$BLOCK_CLASS' + headingClasses(sourceBlock);
-                    div.setAttribute('$DECORATION_ATTRIBUTE', '');
-                    div.setAttribute('dir', DIR);
-                    div.style.cssText = 'user-select: none; -webkit-user-select: none;';
-                    div.textContent = text;
-                    return div;
-                }
-                // Build a set of ids that will carry a translation this pass (for reconciliation).
-                var keep = {};
-                for (var a = 0; a < ids.length; a++) { keep[ids[a]] = 1; }
-                // 1) Reconcile: remove the owned decoration for any enumerated block that is NOT
-                //    getting a translation this pass (a now-blank/absent block — Gate-4 High), so a
-                //    language switch to a shorter/blank set never leaves stale nodes behind.
-                for (var r = 0; r < allIds.length; r++) {
-                    var rid = allIds[r];
-                    if (Object.prototype.hasOwnProperty.call(keep, rid)) continue;
-                    var rblock = findBlock(rid);
-                    var rdec = ownedDecoration(rblock);
-                    if (rdec && rdec.parentNode) { rdec.parentNode.removeChild(rdec); }
-                }
-                // 2) Inject / update in place for each translated id.
-                var count = 0;
-                for (var i = 0; i < ids.length; i++) {
-                    var bid = ids[i];
-                    var block = findBlock(bid);
-                    if (!block) continue;
-                    var existing = ownedDecoration(block);
-                    if (existing) {
-                        if (isHeading(block)) {
-                            existing.classList.add('$HEADING_CLASS');
-                            existing.classList.toggle('$CJK_CLASS', TARGET_CJK);
-                        } else {
-                            existing.classList.remove('$HEADING_CLASS');
-                            existing.classList.remove('$CJK_CLASS');
-                        }
-                        existing.setAttribute('dir', DIR);
-                        existing.textContent = texts[i];
-                        count += 1;
-                        continue;
-                    }
-                    var node = makeBlock(texts[i], block);
-                    if (block.parentNode) {
-                        block.parentNode.insertBefore(node, block.nextSibling);
-                        count += 1;
-                    }
-                }
-                return count;
-            })();
-        """.trimIndent()
-    }
+    ): String = buildInjectScript(translationsById, allBlockIds, targetIsCjk, rtl)
 
     /**
      * JS that removes every injected decoration node from the whole document. Idempotent
@@ -324,8 +235,8 @@ object EpubBilingualJs {
 
     /** iOS `__vreaderBidEsc` parity: `CSS.escape` with the `[^a-zA-Z0-9_-] → \\$&`
      *  fallback so a stamped bid interpolated into a `[data-vreader-bid="…"]` selector
-     *  can never break the selector context. */
-    private const val BID_SELECTOR_ESCAPE_JS =
+     *  can never break the selector context. Internal so the inject-builder parts file uses it. */
+    internal const val BID_SELECTOR_ESCAPE_JS =
         "function __vreaderBidEsc(s) { return (typeof CSS !== 'undefined' && CSS.escape) ? " +
             "CSS.escape(s) : String(s).replace(/[^a-zA-Z0-9_-]/g, '\\\\\$&'); }"
 }
