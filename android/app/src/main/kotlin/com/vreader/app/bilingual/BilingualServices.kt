@@ -83,7 +83,10 @@ class BilingualServices(
     /**
      * A PER-SESSION [BilingualViewModel] for [bookKey] over [textProvider]. Wires the real
      * prefetcher, the live AI-provider snapshot provider (a single store.snapshot() read per
-     * refresh — snapshot-consistency), and the readiness gate.
+     * refresh — snapshot-consistency), and the readiness gate. The SAME [textProvider] is passed
+     * into the VM (WI-8 — so its position-driven prefetch resolves real TXT/MD units, not the
+     * inert [NoTranslationUnitsProvider] default) AND into the prefetcher (the translate side),
+     * so the two segment the document identically by construction.
      */
     fun bilingualViewModel(
         bookKey: String,
@@ -96,6 +99,7 @@ class BilingualServices(
             snapshotProvider = { snapshot() },
             readiness = bilingualAiReadiness,
             dispatcher = ioDispatcher,
+            textProvider = textProvider,
         )
 
     /** One consistent AI-provider snapshot for the VM's readiness refresh. */

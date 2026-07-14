@@ -30,6 +30,11 @@ class TxtSelectionController(
     private var lazyCoords: LayoutCoordinates? = null
     // the initial word selected at long-press — the FIXED anchor; drags extend relative to it (never drop it).
     private var anchorRange: Utf16Range? = null
+    // feature #131 WI-8 — the WINDOW-space bounds of the interlinear TRANSLATION slots currently
+    // laid out. Populated additively by the bilingual body; a long-press whose pointer lands inside one
+    // is CONSUMED (no selection begun) instead of routing to hitAt's nearest-source-chunk fallback
+    // (:47–53). Empty when bilingual is off → the disabled selection path is byte-identical.
+    private var excludedBounds: List<androidx.compose.ui.geometry.Rect> = emptyList()
 
     private val _selection = MutableStateFlow<Utf16Range?>(null)
     val selection: StateFlow<Utf16Range?> = _selection.asStateFlow()
@@ -39,6 +44,42 @@ class TxtSelectionController(
         chunks[index] = ChunkInfo(layout, coords)
     }
     fun unregisterChunk(index: Int) { chunks.remove(index) }
+
+    /** feature #131 WI-8 — set the WINDOW-space bounds of the currently laid-out interlinear
+     *  translation slots (the bilingual body publishes these on layout). A long-press whose
+     *  pointer falls inside any of these is a no-op (translation is never selectable, and the
+     *  nearest-source-chunk fallback in [hitAt] is bypassed). Pass an empty list to clear
+     *  (bilingual off / no translations visible). */
+    fun setExcludedBounds(bounds: List<androidx.compose.ui.geometry.Rect>) { excludedBounds = bounds }
+
+    /** feature #131 WI-8 — whether the pointer at [localPoint] (LazyColumn-local) lands inside a
+     *  registered translation-slot's window bounds. */
+    private fun isInExcludedBounds(localPoint: Offset): Boolean {
+        if (excludedBounds.isEmpty()) return false
+        val lz = lazyCoords ?: return false
+        val windowPoint = lz.localToWindow(localPoint)
+        return excludedBounds.any { it.contains(windowPoint) }
+    }
+
+    /**
+     * feature #131 WI-8 — whether source chunk [index]'s REGISTERED `Text` bounds intersect the
+     * LazyColumn viewport (used by the host's TTS auto-scroll guard, which can no longer trust
+     * item-index visibility now that an item holds a source `Text` + a taller translation child).
+     * A chunk whose `LayoutCoordinates` is absent / detached / pre-layout counts as NOT visible
+     * (round-6 Low — the safe default: the host then scrolls the source into view). Returns false
+     * when the lazy coords themselves are unavailable (pre-first-layout).
+     */
+    fun isSourceChunkInViewport(index: Int): Boolean {
+        val lz = lazyCoords ?: return false
+        if (!lz.isAttached) return false
+        val info = chunks[index] ?: return false
+        val coords = info.coords
+        if (!coords.isAttached) return false
+        val viewport = lz.boundsInWindow()
+        val chunkBounds = coords.boundsInWindow()
+        // A zero-area intersection (edge-touch) is NOT visible; require real vertical overlap.
+        return chunkBounds.bottom > viewport.top && chunkBounds.top < viewport.bottom
+    }
 
     /** Pointer (LazyColumn-local) → the hit chunk + chunk-local rendered offset + source offset. The hit
      *  chunk is used for BOTH the source mapping AND word-boundary lookup (avoids a chunk-boundary shift).
@@ -58,8 +99,11 @@ class TxtSelectionController(
         return Hit(hit.key, hit.value, rendered, doc.offsetForChunk(hit.key) + localSource)
     }
 
-    /** Long-press: select the word under [localPoint] (word boundary in the HIT chunk, mapped to source). */
+    /** Long-press: select the word under [localPoint] (word boundary in the HIT chunk, mapped to source).
+     *  A long-press whose pointer lands inside an interlinear translation slot ([setExcludedBounds]) is a
+     *  NO-OP — the translation is never selectable, and hitAt's nearest-source-chunk fallback is bypassed. */
     fun beginAt(localPoint: Offset) {
+        if (isInExcludedBounds(localPoint)) return
         val hit = hitAt(localPoint) ?: return
         val word = hit.info.layout.getWordBoundary(hit.rendered)   // RENDERED coords in the hit chunk
         val base = doc.offsetForChunk(hit.chunkIndex)
