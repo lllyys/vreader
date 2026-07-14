@@ -1,15 +1,15 @@
-// Purpose: feature #137 WI-6b (#110 Phase 3, box E) — the designed page-turn AFFORDANCES for the paged
-// TXT/MD body (TxtPagedBody): the 30/40/30 tap-zones + the first-open discoverability hint, faithful to
-// the committed design (dev-docs/designs/vreader-fidelity-v1/project/vreader-tap-zones.jsx +
+// Purpose: feature #137 WI-6b + WI-7a (#110 Phase 3, box E) — the designed page-turn AFFORDANCES for the
+// paged TXT/MD body (TxtPagedBody): the 30/40/30 tap-zones + the first-open discoverability hint, faithful
+// to the committed design (dev-docs/designs/vreader-fidelity-v1/project/vreader-tap-zones.jsx +
 // vreader-reader.jsx `handleTap`). Two pieces:
 //
-//   • [Modifier.pagedTapZones] — a single awaitEachGesture classifier over the pager Box. A TAP resolves
-//     to a horizontal zone: LEFT 30% → previous page, RIGHT 30% → next page (both CONSUME the tap so the
-//     scaffold's outer center-tap chrome toggle does NOT also fire), CENTER 40% → NOT consumed, so the
-//     scaffold's existing detectTapGestures toggles the chrome (reusing that mechanism — no new chrome).
-//     RTL-aware (LocalLayoutDirection): in RTL the "advance" side is the LEFT zone, mirroring HorizontalPager.
-//     The classifier is structured so WI-7a can extend the same awaitEachGesture with a long-press →
-//     selection branch (the [onLongPress] hook is the seam; paged selection is inert this WI).
+//   • [Modifier.pagedTapZones] — ONE awaitEachGesture classifier over the pager that owns the page-turn
+//     tap-zones, the pager swipe coexistence, AND (WI-7a) the paged text-selection long-press-drag — a
+//     single recognizer, never two racing ones (Gate-4 R1 Critical). Per gesture exactly one branch wins:
+//     LONG-PRESS → source selection (begin+drag+finalize, never a page turn); SWIPE → the HorizontalPager
+//     turns the page natively; SETTLED TAP → tap-to-edit first (suppresses navigation iff a highlight is
+//     hit), else the zones — LEFT 30% → prev, RIGHT 30% → next (RTL swaps), CENTER 40% → the host's chrome
+//     toggle. The tap's up is CONSUMED so the pager does not re-process it as a zero-distance drag.
 //
 //   • [TapZoneHint] — the first-open overlay (vreader-tap-zones.jsx:11 `TapZoneHint`): three zones
 //     (flex 3/4/3 = 30/40/30) with a chevron-back "TAP TO GO BACK", a dot "TAP TO TOGGLE CONTROLS", and a
@@ -18,17 +18,21 @@
 //     (the persisted `ReaderSettingsStore.tapHintSeen` gate lives in the caller); dismissed on the first
 //     interaction (the caller lowers `visible` + persists on any tap).
 //
-// @coordinates-with: TxtReaderBody.kt (TxtPagedBody applies [pagedTapZones] to the pager Box + renders
-//   [TapZoneHint] gated by the persisted flag), reader/settings/ReaderSettingsStore.kt (tapHintSeen/
-//   markTapHintSeen — the persistence), ReaderChromeScaffold.kt (the outer detectTapGestures the center
-//   zone falls through to). NO invented UI — every visual mirrors vreader-tap-zones.jsx (rule 51).
+// @coordinates-with: TxtReaderBody.kt (TxtPagedBody applies [pagedTapZones] to the pager + wires the
+//   selection callbacks to its TxtSelectionController + renders [TapZoneHint] gated by the persisted flag),
+//   TxtSelectionController.kt (the source-range selection this classifier's long-press-drag drives),
+//   reader/settings/ReaderSettingsStore.kt (tapHintSeen/markTapHintSeen — the persistence). NO invented UI
+//   — every visual mirrors vreader-tap-zones.jsx (rule 51).
 package com.vreader.app.reader.paged
 
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.drag
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -62,28 +66,31 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vreader.app.reader.settings.ReaderTheme
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeoutOrNull
 
 /** The 30/40/30 split (vreader-tap-zones.jsx flex 3/4/3, vreader-reader.jsx `x < w*0.3 / x > w*0.7`). */
 private const val LEFT_ZONE_FRACTION = 0.30f
 private const val RIGHT_ZONE_FRACTION = 0.70f
 
 /**
- * Attach the designed 30/40/30 tap-zone page-turn gesture (feature #137 WI-6b). A settled TAP resolves to
- * a zone by its x fraction of the box width:
- *   • LEFT 30%  → [onPrevPage] (previous page — animateScrollToPage),
- *   • RIGHT 30% → [onNextPage] (next page),
- *   • CENTER 40% → [onToggleChrome] — the host's EXISTING chrome toggle (chromeState.copy(chromeVisible=!));
- *     this is the same mechanism the scaffold's own center-tap uses, invoked via a callback (no new chrome).
- * RTL swaps prev/next (the "advance" side follows the pager). ANY tap first fires [onFirstInteraction] so
- * the first-open hint dismisses on the first touch. [onLongPress] is the WI-7a selection seam (a long-press
- * calls it; paged selection is inert this WI, so the caller passes a no-op) — a long-press NEVER turns a
- * page.
+ * Attach the designed 30/40/30 tap-zone page-turn gesture (feature #137 WI-6b) + the WI-7a paged
+ * text-selection classifier as ONE `awaitEachGesture` recognizer (Gate-4 R1 Critical: two nested
+ * recognizers race + double-fire). Per gesture, exactly one branch wins:
  *
- * Uses [detectTapGestures] (the canonical tap detector that coexists with a scrollable): a horizontal
- * SWIPE is a drag the HorizontalPager handles natively (detectTapGestures does not fire onTap for it), so
- * the WI-6a swipe page-turn is preserved. The center zone routes through [onToggleChrome] rather than a
- * fall-through because detectTapGestures consumes the tap (so the scaffold's own center-tap wouldn't fire)
- * — the callback reuses the identical host toggle, keeping "one chrome mechanism".
+ *   • LONG-PRESS → SELECTION. [onSelectLongPress] begins a source selection at the press point, then the
+ *     drag stream extends it via [onSelectDragTo]; a completed drag/up calls [onSelectFinalize], a cancel
+ *     calls [onSelectCancel]. A long-press NEVER turns a page or toggles chrome.
+ *   • SWIPE (a horizontal drag before the long-press timeout) → the HorizontalPager turns the page
+ *     natively: `awaitLongPressOrCancellation` returns null WITHOUT this recognizer consuming, so the
+ *     pager's own drag handling wins. No zone action fires.
+ *   • SETTLED TAP → tap-to-edit FIRST ([onTapForEdit] returns true iff a highlight handled it) — if
+ *     handled, NO zone navigation runs. Otherwise the tap resolves to a zone by its x fraction:
+ *       – LEFT 30%  → [onPrevPage],  RIGHT 30% → [onNextPage]  (RTL swaps prev/next),
+ *       – CENTER 40% → [onToggleChrome] (the host's EXISTING chrome toggle — no new chrome).
+ *
+ * ANY down first fires [onFirstInteraction] so the first-open hint dismisses on the first touch.
+ * Keyed on [isRtl] only (the pointerInput does not restart on recomposition); the caller hands STABLE
+ * trampolines to the live closures (rememberUpdatedState).
  */
 fun Modifier.pagedTapZones(
     onPrevPage: () -> Unit,
@@ -91,27 +98,49 @@ fun Modifier.pagedTapZones(
     onToggleChrome: () -> Unit,
     onFirstInteraction: () -> Unit,
     isRtl: Boolean = false,
-    onLongPress: (Offset) -> Unit = {},
+    // feature #137 WI-7a — the unified selection branch (defaulted to no-ops so a caller without a
+    // selection controller behaves exactly like the WI-6b tap-only classifier).
+    onSelectLongPress: (Offset) -> Unit = {},
+    onSelectDragTo: (Offset) -> Unit = {},
+    onSelectFinalize: () -> Unit = {},
+    onSelectCancel: () -> Unit = {},
+    // Returns true iff the tap landed on an existing highlight (tap-to-edit) → suppress zone navigation.
+    onTapForEdit: (Offset) -> Boolean = { false },
 ): Modifier = this.pointerInput(isRtl) {
-    detectTapGestures(
-        onLongPress = { pos ->
-            // A long-press is ALSO a first interaction → dismiss the discoverability hint (Gate-4 R1
-            // Medium). WI-7a selection seam — a long-press is a selection intent, never a page turn / toggle.
-            onFirstInteraction()
-            onLongPress(pos)
-        },
-        onTap = { pos ->
-            // First touch dismisses the discoverability hint regardless of zone.
-            onFirstInteraction()
-            val w = size.width.toFloat()
-            if (w <= 0f) return@detectTapGestures
-            when {
-                pos.x < w * LEFT_ZONE_FRACTION -> (if (isRtl) onNextPage else onPrevPage)()
-                pos.x > w * RIGHT_ZONE_FRACTION -> (if (isRtl) onPrevPage else onNextPage)()
-                else -> onToggleChrome()   // center 40% → reuse the host's existing chrome toggle
+    val longPressTimeout = viewConfiguration.longPressTimeoutMillis
+    awaitEachGesture {
+        val down = awaitFirstDown(requireUnconsumed = false)
+        onFirstInteraction()
+        // Race the long-press timeout against a pointer up/cancel: a fast up = TAP (zones/edit); the timeout
+        // firing (null) = LONG-PRESS (selection); a cancel (swipe → the pager consumed the drag) = null with
+        // the pointer gone → the pager already turned, so do nothing.
+        val up = withTimeoutOrNull(longPressTimeout) { waitForUpOrCancellation() }
+        if (up == null) {
+            // Either the LONG-PRESS timeout elapsed (a real long-press) or a swipe cancelled. Distinguish:
+            // a still-pressed pointer means a long-press → begin selection + drag; a cancelled pointer means
+            // the swipe won (pager handles it) → no-op.
+            val current = currentEvent.changes.firstOrNull { it.id == down.id }
+            if (current != null && current.pressed && !current.isConsumed) {
+                onSelectLongPress(current.position)
+                val completed = drag(down.id) { change -> onSelectDragTo(change.position); change.consume() }
+                if (completed) onSelectFinalize() else onSelectCancel()
             }
-        },
-    )
+            return@awaitEachGesture
+        }
+        // A settled TAP. CONSUME its up so the HorizontalPager does not also process the down+up as a
+        // zero-distance drag that snaps back to the current page and overrides animateScrollToPage (Gate-4
+        // regression: the old detectTapGestures consumed the tap; awaitEachGesture must too).
+        up.consume()
+        // Tap-to-edit first; if a highlight handled the tap, suppress navigation.
+        if (onTapForEdit(down.position)) return@awaitEachGesture
+        val w = size.width.toFloat()
+        if (w <= 0f) return@awaitEachGesture
+        when {
+            down.position.x < w * LEFT_ZONE_FRACTION -> (if (isRtl) onNextPage else onPrevPage)()
+            down.position.x > w * RIGHT_ZONE_FRACTION -> (if (isRtl) onPrevPage else onNextPage)()
+            else -> onToggleChrome()   // center 40% → reuse the host's existing chrome toggle
+        }
+    }
 }
 
 /** The hint's animation timeline (vreader-tap-zones.jsx:14 — enter 220ms, hold 2500ms, exit 400ms). */

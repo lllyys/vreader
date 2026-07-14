@@ -18,15 +18,20 @@
 //     display-settings / rotation change re-paginates via the navigator's reflow reconciliation, which
 //     clamps the pager to the page containing the captured source offset.
 //
-// Selection / highlights / bookmarks / TTS / find are NOT re-integrated into the paged body yet — those
-// are WI-7a/7b/8/9 (the paged mode leaves them inert; the scroll path keeps them).
+// feature #137 WI-7a — paged text SELECTION is now integrated into [TxtPagedBody]: each visible page
+// registers its rendered layout + coords + PageOffsetMap with the (optional) TxtSelectionController, a
+// long-press-drag over a page begins/extends a SOURCE selection (word-select via the page's
+// PageOffsetMap, GLOBAL source coords, MD dual-affinity), and a tap resolves a source offset. The
+// highlight WASH render on the page, bookmarks, TTS, and find are still WI-7b/8/9 (inert in paged mode).
 //
 // feature #137 WI-6b — the designed page-turn AFFORDANCES on [TxtPagedBody]: the 30/40/30 tap-zones
 // (paged/PagedTapZones.pagedTapZones on the pager — LEFT→prev, RIGHT→next via animateScrollToPage, CENTER
 // →the host's EXISTING chrome toggle via [onToggleChrome]) alongside the preserved native horizontal
 // SWIPE, and the first-open [TapZoneHint] discoverability overlay (shown once, persisted via
-// ReaderSettingsStore.tapHintSeen/markTapHintSeen; dismissed on the first interaction). The tap gesture is
-// one detectTapGestures classifier whose onLongPress hook is the WI-7a paged-selection seam (inert now).
+// ReaderSettingsStore.tapHintSeen/markTapHintSeen; dismissed on the first interaction). feature #137 WI-7a
+// folds the tap-zones AND the paged text-selection long-press-drag into ONE pagedTapZones awaitEachGesture
+// classifier on the pager (no two racing recognizers): a long-press starts selection, a fast swipe turns
+// the page, a settled tap navigates (or tap-to-edit an existing highlight).
 //
 // @coordinates-with: TxtReaderActivity.kt (the host — branches layout==Paged→TxtPagedBody else TxtBody,
 //   owns the TxtPageNavigator + save seam + supplies [onToggleChrome]), paged/TxtPaginator.kt +
@@ -137,6 +142,18 @@ internal fun TxtPagedBody(
     jumpRequest: Int? = null,
     onJumpConsumed: () -> Unit = {},
     onContentBoxReady: (PageContentBox) -> Unit = {},
+    // feature #137 WI-7a — paged text selection. When non-null, each visible page registers its rendered
+    // layout + coords + PageOffsetMap with the controller (registerPage), and a long-press-drag over the
+    // page begins/extends/finalizes a SOURCE selection through the ONE unified pagedTapZones classifier.
+    // Defaulted null so #129/WI-6a/6b call sites + previews stay valid (selection inert). The highlight
+    // WASH render on the page is WI-7b — this WI only produces the source range.
+    selectionController: TxtSelectionController? = null,
+    onSelectionFinalized: () -> Unit = {},
+    // A settled tap → the host resolves tap-to-edit (open the edit popover if the tap hit an existing
+    // highlight) and RETURNS true iff a highlight was hit, so the classifier SUPPRESSES page-turn/chrome
+    // navigation for that tap (Gate-4 R1 Critical — no navigate+edit double-fire). Returns false → the tap
+    // navigates (the WI-6b tap-zone behavior). Defaulted to a no-op returning false.
+    onTapEditAt: (Offset) -> Boolean = { false },
 ) {
     val isMarkdown = format == BookFormat.md
     val density = LocalDensity.current
@@ -292,6 +309,14 @@ internal fun TxtPagedBody(
                 val liveTurnNext by rememberUpdatedState(turnNext)
                 val liveToggleChrome by rememberUpdatedState(onToggleChrome)
                 val liveDismissHint by rememberUpdatedState(dismissHint)
+                // feature #137 WI-7a — live selection closures for the unified pagedTapZones classifier
+                // (stable pointerInput → read the live closures through rememberUpdatedState). The
+                // tap-to-edit trampoline forwards to [onTapEditAt], which the host implements to (a) open the
+                // edit popover when the tap lands on an existing highlight and (b) RETURN true so navigation
+                // is suppressed for that tap. Returns false (tap navigates) when no highlight is hit — which
+                // is always the case in WI-7a (on-page washes are WI-7b), so taps navigate exactly as WI-6b.
+                val liveSelFinalize by rememberUpdatedState(onSelectionFinalized)
+                val liveTapForEdit by rememberUpdatedState(onTapEditAt)
                 // Arm the first-open hint ONCE the paged surface exists AND the persisted flag says not-seen.
                 // (The hint shows over the real pager, never the loading/degenerate surfaces.) Auto-lowered
                 // by the hint's own timeline (onDone → dismissHint) or the first tap.
@@ -349,16 +374,17 @@ internal fun TxtPagedBody(
 
                 HorizontalPager(
                     state = pagerState,
-                    // feature #137 WI-6b — the designed 30/40/30 tap-zones: LEFT→prev, RIGHT→next (both
-                    // consume so the scaffold's center-tap chrome toggle does not also fire), CENTER→leave
-                    // unconsumed so the scaffold's existing toggle flips chrome (reuse; no new chrome). ANY
-                    // tap dismisses the first-open hint. The long-press hook is the WI-7a selection seam
-                    // (a no-op now — paged selection stays inert this WI). The gesture sits BEFORE the pager's
-                    // own drag handling in the modifier chain, so a horizontal SWIPE (a drag) still turns the
-                    // page natively (a drag consumes the down → the tap classifier bows out).
+                    // feature #137 WI-6b + WI-7a — ONE unified pagedTapZones classifier on the pager: a
+                    // LONG-PRESS starts a source selection (begin+drag+finalize) and NEVER turns a page; a
+                    // horizontal SWIPE is a drag the HorizontalPager handles natively (the classifier bows
+                    // out on the cancelled long-press); a SETTLED tap resolves tap-to-edit first, else the
+                    // 30/40/30 zones (LEFT→prev, RIGHT→next, CENTER→chrome). ANY down dismisses the hint.
+                    // The pager also publishes its LayoutCoordinates as the controller's lazyCoords, so the
+                    // classifier's pager-local pointer positions convert to window space correctly.
                     modifier = Modifier
                         .fillMaxSize()
                         .testTag("txt-pager")
+                        .onGloballyPositioned { selectionController?.setLazyCoords(it) }
                         .pagedTapZones(
                             // Stable trampolines → the LIVE closures (rememberUpdatedState) so a reflow's
                             // new pageCount/callbacks are always used even though the pointerInput never
@@ -368,20 +394,25 @@ internal fun TxtPagedBody(
                             onToggleChrome = { liveToggleChrome() },
                             onFirstInteraction = { liveDismissHint() },
                             isRtl = layoutDirection == androidx.compose.ui.unit.LayoutDirection.Rtl,
+                            // feature #137 WI-7a — the selection branch of the unified classifier.
+                            onSelectLongPress = { p -> selectionController?.beginAt(p) },
+                            onSelectDragTo = { p -> selectionController?.extendTo(p) },
+                            onSelectFinalize = { liveSelFinalize() },
+                            onSelectCancel = { selectionController?.clear() },
+                            onTapForEdit = { p -> liveTapForEdit(p) },
                         ),
                     // Bound the rendered window: HorizontalPager keeps ± beyondViewportPageCount pages
                     // COMPOSED; combined with the LRU render cache the whole book is never rendered.
                     beyondViewportPageCount = 1,
                 ) { page ->
-                    // Lazily render THIS page through the UI mapper; hold it in the small LRU cache so an
-                    // off-screen page's AnnotatedString is evicted (memory-bounded — the scroll body's LRU
-                    // posture, page-scoped). Only the AnnotatedString is cached (the PageOffsetMap is
-                    // WI-7a's concern and not retained here).
-                    val rendered: AnnotatedString = remember(page, idx, mapper) {
-                        renderCache.getOrRender(page) {
-                            val (text: AnnotatedString, _: PageOffsetMap) =
-                                paginator.renderPage(document, idx, page, mapper, effectiveStyle, isMarkdown)
-                            text
+                    // Lazily render THIS page through the UI mapper; hold BOTH the rendered text and its
+                    // per-page PageOffsetMap in the small LRU cache so an off-screen page is evicted
+                    // (memory-bounded — the scroll body's LRU posture, page-scoped). The map is WI-7a's
+                    // selection bridge (page-local rendered ↔ GLOBAL source); it is rendered + evicted with
+                    // the text so a visible page's map always matches its rendered text.
+                    val (rendered: AnnotatedString, pageMap: PageOffsetMap) = remember(page, idx, mapper) {
+                        renderCache.getOrRenderPage(page) {
+                            paginator.renderPage(document, idx, page, mapper, effectiveStyle, isMarkdown)
                         }
                     }
                     Box(
@@ -389,11 +420,32 @@ internal fun TxtPagedBody(
                             .fillMaxSize()
                             .padding(horizontal = marginDp.dp, vertical = 16.dp),
                     ) {
+                        // feature #137 WI-7a — register THIS page's rendered layout + coords + map with the
+                        // selection controller so a long-press-drag over it resolves to a SOURCE range; the
+                        // registration replaces on re-render and is DISPOSED when the page leaves the pager
+                        // window (beyondViewportPageCount eviction) so a stale off-screen TextLayoutResult is
+                        // never consulted. Inert when there is no controller (WI-6a/6b call sites).
+                        var pageLayout by remember(page, idx) { mutableStateOf<TextLayoutResult?>(null) }
+                        var pageCoords by remember(page, idx) { mutableStateOf<androidx.compose.ui.layout.LayoutCoordinates?>(null) }
+                        if (selectionController != null) {
+                            // Key registration on the controller TOO (Gate-4 Medium): if the controller
+                            // instance changes while the same page/layout/map stays composed, the old
+                            // controller is unregistered (below) and the new one MUST re-register.
+                            LaunchedEffect(selectionController, page, pageLayout, pageCoords, pageMap) {
+                                val l = pageLayout; val c = pageCoords
+                                if (l != null && c != null) selectionController.registerPage(page, l, c, pageMap)
+                            }
+                            DisposableEffect(selectionController, page) { onDispose { selectionController.unregisterPage(page) } }
+                        }
                         Text(
                             text = rendered,
                             // The SAME effective style phase-1 measured against (deterministic breaks).
                             style = effectiveStyle,
-                            modifier = Modifier.fillMaxSize().testTag("txt-page-$page"),
+                            onTextLayout = { if (selectionController != null) pageLayout = it },
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .testTag("txt-page-$page")
+                                .onGloballyPositioned { if (selectionController != null) pageCoords = it },
                         )
                     }
                 }
@@ -430,24 +482,27 @@ private fun TxtScrollFallback(
 }
 
 /**
- * A tiny page → rendered-AnnotatedString LRU (feature #137 WI-6a) so the paged body holds only a small
- * window of rendered pages (the current ± a couple that HorizontalPager composes), never the whole book.
- * NOT thread-safe — accessed only on the main thread (the page-render composables run there). [maxCached]
- * bounds the retained pages (default 6 — a couple beyond the pager's composed window).
+ * A tiny page → rendered (AnnotatedString + PageOffsetMap) LRU (feature #137 WI-6a; the map added WI-7a)
+ * so the paged body holds only a small window of rendered pages (the current ± a couple that
+ * HorizontalPager composes), never the whole book. The text AND its per-page PageOffsetMap are rendered
+ * together (one renderPage call) and evicted together, so a visible page's selection map is always the one
+ * matching its rendered text (no drift). NOT thread-safe — accessed only on the main thread (the
+ * page-render composables run there). [maxCached] bounds the retained pages (default 6 — a couple beyond
+ * the pager's composed window).
  */
 class PagedRenderCache(private val maxCached: Int = 6) {
-    private val cache = object : LinkedHashMap<Int, AnnotatedString>(maxCached.coerceAtLeast(1), 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Int, AnnotatedString>): Boolean = size > maxCached
+    private val cache = object : LinkedHashMap<Int, Pair<AnnotatedString, PageOffsetMap>>(maxCached.coerceAtLeast(1), 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Int, Pair<AnnotatedString, PageOffsetMap>>): Boolean = size > maxCached
     }
 
-    /** The rendered text for [page], rendering + caching it (LRU) on a miss. */
-    fun getOrRender(page: Int, render: () -> AnnotatedString): AnnotatedString =
+    /** The rendered (text, map) for [page], rendering + caching it (LRU) on a miss. */
+    fun getOrRenderPage(page: Int, render: () -> Pair<AnnotatedString, PageOffsetMap>): Pair<AnnotatedString, PageOffsetMap> =
         cache.getOrPut(page, render)
 
     /** Test/host visibility into the retained-page count (proves the window stays bounded). */
     val size: Int get() = cache.size
 
-    /** Drop every cached page (a reflow invalidates page numbers → their rendered text must be rebuilt). */
+    /** Drop every cached page (a reflow invalidates page numbers → their rendered text + map must be rebuilt). */
     fun clear() = cache.clear()
 }
 
