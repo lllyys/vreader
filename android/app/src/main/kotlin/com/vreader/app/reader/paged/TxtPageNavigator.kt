@@ -171,11 +171,12 @@ class TxtPageNavigator(private val paginator: TxtPaginator) {
                 // Only swallow OUR OWN supersession (token cancelled or a newer generation started);
                 // clear the stale active-token pointer if it still points at this dead pass. Any
                 // other cancellation (parent scope/job) is genuine — rethrow it.
-                if (token.isCancelled || myGeneration != generation) {
-                    if (activeToken === token) activeToken = null
-                    return@launch
-                }
-                throw e
+                // Clear the stale active-token pointer BEFORE either branch — this pass is dead
+                // regardless of whether the cancel was our supersession or a parent-scope cancel, so
+                // `activeToken` must never keep pointing at a no-longer-running pass.
+                if (activeToken === token) activeToken = null
+                if (token.isCancelled || myGeneration != generation) return@launch
+                throw e   // genuine parent/job cancellation — honor structured concurrency.
             }
             // 3. Publish ONLY if this is still the newest generation (guards against an out-of-order
             //    completion that the token-cancel alone might race).
