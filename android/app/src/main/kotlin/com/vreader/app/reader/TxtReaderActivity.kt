@@ -26,6 +26,17 @@
 // hit's canonical charOffsetUTF16 resolves to a scroll via the EXISTING chunk-scroll seam
 // (chunkForOffset), returning Succeeded (sheet dismisses) or Failed (out-of-range → sheet stays open). The
 // icon is hidden only when the WI-7 index-state gate reports Unsupported (no dead control).
+//
+// feature #131 WI-8: bilingual interlinear, ADDITIVE + strictly TXT/MD-gated. A per-session
+// BilingualViewModel (over the real TxtChapterTextProvider, WI-4b DI) drives position-based prefetch
+// (onPositionChanged on the top-visible char offset) + the first-enable setup sheet. Each source chunk's
+// lazy item wraps its byte-UNCHANGED source `Text` and the muted, NON-registered interlinear translation
+// slot(s) anchored to that chunk (BilingualTxtAnchors) in ONE `Column` — the items(count=chunkCount,
+// key={it}) loop + keys are UNCHANGED so lazy-index==chunk-index (position-save/every jump) is preserved
+// (round-4 H2). The translation slots' window bounds are pushed to the selection controller so a
+// long-press on translation is excluded from the nearest-source-chunk fallback (gesture exclusion). TTS
+// auto-scroll visibility now keys off the registered SOURCE `Text` bounds (isSourceChunkInViewport), not
+// the item index, since an in-item translation makes items taller than their source line (round-5/6).
 package com.vreader.app.reader
 
 import android.os.Bundle
@@ -88,6 +99,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
@@ -174,6 +186,11 @@ class TxtReaderActivity : ComponentActivity() {
     private val saveRequests = Channel<PendingSave>(Channel.CONFLATED)
     private data class PendingSave(val book: Book, val offsetUtf16: Int)
 
+    // feature #131 WI-8 — the per-session bilingual VM (TXT/MD only; null for any non-TXT/MD open,
+    // and until the composition builds it). Held so the @VisibleForTesting seams can drive
+    // enable/disable + read state deterministically (the live More-menu entry is WI-9).
+    private var bilingualViewModel: com.vreader.app.bilingual.BilingualViewModel? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val key = intent.getStringExtra(EXTRA_FINGERPRINT_KEY)
@@ -250,13 +267,10 @@ class TxtReaderActivity : ComponentActivity() {
                         }
                         val active = tts.phase != TtsPhase.idle
                         val spokenChunk = if (tts.phase == TtsPhase.speaking) s.document.chunkForOffset(tts.charStart) else -1
-                        // auto-scroll ONLY when the spoken chunk is off-screen — so a small manual scroll
-                        // while listening isn't fought on every sentence.
-                        LaunchedEffect(spokenChunk) {
-                            if (spokenChunk >= 0 && listState.layoutInfo.visibleItemsInfo.none { it.index == spokenChunk }) {
-                                runCatching { listState.animateScrollToItem(spokenChunk) }
-                            }
-                        }
+                        // The TTS auto-scroll effect is installed BELOW, after selectionController is
+                        // declared — feature #131 WI-8 keys visibility off the registered SOURCE `Text`
+                        // bounds (an in-item translation child makes the item taller than its source line,
+                        // so item-index visibility no longer proves the source is on-screen).
                         var showSpeed by remember { mutableStateOf(false) }
                         var showVoice by remember { mutableStateOf(false) }
                         var starting by remember { mutableStateOf(false) }   // guards double-tap → double-chunk
@@ -285,6 +299,26 @@ class TxtReaderActivity : ComponentActivity() {
 
                         // feature #124/#125 — custom selection + popover (TXT + MD).
                         val selectionController = remember(s.document, chunkMapper) { if (annotatable) TxtSelectionController(s.document, chunkMapper) else null }
+                        // feature #131 WI-8 — expose the live controller + list state to the connected test
+                        // seams (the TTS source-visibility query drives against real laid-out coordinates).
+                        SideEffect { testSelectionController = selectionController; testListState = listState }
+                        // feature #131 WI-8 — TTS auto-scroll: keep the spoken SOURCE on screen. Visibility
+                        // keys off the registered source `Text` bounds (isSourceChunkInViewport), NOT the
+                        // lazy-item index — an in-item translation child makes the item taller than its
+                        // source line, so `visibleItemsInfo.index == spokenChunk` can be true while the
+                        // SOURCE has scrolled above the viewport (only the translation is visible). A null
+                        // controller (never for TXT/MD, which is always annotatable) or a not-yet-laid-out /
+                        // detached source chunk counts as NOT visible → scroll (the safe default, round-6 Low).
+                        // Recomputes on scroll — keyed on BOTH firstVisibleItemIndex AND
+                        // firstVisibleItemScrollOffset (round-4 audit High-2): scrolling WITHIN a tall
+                        // source+translation item changes the offset while the index stays put, and that is
+                        // exactly the translation-only-visible case where the SOURCE has left the viewport.
+                        LaunchedEffect(spokenChunk, listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset) {
+                            if (spokenChunk < 0) return@LaunchedEffect
+                            val visible = selectionController?.isSourceChunkInViewport(spokenChunk)
+                                ?: listState.layoutInfo.visibleItemsInfo.any { it.index == spokenChunk }
+                            if (!visible) runCatching { listState.animateScrollToItem(spokenChunk) }
+                        }
                         val popoverVm = remember(bookKey) { com.vreader.app.annotations.SelectionPopoverViewModel() }
                         val popoverState by popoverVm.state.collectAsStateWithLifecycle()
                         DisposableEffect(lifecycleOwner, bookKey) {
@@ -382,6 +416,69 @@ class TxtReaderActivity : ComponentActivity() {
                         DisposableEffect(inBookSearchVm) { onDispose { inBookSearchVm.onCleared() } }
                         val inBookSearchState by inBookSearchVm.state.collectAsStateWithLifecycle()
                         var showSearch by remember(bookKey) { mutableStateOf(false) }
+
+                        // feature #131 WI-8 — the bilingual interlinear wiring, STRICTLY gated to TXT/MD
+                        // (annotatable == txt || md). For any other format the VM is null and the whole
+                        // bilingual path (render, position-driven prefetch, setup sheet, TTS-visibility
+                        // change) is inert — the reader is byte-identical to #129/#132/#133/#134/#135.
+                        val bilingualKind = when (s.book.originalFormat) {
+                            BookFormat.txt -> com.vreader.app.bilingual.TranslationUnitId.Kind.txtDocSegmentWindow
+                            BookFormat.md -> com.vreader.app.bilingual.TranslationUnitId.Kind.mdDocSegmentWindow
+                            else -> null
+                        }
+                        // ONE VM per reader open, hosted in this Activity's ViewModelStore (via a one-shot
+                        // factory) so Android clears it — and cancels its viewModelScope — on destroy; a
+                        // fresh store key per book keeps re-opens independent. The provider is a LAZY
+                        // decorator so the whole-document segmentation scan is deferred off the reader-open
+                        // path until bilingual actually prefetches (round-4 audit High-3).
+                        val bilingualVm: com.vreader.app.bilingual.BilingualViewModel? =
+                            if (bilingualKind == null) null else viewModel(
+                                key = "bilingual-$bookKey",
+                                factory = viewModelFactory {
+                                    initializer {
+                                        container.bilingualViewModel(
+                                            bookKey,
+                                            LazyTxtChapterTextProvider(s.document, bilingualKind),
+                                        )
+                                    }
+                                },
+                            )
+                        SideEffect { bilingualViewModel = bilingualVm }
+                        val bilingualState by (bilingualVm?.state ?: flowOf(com.vreader.app.bilingual.BilingualUiState()))
+                            .collectAsStateWithLifecycle(com.vreader.app.bilingual.BilingualUiState())
+                        // The source-chunk → translation-unit anchor map. Constructed cheaply per doc/kind;
+                        // its whole-document scan is itself LAZY (runs on first unitsForChunk, only while
+                        // enabled + rendering — round-4 audit High-3), so a disabled open pays nothing.
+                        val bilingualAnchors = remember(s.document, bilingualKind) {
+                            bilingualKind?.let { BilingualTxtAnchors(s.document, it) }
+                        }
+                        // Position-driven prefetch: feed the top-visible chunk's char offset to the VM.
+                        // Keyed ALSO on the target language (round-4 audit High-1) so a language change while
+                        // enabled re-submits the CURRENT position immediately (the VM invalidates its cache
+                        // on a language change; without re-submitting, the visible unit would stay untranslated
+                        // until the user scrolls). Only active when enabled (onPositionChanged is itself a
+                        // no-op while disabled). The snapshotFlow's first emission IS the current position, so
+                        // a re-key re-dispatches the current unit without waiting for a scroll.
+                        LaunchedEffect(bilingualVm, s.document, bilingualState.enabled, bilingualState.targetLanguage.key) {
+                            val vm = bilingualVm ?: return@LaunchedEffect
+                            if (!bilingualState.enabled) return@LaunchedEffect
+                            snapshotFlow { listState.firstVisibleItemIndex }
+                                .map { s.document.offsetForChunk(it) }
+                                .collect { vm.onPositionChanged(it) }
+                        }
+                        // The first-enable setup sheet — driven by the VM's needsSetupSheet flag (raised on
+                        // the first was-off→on enable). Dismiss lowers the flag (config already persisted).
+                        if (bilingualVm != null && bilingualState.needsSetupSheet) {
+                            com.vreader.app.bilingual.BilingualSetupSheet(
+                                theme = displaySettings.theme,
+                                selectedLanguage = bilingualState.targetLanguage,
+                                aiConfigured = bilingualState.aiConfigured,
+                                onSelectLanguage = { bilingualVm.setTargetLanguage(it.key) },
+                                onSetUp = { /* WI-9 routes to the Variant A AI Providers sheet */ },
+                                onTurnOn = { bilingualVm.dismissSetupSheet() },
+                                onDismiss = { bilingualVm.dismissSetupSheet() },
+                            )
+                        }
 
                         TxtReaderChrome(
                             theme = displaySettings.theme,
@@ -525,6 +622,26 @@ class TxtReaderActivity : ComponentActivity() {
                                     selectionController = selectionController,
                                     onSelectionFinalized = { finalizeTxtSelection(selectionController, popoverVm) },
                                     onTapAt = { point -> onTxtTap(point, s.book, highlightsList, selectionController, popoverVm) },
+                                    // feature #131 WI-8 — interlinear translation slot(s) per chunk. Only
+                                    // drawn while bilingual is enabled; each returned state is derived from
+                                    // the VM's shaped render slice for a unit anchored to this chunk (round-4
+                                    // H2). Empty when off / no unit anchored here → the item's Column holds
+                                    // only the unchanged source Text (behaviorally identical to today).
+                                    bilingualRenderStates = { chunkIndex ->
+                                        if (bilingualVm == null || !bilingualState.enabled) emptyList()
+                                        else bilingualAnchors?.unitsForChunk(chunkIndex).orEmpty().map { unit ->
+                                            com.vreader.app.bilingual.BilingualRenderState.forUnit(bilingualState, unit)
+                                        }
+                                    },
+                                    bilingualLanguage = bilingualState.targetLanguage,
+                                    bilingualTheme = displaySettings.theme,
+                                    bilingualSourceFontSizeSp = displaySettings.fontSizeSp,
+                                    // The translation slots report their window bounds so the selection
+                                    // controller can exclude a long-press on translation from the
+                                    // nearest-source-chunk fallback (round-4 H2 gesture exclusion).
+                                    onBilingualSlotBounds = { bounds ->
+                                        selectionController?.setExcludedBounds(bounds)
+                                    },
                                 )
                                 AnimatedVisibility(pillVisible, modifier = Modifier.align(Alignment.TopEnd).padding(12.dp)) {
                                     InReaderSessionPill(sessionSeconds)
@@ -800,6 +917,73 @@ class TxtReaderActivity : ComponentActivity() {
         startActivity(android.content.Intent.createChooser(send, null))
     }
 
+    // ---- feature #131 WI-8 bilingual test seams (the live More-menu entry is WI-9) ----
+    // These drive the SAME VM the render/prefetch use, so a connected test can enable/disable + read
+    // state deterministically without a designed entry toggle. Null-safe until the composition builds the
+    // VM (a non-TXT/MD open, or before the first frame).
+
+    /** Whether the bilingual VM was built for this book (TXT/MD only). */
+    @androidx.annotation.VisibleForTesting
+    fun bilingualViewModelBuiltForTest(): Boolean = bilingualViewModel != null
+
+    /** Enable bilingual for this book via the VM (optionally set the target language first), then await
+     *  the serial command consumer flipping `enabled` (and the language, when set) so the caller sees a
+     *  settled state. */
+    @androidx.annotation.VisibleForTesting
+    suspend fun enableBilingualForTest(languageKey: String? = null) {
+        val vm = bilingualViewModel ?: return
+        languageKey?.let { vm.setTargetLanguage(it) }
+        vm.setEnabled(true)
+        awaitBilingualState(enabled = true, language = languageKey)
+    }
+
+    /** Disable bilingual + await the flip. */
+    @androidx.annotation.VisibleForTesting
+    suspend fun disableBilingualForTest() {
+        val vm = bilingualViewModel ?: return
+        vm.setEnabled(false)
+        awaitBilingualState(enabled = false, language = null)
+    }
+
+    /** The VM's current bilingual state (or null if not built). */
+    @androidx.annotation.VisibleForTesting
+    fun bilingualStateForTest(): com.vreader.app.bilingual.BilingualUiState? = bilingualViewModel?.state?.value
+
+    // The live selection controller + list state, so a connected test can drive the TTS source-visibility
+    // seam (isSourceChunkInViewport) against real laid-out coordinates and scroll the source off-screen —
+    // covering round-5/6 (the translation-only-visible → scroll case) deterministically (round-4 audit
+    // Medium-2). Set by the composition alongside the bilingual VM.
+    @Volatile private var testSelectionController: TxtSelectionController? = null
+    @Volatile private var testListState: androidx.compose.foundation.lazy.LazyListState? = null
+
+    /** Whether source chunk [index]'s registered `Text` bounds are in the list viewport (the SAME query
+     *  the TTS auto-scroll guard uses). Null when the controller isn't laid out yet. */
+    @androidx.annotation.VisibleForTesting
+    fun isSourceChunkInViewportForTest(index: Int): Boolean? = testSelectionController?.isSourceChunkInViewport(index)
+
+    /** Scroll the reader so [index] is the first visible item (drives the source of a distant chunk off
+     *  the viewport). Suspends until the scroll settles. */
+    @androidx.annotation.VisibleForTesting
+    suspend fun scrollToItemForTest(index: Int) {
+        testListState?.scrollToItem(index)
+    }
+
+    /** The current first-visible item index (== the top source chunk index — lazy-index==chunk-index). */
+    @androidx.annotation.VisibleForTesting
+    fun firstVisibleChunkForTest(): Int? = testListState?.firstVisibleItemIndex
+
+    /** Await the VM's serial consumer flipping `enabled` to [enabled] AND (when non-null) the language.
+     *  Throws on timeout so a test fails explicitly rather than proceeding with stale state. */
+    private suspend fun awaitBilingualState(enabled: Boolean, language: String?) {
+        val vm = bilingualViewModel ?: return
+        for (i in 0 until 150) {
+            val st = vm.state.value
+            if (st.enabled == enabled && (language == null || st.targetLanguage.key == language)) return
+            delay(20)
+        }
+        throw AssertionError("bilingual state (enabled=$enabled, language=$language) not reached in time")
+    }
+
     companion object {
         const val EXTRA_FINGERPRINT_KEY = "fingerprintKey"
 
@@ -999,6 +1183,18 @@ private fun TxtBody(
     onSelectionFinalized: () -> Unit = {},
     // feature #124 WI-4 — a tap (LazyColumn-local point) → host hit-tests an existing highlight to edit.
     onTapAt: (androidx.compose.ui.geometry.Offset) -> Unit = {},
+    // feature #131 WI-8 — the interlinear translation slot(s) anchored to a chunk. Each source chunk `i`'s
+    // item wraps its (byte-unchanged) source `Text` and these translation children in ONE `Column`, so
+    // lazy-index == chunk-index is preserved (round-4 H2). Empty list → no translation child for the
+    // chunk. The translation slots are NON-registered (never call registerChunk).
+    bilingualRenderStates: (chunkIndex: Int) -> List<com.vreader.app.bilingual.BilingualRenderState> = { emptyList() },
+    bilingualLanguage: com.vreader.app.bilingual.BilingualLanguage = com.vreader.app.bilingual.BilingualLanguages.ALL.first(),
+    bilingualTheme: ReaderTheme? = null,
+    bilingualSourceFontSizeSp: Float = 17f,
+    // feature #131 WI-8 — the flattened WINDOW-space bounds of the currently laid-out translation slots,
+    // pushed to the host so the selection controller excludes a long-press on translation from the
+    // nearest-source-chunk fallback (round-4 H2 gesture exclusion).
+    onBilingualSlotBounds: (List<androidx.compose.ui.geometry.Rect>) -> Unit = {},
 ) {
     val isMarkdown = format == BookFormat.md
     val wash = VReaderColors.Accent.copy(alpha = 0.18f)
@@ -1008,6 +1204,16 @@ private fun TxtBody(
     // INITIAL onTapAt/onSelectionFinalized closures (stale highlightsList → tap-to-edit never hits).
     val currentOnTap by androidx.compose.runtime.rememberUpdatedState(onTapAt)
     val currentOnFinalize by androidx.compose.runtime.rememberUpdatedState(onSelectionFinalized)
+    // feature #131 WI-8 — the WINDOW-space bounds of EACH laid-out translation slot, keyed by
+    // (chunkIndex, slotIndex) so EVERY rendered slot reports its own rect (round-4 audit Medium-1 — a
+    // chunk may anchor several units; the first slot's rect does not cover its siblings). Each slot owns
+    // its entry + disposal, and a source-only/empty slot removes its stale rect. The flattened list is
+    // pushed to the host (→ selection controller's excluded bounds) so a long-press on translation is
+    // never selectable — and never keeps a phantom rect over source content that scrolled into its place.
+    val translationSlotBounds = remember { androidx.compose.runtime.mutableStateMapOf<Pair<Int, Int>, androidx.compose.ui.geometry.Rect>() }
+    LaunchedEffect(translationSlotBounds.entries.toList()) {
+        onBilingualSlotBounds(translationSlotBounds.values.toList())
+    }
     LazyColumn(
         Modifier
             .fillMaxSize()
@@ -1040,7 +1246,11 @@ private fun TxtBody(
         contentPadding = PaddingValues(horizontal = marginDp.dp, vertical = 16.dp),
     ) {
         // Count-based: indices on demand (a newline-dense 14MB file can be 100k+ chunks).
+        // ONE lazy item per chunk (loop + keys UNCHANGED → lazy-index == chunk-index preserved, round-4
+        // H2). Inside each item a Column holds the byte-unchanged source Text (below) then the muted,
+        // NON-registered interlinear translation slot(s) anchored to this chunk (feature #131 WI-8).
         items(count = document.chunkCount, key = { it }) { i ->
+          Column {
             val raw = document.textForChunk(i).toString()
             // .md → styled markdown spans (no read-aloud span wash — markers shift offsets, plan §OOS).
             // .txt → raw verbatim, with the spoken-sentence span washed when read-aloud is active.
@@ -1082,6 +1292,38 @@ private fun TxtBody(
                         }
                     },
             )
+            // feature #131 WI-8 — the interlinear translation slot(s) for the unit(s) anchored to chunk `i`,
+            // as muted NON-registered `Text` children inside the SAME lazy item's Column. Never registered
+            // with the selection controller; EACH reports its own window bounds (keyed by (i, slotIdx)) so a
+            // long-press on ANY of them is excluded (round-4 audit Medium-1).
+            val renderStates = bilingualRenderStates(i)
+            val slotTheme = bilingualTheme
+            renderStates.forEachIndexed { slotIdx, renderState ->
+                val boundsKey = i to slotIdx
+                // A source-only/empty slot draws NOTHING (no node → no onGloballyPositioned) — so proactively
+                // drop any prior rect for this key, and each slot removes its rect on dispose (recycle /
+                // language change) so no phantom exclusion survives over source content (round-4 audit Medium-1).
+                val drawsSlot = renderState.phase != com.vreader.app.bilingual.BilingualRenderPhase.SourceOnly &&
+                    !(renderState.phase == com.vreader.app.bilingual.BilingualRenderPhase.Loaded &&
+                        renderState.segments.orEmpty().none { it.isNotBlank() })
+                if (slotTheme != null && drawsSlot) {
+                    com.vreader.app.bilingual.BilingualTranslationSlot(
+                        state = renderState,
+                        theme = slotTheme,
+                        language = bilingualLanguage,
+                        sourceFontSizeSp = bilingualSourceFontSizeSp,
+                        modifier = Modifier.onGloballyPositioned { c ->
+                            if (c.isAttached) translationSlotBounds[boundsKey] = c.boundsInWindow()
+                            else translationSlotBounds.remove(boundsKey)
+                        },
+                    )
+                    DisposableEffect(boundsKey) { onDispose { translationSlotBounds.remove(boundsKey) } }
+                } else {
+                    // Nothing drawn for this slot → ensure no stale rect lingers.
+                    DisposableEffect(boundsKey, drawsSlot) { translationSlotBounds.remove(boundsKey); onDispose { translationSlotBounds.remove(boundsKey) } }
+                }
+            }
+          }
         }
     }
 }
