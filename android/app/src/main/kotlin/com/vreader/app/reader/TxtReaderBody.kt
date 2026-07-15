@@ -7,16 +7,25 @@
 //     host renders it when layout == Scroll (the default) and always for bilingual-on (WI-10 gate).
 //
 //   • [TxtPagedBody] — the feature-#137 PAGED renderer: a HorizontalPager over WI-4's TxtPageIndex.
-//     Phase-1 pagination (TxtPaginator.index) runs OFF-MAIN (Dispatchers.Default, generation-cancellable)
-//     via WI-5's TxtPageNavigator, driven by a real Compose ComposeLineMeasurer built from the SAME
-//     resolver/density/direction the render uses (deterministic breaks). Each visible page renders LAZILY
-//     via TxtPaginator.renderPage through the UI mapper, held only for a small window (an LRU keyed by
-//     page → the rendered AnnotatedString) so the whole book is never rendered at once. A load state
-//     shows while phase-1 is in flight (or the degenerate-box degrade-to-scroll fallback renders the
-//     scroll body). Page-start save/restore: the pager's current page's START source offset is what the
-//     host persists (via [onSaveSourceOffset]); a saved offset restores by pageContaining. A
-//     display-settings / rotation change re-paginates via the navigator's reflow reconciliation, which
-//     clamps the pager to the page containing the captured source offset.
+//     Each visible page renders LAZILY via TxtPaginator.renderPage through the UI mapper, held only for a
+//     small window (an LRU keyed by page → the rendered AnnotatedString) so the whole book is never
+//     rendered at once. A load state shows on the FIRST open (or the degenerate-box degrade-to-scroll
+//     fallback renders the scroll body). Page-start save/restore: the pager's current page's START source
+//     offset is what the host persists (via [onSaveSourceOffset]); a saved offset restores by pageContaining.
+//
+//     feature #138 WI-5b — the body now drives the WINDOWED pagination lifecycle through a
+//     PaginationSession (owned here per document) instead of a single blocking whole-doc
+//     TxtPaginator.index pass: session.openFromStart publishes the FIRST sealed window fast (the loading
+//     surface clears in < 2 s instead of ~85 s), then background-completes; each republish grows the
+//     SEALED pageCount (append-only, never shrinks). The session's callbacks fire off-main, so they publish
+//     into thread-safe MutableStateFlows that a MAIN collector marshals into Compose state + the navigator.
+//     A far page-turn near the frontier drives an on-demand session.ensureMeasuredThrough (NO busy loop).
+//     Deep-RESUME uses a CONDITIONAL reveal (session.onReveal → land the pager on the anchor's page once it
+//     seals in the background, by RECREATING the pager keyed on that page — the Gate-2 Medium-4 fallback;
+//     robust where a far scrollToPage clamps short under count-lag) — DROPPED without a yank the instant the
+//     user takes over. A display-settings / rotation change RE-OPENS the windowed pass from the captured
+//     source offset and clamps to it; only a REFLOW clears the page-render cache (a background APPEND never
+//     does — it only appends SEALED pages, never renumbers a published page).
 //
 // feature #137 WI-7a — paged text SELECTION is now integrated into [TxtPagedBody]: each visible page
 // registers its rendered layout + coords + PageOffsetMap with the (optional) TxtSelectionController, a
@@ -39,7 +48,8 @@
 //
 // @coordinates-with: TxtReaderActivity.kt (the host — branches layout==Paged→TxtPagedBody else TxtBody,
 //   owns the TxtPageNavigator + save seam + supplies [onToggleChrome]), paged/TxtPaginator.kt +
-//   TxtPageIndex.kt + TxtPageNavigator.kt + PageOffsetMap.kt (WI-4/WI-5 engine), paged/PagedTapZones.kt
+//   TxtPageIndex.kt + TxtPageNavigator.kt + PaginationSession.kt (feature #138 — the windowed lifecycle
+//   owner this body drives) + PageOffsetMap.kt (WI-4/WI-5 engine), paged/PagedTapZones.kt
 //   (WI-6b tap-zones + hint), paged/ComposeLineMeasurer.kt (the production measurer), ChunkTextMapper.kt
 //   (the UI render+cache seam), TxtDocument.kt (the chunk source), settings/ReaderTextStyles.kt
 //   (bodyTextStyle both paths apply), settings/ReaderSettingsStore.kt (the tap-hint-seen flag).
@@ -66,6 +76,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -101,9 +112,20 @@ import com.vreader.app.reader.paged.TxtPageNavigator
 import com.vreader.app.reader.paged.TxtPaginator
 import com.vreader.app.reader.paged.pagedTapZones
 import com.vreader.app.ui.theme.VReaderColors
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import vreader.contracts.BookFormat
+
+/**
+ * feature #138 WI-5b — how close to the sealed frontier (in pages) a settled/target page must be before
+ * the body arms an on-demand forward extension of the [com.vreader.app.reader.paged.PaginationSession].
+ * One page ahead of the last sealed page keeps the successor sealed so a page-turn near the frontier is
+ * never a dead-end while the background completion loop catches up.
+ */
+private const val EXTEND_MARGIN = 1
 
 /**
  * The paged TXT/MD reader body — feature #137 WI-6a. Renders the document one page at a time through a
@@ -226,47 +248,145 @@ internal fun TxtPagedBody(
     val marginPx = with(density) { marginDp.dp.toPx() }
     val vPadPx = with(density) { 16.dp.toPx() }
 
-    // The published boundary index as COMPOSE STATE (null before phase-1 completes) — the pagination
-    // runs off-main in a LaunchedEffect and publishes here so the pager recomposes. The `navigator`
-    // mirrors currentPage + the offset↔page math (so the host's test seams + future bookmark/search jumps
-    // read it); this Compose-state mirror is what drives recomposition (the navigator's plain fields
-    // don't). NO frame-poll loop — every programmatic scroll flows through a Compose-observable target
-    // (localScrollTarget for the reflow clamp, [jumpToSourceOffset] for an external source-offset jump),
+    // The published boundary index as COMPOSE STATE (null before the first sealed window publishes) — the
+    // windowed pagination lifecycle runs off-main through the SESSION and is mirrored here so the pager
+    // recomposes. The `navigator` mirrors currentPage + the offset↔page math (so the host's test seams +
+    // the bookmark/search/scrubber/TTS jumps read it); this Compose-state mirror is what drives
+    // recomposition (the navigator's plain fields don't). NO frame-poll loop — every programmatic scroll
+    // flows through a Compose-observable target (localScrollTarget for the reflow clamp + on-demand-extend
+    // landing, pendingResumeReveal for the deep-resume reveal, [jumpToSourceOffset] for an external jump),
     // so the compose-test idling resource can settle (a busy while-loop would keep it perpetually not-idle).
     var index by remember(document) { mutableStateOf<com.vreader.app.reader.paged.TxtPageIndex?>(null) }
-    // The reflow clamp's one-shot programmatic scroll target (a Compose State the pager consumes).
+    // The reflow clamp's / on-demand-extend landing's one-shot programmatic scroll target (an ORDINARY
+    // in-range scroll — its consumer clamp-and-clears, correct because the page is within pageCount). NOT
+    // used for the deep-resume reveal (that is a distinct, index-aware one-shot — pendingResumeReveal).
     var localScrollTarget by remember(document) { mutableStateOf<Int?>(null) }
-    // Whether the FIRST pagination has restored to the resume anchor yet (so a later reflow captures the
+    // feature #138 WI-5b — the CONDITIONAL deep-resume reveal, a one-shot DISTINCT from localScrollTarget
+    // (Gate-2 R2 High 1). `pendingResumeReveal` is the resume SOURCE OFFSET the session's onReveal signalled
+    // (fired ONCE when the deep anchor's page first seals in the background). A dedicated collector scrolls
+    // to pageContaining(revealOffset) ONLY IF the user has not taken over AND the page is now in range —
+    // NEVER clamp-and-cleared while out of range (the hazard localScrollTarget's consumer has). Dropped
+    // (cleared, no scroll) once the user pages away.
+    var pendingResumeReveal by remember(document) { mutableStateOf<Int?>(null) }
+    // feature #138 WI-5b — the deep-resume LANDING page (Gate-2 R2 Medium-4 fallback). When the reveal
+    // decides to land a DEEP anchor, it sets this to pageContaining(revealOffset) and the pager is
+    // RECREATED with initialPage = resumePage (rememberPagerState keyed on it). Recreating is the robust
+    // mechanism a `requestScrollToPage(farPage)` is NOT: the pager's own internal pageCount lags a fresh
+    // (grown) republish by a frame, so a scroll-to-a-far-page can clamp SHORT under load (land on an
+    // earlier page and never catch up) — the recreated pager is BORN on the resume page with the current
+    // count, so it lands EXACTLY. null = no deep-resume landing pending.
+    var resumePage by remember(document) { mutableStateOf<Int?>(null) }
+    // Set true on the FIRST user-driven settled-page change (a swipe with no programmatic target pending)
+    // — the reveal is dropped once the user has taken over so an auto-scroll never yanks them.
+    var userInteractedSinceOpen by remember(document) { mutableStateOf(false) }
+    // feature #138 WI-5b — the on-demand forward-extension target: a Compose-observable settled/target page
+    // near the sealed frontier that drives session.ensureMeasuredThrough (NO busy loop — the #137
+    // idling-resource lesson is binding). null = no extension pending.
+    var extendThroughPage by remember(document) { mutableStateOf<Int?>(null) }
+    // Whether the FIRST windowed open has captured its resume anchor yet (so a later reflow captures the
     // live page offset, not initialSourceOffset again).
     var restored by remember(document) { mutableStateOf(false) }
-    // The in-flight phase-1 token, held across recompositions so a superseded pass is explicitly
-    // token-CANCELLED (Gate-4 Medium). Coroutine-cancelling the old LaunchedEffect alone does NOT stop
-    // TxtPaginator's tight CPU loop — it only aborts at `checkCancelled(token)` (TxtPaginator.kt:119), so
-    // the whole-book measure would run to completion on Dispatchers.Default without this cancel.
-    val activeToken = remember(document) { androidx.compose.runtime.mutableStateOf<com.vreader.app.reader.paged.PaginationToken?>(null) }
+    // feature #138 WI-4/5b — the SESSION owns the pagination token/cancellation/generation (the body no
+    // longer holds an activeToken). Owned per-document here so this WI stays within TxtReaderBody; disposed
+    // (superseded) when the body leaves the composition so a background pass never publishes after teardown.
+    val session = remember(document) { com.vreader.app.reader.paged.PaginationSession(paginator) }
+    DisposableEffect(session) { onDispose { session.supersede() } }
+    // feature #138 WI-5b — THREAD-SAFE hand-off flows. The session's onSnapshot/onReveal callbacks fire on
+    // whatever coroutine context the completion loop resumes on — OBSERVED to be a Dispatchers.Default
+    // worker thread for some republishes — so they must NOT write Compose state directly (a background
+    // write throws "multithreaded access to SnapshotStateObserver" during a layout read). Instead they
+    // publish into these thread-safe MutableStateFlows; a MAIN-dispatcher collector below marshals every
+    // update into Compose state + the navigator. `openSeq` distinguishes a fresh open / reflow generation
+    // so the main collector clamps the FIRST snapshot of the current pass exactly once.
+    val snapshotFlowOut = remember(document) { MutableStateFlow<com.vreader.app.reader.paged.TxtPageIndex?>(null) }
+    val revealFlowOut = remember(document) { MutableStateFlow<Int?>(null) }
+    val capturedAnchorFlow = remember(document) { MutableStateFlow(0) }
+    var openSeq by remember(document) { mutableStateOf(0) }
 
-    // Drive phase-1 pagination OFF-MAIN whenever a reflow trigger changes (content box, EFFECTIVE style,
-    // margin). Captures the resume anchor: initialSourceOffset on the FIRST pass, else the current page's
-    // start (so font/rotation reflow preserves progression). Cancellable: the prior token is flipped BEFORE
-    // the new pass so a superseded whole-book measure aborts at its next chunk-boundary check. Clamps the
-    // pager to pageContaining(captured). Uses [effectiveStyle] — the SAME style the page renders with.
+    // Drive the WINDOWED pagination lifecycle OFF-MAIN whenever a reflow trigger changes (content box,
+    // EFFECTIVE style, margin). The FIRST run is a fresh open (anchor = initialSourceOffset); a later run
+    // with the same document but a changed style/margin/box is a REFLOW (anchor = the current page's start,
+    // and ONLY a reflow clears the render cache — a background APPEND never does, since it only appends
+    // SEALED pages and never renumbers a published page — Gate-2 R1 High 3). The session's openFromStart
+    // supersedes any in-flight pass (its generation token), publishes the FIRST sealed window fast (loading
+    // clears in < 2 s instead of ~85 s), then background-completes; each republish grows the SEALED
+    // pageCount (append-only, never shrinks). The callbacks publish into the thread-safe hand-off flows;
+    // the MAIN collector below mirrors them into Compose state + the navigator. Uses [effectiveStyle] — the
+    // SAME style the page renders with.
     LaunchedEffect(contentBox, effectiveStyle, marginDp, document) {
         if (contentBox.widthPx <= 0f || contentBox.heightPx <= 0f) return@LaunchedEffect
         onContentBoxReady(contentBox)
-        val captured = if (!restored) initialSourceOffset else navigator.currentSourceOffset()
-        activeToken.value?.cancel()                              // supersede any in-flight measure pass
-        val token = com.vreader.app.reader.paged.PaginationToken()
-        activeToken.value = token
-        val newIndex = paginator.index(document, effectiveStyle, contentBox, measurer, token, isMarkdown)
-        if (activeToken.value === token) activeToken.value = null
-        // The renderPage cache is keyed by page NUMBER; a reflow renumbers pages → invalidate it.
+        val isReflow = restored
+        val captured = if (!isReflow) initialSourceOffset else navigator.currentSourceOffset()
+        // A reflow renumbers pages → the page-number-keyed render cache is invalid; clear it (ONLY here).
+        // A fresh open starts with an empty cache anyway; the harmless clear keeps the first-open path
+        // identical to the reflow path. A background APPEND (in the snapshot collector) NEVER clears it.
         renderCache.clear()
-        navigator.setIndex(newIndex)                             // install into the navigator (offset↔page math)
-        val target = newIndex.pageContaining(captured)
-        navigator.onPagerPageChanged(target)                     // keep navigator.currentPage in sync
-        index = newIndex                                         // publish → pager recomposes
-        localScrollTarget = target                               // scroll the (already-composed) pager to it
-        restored = true
+        // Reset the hand-off + reveal + interaction state for this new pass, then bump the sequence so the
+        // main collector clamps the FIRST snapshot of THIS pass exactly once (a reflow keeps `index`
+        // non-null, so an `index == null` guard could not distinguish a reflow's first snapshot).
+        pendingResumeReveal = null
+        userInteractedSinceOpen = false
+        capturedAnchorFlow.value = captured
+        revealFlowOut.value = null
+        openSeq += 1
+        // NOTE `restored` is NOT set here. It flips to true only once the FIRST pass's resume anchor has
+        // actually LANDED (the main snapshot collector's clamp, the reveal collector's scroll, or index
+        // completion) — see below. A spurious contentBox jitter (a second layout pass firing this effect
+        // before the deep resume lands) must still re-capture `initialSourceOffset`, NOT the pre-restore
+        // page-0 offset — flipping `restored` before the restore lands would lose a deep resume (a WI-5b
+        // regression). Setting it after the suspend call is also unsafe (openFromStart may resume off-main).
+        session.openFromStart(
+            document = document, style = effectiveStyle, contentBox = contentBox, measurer = measurer,
+            isMarkdown = isMarkdown, resumeAnchorOffset = captured,
+            // Off-main-safe: publish into the thread-safe flows ONLY (no Compose-state write here; the
+            // callbacks may fire on a worker thread — the main collector marshals them into Compose state).
+            onSnapshot = { snapshot -> snapshotFlowOut.value = snapshot },
+            onReveal = { revealOffset -> revealFlowOut.value = revealOffset },
+        )
+    }
+
+    // feature #138 WI-5b — the MAIN-thread snapshot collector: marshal every session republish (published
+    // off-main into snapshotFlowOut) into the navigator + Compose `index` state, and clamp the FIRST
+    // snapshot of the current open/reflow pass to the resume anchor's page IFF the anchor is already SEALED
+    // in that window (the SHALLOW case). A DEEP anchor short of the first window is landed by the reveal
+    // collector when its page seals — never a progressive clamp that races the reveal (two competing
+    // scrolls to the same growing page settle short — the defect that made a deep resume land on the
+    // last-sealed page). `openSeq` gates the once-per-pass clamp.
+    var clampedForSeq by remember(document) { mutableStateOf(-1) }
+    LaunchedEffect(snapshotFlowOut, openSeq) {
+        snapshotFlowOut.collect { snapshot ->
+            if (snapshot == null) return@collect
+            navigator.setIndex(snapshot)
+            index = snapshot
+            // The clamp decision is made EXACTLY ONCE per pass, on the FIRST published snapshot of that pass
+            // (the first window). A SHALLOW anchor (in that first window) is clamped here; a DEEP anchor
+            // short of the first window is NOT clamped here — the reveal collector owns it EXCLUSIVELY
+            // (Gate-2 R2 High 1). Either way `clampedForSeq` is marked done so a LATER (grown) snapshot never
+            // re-runs this and competes with the reveal (the defect that landed a deep resume on a
+            // clamped-to-a-wrong-window page). `openSeq` gates it per open/reflow pass.
+            if (clampedForSeq != openSeq) {
+                clampedForSeq = openSeq
+                val captured = capturedAnchorFlow.value
+                val anchorSealedInFirstWindow = snapshot.isComplete ||
+                    (snapshot.pageCount > 0 && captured.coerceAtLeast(0) < snapshot.frontierSourceOffset)
+                if (anchorSealedInFirstWindow) {
+                    val target = snapshot.pageContaining(captured)
+                    navigator.onPagerPageChanged(target)
+                    localScrollTarget = target
+                    // A SHALLOW anchor is now clamped → the first pass has RESTORED. A later contentBox change
+                    // is now a genuine reflow (it captures the live page, not the anchor). A DEEP anchor's
+                    // `restored` flip is owned by the reveal collector (below) so a spurious re-layout before
+                    // the deep resume lands does NOT re-capture the pre-restore page-0 offset (WI-5b regression).
+                    restored = true
+                }
+            }
+        }
+    }
+    // feature #138 WI-5b — marshal the session's onReveal signal (off-main → revealFlowOut) into the
+    // Compose `pendingResumeReveal` one-shot on the main thread; the dedicated reveal collector consumes it.
+    LaunchedEffect(revealFlowOut) {
+        revealFlowOut.collect { r -> if (r != null) pendingResumeReveal = r }
     }
 
     Box(
@@ -299,10 +419,24 @@ internal fun TxtPagedBody(
             }
             else -> {
                 val pageCount = idx.pageCount
-                val pagerState = rememberPagerState(
-                    initialPage = navigator.currentPage.coerceIn(0, (pageCount - 1).coerceAtLeast(0)),
-                    pageCount = { pageCount },
-                )
+                // feature #138 WI-5b — the SEALED count GROWS over the life of this open (append-only). The
+                // pager must re-read the LIVE count, not the value captured at first composition: a plain
+                // `pageCount = { pageCount }` lambda closes over the FIRST recomposition's local val, so page
+                // turns near the frontier could clamp to a stale count. rememberUpdatedState feeds the live
+                // count into the pager's pageCount lambda so it always returns the current value.
+                val livePageCount by rememberUpdatedState(pageCount)
+                // feature #138 WI-5b — the pager is RECREATED (keyed on resumePage) when a DEEP resume lands:
+                // its initialPage becomes the resume page, so it is BORN on that page with the current grown
+                // count (the Gate-2 R2 Medium-4 fallback). This is robust where a requestScrollToPage(farPage)
+                // is not — a far scroll clamps to the pager's own (frame-lagged) internal count and can settle
+                // SHORT under load. When resumePage is null the pager keys only on the document (stable across
+                // the growing count — an append never recreates it, so no yank).
+                val pagerState = key(resumePage) {
+                    rememberPagerState(
+                        initialPage = (resumePage ?: navigator.currentPage).coerceIn(0, (pageCount - 1).coerceAtLeast(0)),
+                        pageCount = { livePageCount },
+                    )
+                }
                 // feature #137 WI-6b — the page-turn scope + the tap-zone page-turn helpers. A LEFT/RIGHT
                 // zone tap animates the pager one page (the design's pager.animateScrollToPage(current±1)),
                 // clamped to the valid range.
@@ -345,12 +479,103 @@ internal fun TxtPagedBody(
                 // index and is about to clamp the pager to the reconciled page): saving the pre-clamp
                 // settled page would briefly persist the wrong page under the new index (Gate-4 Low). The
                 // clamp's own scroll settles and saves the correct page immediately after.
+                //
+                // feature #138 WI-5b — this collector ALSO (a) marks userInteractedSinceOpen on the FIRST
+                // user-driven settle so the deep-resume reveal is dropped once the user has taken over
+                // (Gate-2 R2 High 1 — a settle with NO pending programmatic target is user-driven; a reflow
+                // clamp / on-demand-extend landing sets localScrollTarget, the deep-resume reveal is a
+                // separate one-shot), and (b) arms on-demand forward EXTENSION when the settled page nears
+                // the sealed frontier of a PARTIAL index (extendThroughPage — a Compose-observable target,
+                // NO busy loop; the #137 idling-resource lesson).
                 LaunchedEffect(pagerState, idx) {
                     snapshotFlow { pagerState.settledPage }.collect { settled ->
+                        // A settle is PROGRAMMATIC (not a user swipe) while a reflow clamp / on-demand-extend
+                        // scroll is queued (localScrollTarget) OR the deep-resume reveal is still driving the
+                        // pager toward its target (pendingResumeReveal) — the reveal uses requestScrollToPage,
+                        // not localScrollTarget, so it must be included here or the reveal's OWN scroll would
+                        // be misread as a user swipe and drop the reveal before it lands (Gate-2 R2 High 1).
+                        val programmaticPending = localScrollTarget != null || pendingResumeReveal != null
                         navigator.onPagerPageChanged(settled)
-                        // localScrollTarget is Compose state — re-read live per emission; non-null means a
-                        // reflow clamp is queued and this settled page is the stale pre-clamp one.
-                        if (localScrollTarget == null) onSaveSourceOffset(navigator.currentSourceOffset())
+                        if (!programmaticPending) {
+                            onSaveSourceOffset(navigator.currentSourceOffset())
+                            // A settle with no pending programmatic scroll is a user swipe → the user has
+                            // taken over; a still-pending deep-resume reveal is now DROPPED (no yank).
+                            if (settled > 0) userInteractedSinceOpen = true
+                        }
+                        // Arm on-demand extension when nearing the frontier of a PARTIAL index (append-only;
+                        // a complete index needs none). The collector below coalesces this into the session.
+                        val live = index
+                        if (live != null && !live.isComplete && settled >= live.pageCount - 1 - EXTEND_MARGIN) {
+                            extendThroughPage = settled
+                        }
+                    }
+                }
+                // feature #138 WI-5b — the CONDITIONAL deep-resume reveal collector (Gate-2 R2 High 1), a
+                // STICKY re-asserting one-shot DISTINCT from localScrollTarget: `pendingResumeReveal` is the
+                // resume SOURCE OFFSET the session armed once the deep anchor's page first sealed. This
+                // collector re-runs on EVERY index publish (keyed on idx) and:
+                //   • DROPS the reveal (no yank) the instant the user has taken over (userInteractedSinceOpen);
+                //   • LEAVES it pending while the offset is still beyond the published frontier (never scrolls
+                //     to a clamped last-sealed page — the hazard localScrollTarget's consumer has);
+                //   • once the offset is genuinely sealed, RE-REQUESTS a scroll to pageContaining(offset) on
+                //     each publish UNTIL the pager actually reaches that page, then clears. Re-asserting is
+                //     load-bearing: the pager's own pageCount lags a fresh republish by a frame, so a single
+                //     requestScrollToPage(farPage) right after a grow can clamp SHORT (land on an earlier
+                //     page) — re-issuing on the next publish lands it exactly. It scrolls only while the pager
+                //     is still on the doc-start default region (currentPage < target), so it never fights the
+                //     user or overshoots.
+                LaunchedEffect(pagerState, idx) {
+                    snapshotFlow { pendingResumeReveal }.collect { reveal ->
+                        if (reveal == null) return@collect
+                        if (userInteractedSinceOpen) {
+                            pendingResumeReveal = null            // dropped — the user has taken over (no yank)
+                            restored = true                        // the user drove the page → first pass done
+                            return@collect
+                        }
+                        val live = index ?: return@collect
+                        // In range ONLY when the offset is genuinely sealed (within the frontier of a partial
+                        // index, or anywhere in a complete one) — never LAND on a clamped page.
+                        val sealedThrough = live.isComplete ||
+                            (live.pageCount > 0 && reveal.coerceAtLeast(0) < live.frontierSourceOffset)
+                        if (!sealedThrough) return@collect            // leave pending; a later grown publish resolves it
+                        val target = live.pageContaining(reveal)
+                        if (target > 0 && pagerState.currentPage == 0) {
+                            // Land the DEEP resume by RECREATING the pager on the resume page (Gate-2 R2
+                            // Medium-4) rather than scrolling — a far scroll clamps to the pager's frame-lagged
+                            // internal count and can settle short under load. Reflect the page in the navigator
+                            // + persist it; the pager is reborn on `resumePage` with the current grown count.
+                            navigator.onPagerPageChanged(target)
+                            resumePage = target
+                            onSaveSourceOffset(navigator.currentSourceOffset())
+                        }
+                        pendingResumeReveal = null                    // one-shot: consumed (landed or a no-op at 0)
+                        // The DEEP resume has landed (queued the pager recreation) → the first pass is RESTORED;
+                        // a later contentBox change is now a genuine reflow that re-captures the live page.
+                        restored = true
+                    }
+                }
+                // feature #138 WI-5b — on-demand forward extension: when the reader nears the sealed frontier
+                // (extendThroughPage armed above), extend the session past that page's start offset. NO
+                // busy/frame-poll loop (the #137 idling-resource lesson is binding) — a Compose-observable
+                // target drives ONE coalesced ensureMeasuredThrough per arming; the growing snapshot flows
+                // back through openFromStart's onSnapshot (published via the session), which the pager
+                // re-reads. No loading affordance for a far extend (Gate-2 R2 Medium 3): the reader stays on
+                // the current page and the pages seal EVENTUALLY.
+                LaunchedEffect(pagerState, idx) {
+                    snapshotFlow { extendThroughPage }.collect { page ->
+                        if (page == null) return@collect
+                        val live = index
+                        if (live != null && !live.isComplete) {
+                            // Measure THROUGH one page past the armed page's start so the successor seals too
+                            // (the +1-page lookahead the seal discipline needs to advance the frontier).
+                            val throughOffset = live.pageEndExclusive(page.coerceIn(0, (live.pageCount - 1).coerceAtLeast(0)))
+                            val extended = session.ensureMeasuredThrough(throughOffset)
+                            // ensureMeasuredThrough hops to the measure dispatcher internally; publish the
+                            // grown snapshot into the THREAD-SAFE hand-off flow so the MAIN collector mirrors
+                            // it into Compose state + the navigator (never a background Compose-state write).
+                            snapshotFlowOut.value = extended
+                        }
+                        extendThroughPage = null
                     }
                 }
                 // The reflow clamp's programmatic scroll: a one-shot Compose-observable target → scroll +
@@ -363,23 +588,31 @@ internal fun TxtPagedBody(
                         if (t == null) return@collect
                         val clamped = t.coerceIn(0, (pageCount - 1).coerceAtLeast(0))
                         navigator.onPagerPageChanged(clamped)
-                        if (clamped != pagerState.currentPage) runCatching { pagerState.scrollToPage(clamped) }
+                        if (clamped != pagerState.currentPage) {
+                            // feature #138 WI-5b — the WINDOWED lifecycle republishes rapidly (the background
+                            // completion loop grows the count every few frames), so this clamp can fire while
+                            // the pager is mid-measure — a direct suspend scrollToPage then throws
+                            // "performMeasureAndLayout called during measure layout". requestScrollToPage
+                            // SCHEDULES the jump for the next layout pass (it never performs layout itself), so
+                            // it is safe to call during composition/layout + never re-enters (no busy loop).
+                            runCatching { pagerState.requestScrollToPage(clamped) }
+                        }
                         localScrollTarget = null
                         // After the clamp settles, persist the reconciled page's start offset (the save was
                         // suppressed while the target was pending).
                         onSaveSourceOffset(navigator.currentSourceOffset())
                     }
                 }
-                // feature #138 WI-5a — an EXTERNAL jump raised as a SOURCE OFFSET (the test-seam page turn /
-                // the bookmark / annotation / search-hit / scrubber / TTS-follow feeders): the host raises
-                // [jumpToSourceOffset] (a raw source-UTF-16 offset); we RESOLVE it to a page SYNCHRONOUSLY
-                // via the navigator's `jumpToOffset(offset)` overload (`pageContaining` over the current
-                // whole-doc index; it sets currentPage + queues pendingScrollTarget), then scroll the pager
-                // + persist the new page-start offset, then clear the request via [onJumpConsumed]. The
-                // source→page conversion moved OUT of the host chrome callback into this body effect (WI-5a;
-                // both still run on main — the point is the seam no longer eagerly resolves the page). Beyond the sealed
-                // frontier of a PARTIAL session index the landing would be EVENTUAL — that async path is
-                // WI-5b; here the index is complete so the resolution is exact + immediate.
+                // feature #138 WI-5a/5b — an EXTERNAL jump raised as a SOURCE OFFSET (the test-seam page
+                // turn / the bookmark / annotation / search-hit / scrubber / TTS-follow feeders): the host
+                // raises [jumpToSourceOffset] (a raw source-UTF-16 offset); we resolve it through the
+                // navigator's async `jumpToOffset(offset, session)` overload. Within the SEALED region it is
+                // the synchronous path; BEYOND the sealed frontier of a PARTIAL session index it
+                // session.ensureMeasuredThrough(offset) FIRST (off-main, coalesced with the background loop),
+                // installs the extended snapshot, THEN resolves the page — the landing is EVENTUAL for a
+                // beyond-frontier offset (Gate-2 R2 Medium 3); the reader stays on the current page meanwhile
+                // and there is NO loading affordance. We then mirror the (possibly-extended) index into
+                // Compose state, scroll the pager, persist the new page-start offset, and clear the request.
                 // `jumpToSourceOffset` is a plain parameter — read it through rememberUpdatedState so the
                 // snapshotFlow reacts to a NEW value even though this LaunchedEffect (keyed pagerState/idx)
                 // never restarts (a bare `snapshotFlow { jumpToSourceOffset }` would capture the stale first).
@@ -387,15 +620,32 @@ internal fun TxtPagedBody(
                 LaunchedEffect(pagerState, idx) {
                     snapshotFlow { liveJumpToSourceOffset }.collect { offset ->
                         if (offset == null) return@collect
-                        // Resolve source offset → page over the current (complete) index. The synchronous
-                        // navigator overload sets currentPage + queues pendingScrollTarget; consume it to
-                        // scroll the (already-composed) pager. pageContaining clamps a negative / past-EOF
-                        // offset internally, so the resolved page is always in range.
-                        navigator.jumpToOffset(offset)
-                        val target = navigator.consumePendingScrollTarget() ?: navigator.pageContaining(offset)
-                        if (target != pagerState.currentPage) runCatching { pagerState.scrollToPage(target) }
-                        onSaveSourceOffset(navigator.currentSourceOffset())
-                        onJumpConsumed()
+                        // Extend-then-resolve: BEYOND the sealed frontier of a PARTIAL index, measure through
+                        // the offset FIRST (off-main, coalesced with the background loop) — the landing is
+                        // EVENTUAL (Gate-2 R2 Medium 3), the reader stays on the current page meanwhile, NO
+                        // loading affordance. ensureMeasuredThrough may resume this coroutine off-main, so
+                        // marshal ALL the index-install + resolve + scroll onto MAIN (`withContext(Main)`) —
+                        // installing the grown snapshot into the navigator + Compose state THERE, then
+                        // resolving over it (no background Compose-state write; no race with the async
+                        // snapshot collector — this jump owns its own install atomically on main).
+                        val live = navigator.index
+                        val extended = if (live != null && !live.isComplete && offset >= live.frontierSourceOffset) {
+                            session.ensureMeasuredThrough(offset)
+                        } else null
+                        withContext(Dispatchers.Main) {
+                            if (extended != null) { navigator.setIndex(extended); index = extended }
+                            navigator.jumpToOffset(offset)
+                            val target = navigator.consumePendingScrollTarget() ?: navigator.pageContaining(offset)
+                            if (target != pagerState.currentPage) {
+                                // requestScrollToPage schedules the jump for the next layout (never performs
+                                // layout itself) — safe during a growing-count republish's mid-measure window,
+                                // where a direct scrollToPage throws "performMeasureAndLayout called during
+                                // measure layout".
+                                runCatching { pagerState.requestScrollToPage(target) }
+                            }
+                            onSaveSourceOffset(navigator.currentSourceOffset())
+                            onJumpConsumed()
+                        }
                     }
                 }
 
