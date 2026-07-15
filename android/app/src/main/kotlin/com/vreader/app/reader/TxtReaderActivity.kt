@@ -252,16 +252,18 @@ class TxtReaderActivity : ComponentActivity() {
                         // Whether the paged body is the one mounted (layout == Paged && !bilingual). Read by
                         // the test seam + the flush branch so onStop saves the right position source.
                         val pagedBodyMounted = remember(s.document) { mutableStateOf(false) }
-                        // An external programmatic page-jump request (the connected test's page turn; future
-                        // bookmark/search jumps land here). The paged body observes it, scrolls, then clears
-                        // it via onJumpConsumed. -1 / null-equivalent = nothing pending.
-                        val pagedJumpRequest = remember(s.document) { mutableStateOf<Int?>(null) }
+                        // feature #138 WI-5a — an external programmatic jump request as a SOURCE OFFSET (the
+                        // connected test's page turn + the bookmark / annotation / search-hit / scrubber /
+                        // TTS-follow feeders). The host raises the raw source-UTF-16 offset; the paged body
+                        // resolves it to a page synchronously (pageContaining over the current whole-doc
+                        // index), scrolls, then clears it via onJumpConsumed. null = nothing pending.
+                        val pagedJumpToSourceOffset = remember(s.document) { mutableStateOf<Int?>(null) }
                         SideEffect {
                             testPagedNavigator = pagedNavigator
                             testPagedRenderCache = pagedRenderCache
                             testPagedOffset = pagedOffset
                             testPagedBodyMounted = pagedBodyMounted
-                            testPagedJumpRequest = pagedJumpRequest
+                            testPagedJumpToSourceOffset = pagedJumpToSourceOffset
                             testPagedBook = s.book
                             testPagedDocLength = s.document.text.length
                         }
@@ -563,45 +565,53 @@ class TxtReaderActivity : ComponentActivity() {
                         }
 
                         // feature #137 WI-6a — a MODE-AWARE offset jump: in PAGED mode a chrome jump
-                        // (bookmark / annotation / search / scrubber) must move the PAGER (via the navigator's
-                        // pageContaining + the paged body's jump seam), NOT the hidden scroll LazyListState —
-                        // else the control is dead (Gate-4 High-2). In scroll mode it uses the existing chunk
-                        // scroll seam. This is the ONLY chrome↔paged glue in WI-6a (uses just the navigator's
-                        // existing pageContaining + jumpRequest — no feature re-integration; full paged
-                        // bookmarks/find/TTS are WI-8/WI-9).
+                        // (bookmark / annotation / search / scrubber) must move the PAGER, NOT the hidden
+                        // scroll LazyListState — else the control is dead (Gate-4 High-2). In scroll mode it
+                        // uses the existing chunk scroll seam.
+                        //
+                        // feature #138 WI-5a — the paged branch now raises the SOURCE OFFSET directly (no
+                        // synchronous source→page conversion on the UI thread): the body resolves it to a page
+                        // via the navigator's `jumpToOffset(offset)` overload. This is the ONLY chrome↔paged
+                        // glue that changes for the seam retype (full paged bookmarks/find/TTS are WI-8/WI-9).
                         val jumpToOffset: (Int) -> Unit = { offset ->
                             if (usePaged) {
-                                // Before the first page index publishes, pageContaining() returns 0 for ANY
-                                // offset — so a jump during the sub-second paged-load window would collapse to
-                                // page 0. Skip it while there is no index yet (the control is barely visible
-                                // then); once the index exists the jump lands on the right page (Gate-4 R2 Low).
+                                // Before the first page index publishes, a jump has no page to resolve to — the
+                                // body's seam no-ops without an index, but skip here too while there is none
+                                // (the control is barely visible during the sub-second paged-load window); once
+                                // the index exists the jump lands on the right page (Gate-4 R2 Low). Clamp the
+                                // raw source offset (the body's pageContaining also clamps, so this is belt-and-
+                                // suspenders parity with the pre-retype behavior).
                                 if (pagedNavigator.index != null) {
                                     val target = offset.coerceIn(0, (s.document.text.length - 1).coerceAtLeast(0))
-                                    pagedJumpRequest.value = pagedNavigator.pageContaining(target)
+                                    pagedJumpToSourceOffset.value = target
                                 }
                             } else {
                                 ttsScope.launch { runCatching { listState.scrollToItem(s.document.chunkForOffset(offset)) } }
                             }
                         }
 
-                        // feature #137 WI-9 — PAGED TTS follow: auto-advance the pager to the page containing
-                        // the currently-spoken SOURCE offset (tts.charStart, the SAME signal spokenChunk is
-                        // derived from). Keyed ONLY on the NARRATION signal (tts.phase + tts.charStart) — NOT
-                        // on the live page offset — so it fires when the narration MOVES to a new sentence but
-                        // does NOT re-fire on a user swipe (a swipe changes pagedOffset, not charStart, so the
-                        // reader can page freely while listening; the follow re-tracks only when the narration
-                        // next advances — Gate-4 R1 High: do not fight user swipes). The pure pagedTtsFollowTarget
-                        // skips the jump when narration is already on the shown page (never yanks a page the
-                        // narration is already on) and before an index publishes. Routes through the SAME
-                        // pager-jump seam the chrome jumps use (pagedJumpRequest).
+                        // feature #137 WI-9 / #138 WI-5a — PAGED TTS follow: auto-advance the pager to the page
+                        // containing the currently-spoken SOURCE offset (tts.charStart, the SAME signal
+                        // spokenChunk is derived from). Keyed ONLY on the NARRATION signal (tts.phase +
+                        // tts.charStart) — NOT on the live page offset — so it fires when the narration MOVES to
+                        // a new sentence but does NOT re-fire on a user swipe (a swipe changes pagedOffset, not
+                        // charStart, so the reader can page freely while listening; the follow re-tracks only
+                        // when the narration next advances — Gate-4 R1 High: do not fight user swipes). The pure
+                        // pagedTtsFollowTarget is the no-yank GUARD: it returns null (→ skip) when narration is
+                        // already on the shown page or before an index publishes. When a follow IS warranted,
+                        // WI-5a raises the spoken SOURCE offset (tts.charStart) — NOT a pre-computed page —
+                        // through the source-offset seam; the body resolves it to the SAME page the guard chose
+                        // (pageContaining(tts.charStart)) via the navigator's synchronous jumpToOffset overload.
                         LaunchedEffect(usePaged, tts.phase, tts.charStart) {
                             if (!usePaged || tts.phase != TtsPhase.speaking) return@LaunchedEffect
-                            val target = pagedTtsFollowTarget(
+                            // The guard decides WHETHER to follow (null → narration on the shown page / no
+                            // index → don't yank); the request raised is the SOURCE offset, not its page.
+                            pagedTtsFollowTarget(
                                 spokenOffset = tts.charStart,
                                 currentPage = pagedNavigator.currentPage,
                                 index = pagedNavigator.index,
                             ) ?: return@LaunchedEffect
-                            pagedJumpRequest.value = target
+                            pagedJumpToSourceOffset.value = tts.charStart
                         }
 
                         TxtReaderChrome(
@@ -624,13 +634,18 @@ class TxtReaderActivity : ComponentActivity() {
                             bookmarks = bookmarkRows,
                             // TXT jump: scroll to the bookmark's char offset via the existing chunk scroll seam
                             // (the same path resume + the annotation jump use). Out-of-range → Failed (sheet stays open).
+                            // feature #138 WI-5a — JumpResult.Succeeded here means the jump was ENQUEUED (the source
+                            // offset was validated in range + raised into the paged/scroll seam), NOT that the pager
+                            // has already LANDED: in paged mode the body resolves the offset → page and scrolls
+                            // asynchronously (on the whole-doc index the landing is immediate; a future partial-index
+                            // far jump is EVENTUAL — WI-5b). "Succeeded" is enqueued-not-landed by design.
                             onJumpBookmark = { record ->
                                 val target = txtBookmarkScrollTarget(record.locator.charOffsetUTF16, s.document.text.length)
                                 if (target == null) {
                                     JumpResult.Failed
                                 } else {
                                     jumpToOffset(target)   // pager in paged mode, list in scroll mode
-                                    JumpResult.Succeeded
+                                    JumpResult.Succeeded   // ENQUEUED (in-range), not necessarily landed yet (WI-5a)
                                 }
                             },
                             // TXT/MD jump: move to the annotation's UTF-16 offset (pager in paged mode, chunk
@@ -687,7 +702,11 @@ class TxtReaderActivity : ComponentActivity() {
                                         // open, rule 51) and a valid target returns Succeeded optimistically while
                                         // the actual scroll runs on ttsScope; the launch is runCatching-guarded so
                                         // a scroll cancelled during teardown can't crash. The recent is committed
-                                        // only on a valid result-open (the VM's commitSearch contract).
+                                        // only on a valid result-open (the VM's commitSearch contract). feature #138
+                                        // WI-5a: Succeeded == the jump was ENQUEUED (in-range source offset raised into
+                                        // the paged/scroll seam), NOT that the pager LANDED — the paged body resolves
+                                        // source→page + scrolls after (immediate on the whole-doc index; a partial-index
+                                        // far jump is EVENTUAL — WI-5b). Enqueued-not-landed by design.
                                         onJump = { hit ->
                                             val off = hit.canonicalLocator?.charOffsetUTF16
                                             val target = txtBookmarkScrollTarget(off, s.document.text.length)
@@ -696,7 +715,7 @@ class TxtReaderActivity : ComponentActivity() {
                                             } else {
                                                 inBookSearchVm.commitSearch()
                                                 jumpToOffset(target)   // pager in paged mode, list in scroll mode
-                                                JumpResult.Succeeded
+                                                JumpResult.Succeeded   // ENQUEUED (in-range), not necessarily landed yet (WI-5a)
                                             }
                                         },
                                         onLoadMore = inBookSearchVm::loadMore,
@@ -792,8 +811,8 @@ class TxtReaderActivity : ComponentActivity() {
                                         onToggleChrome = {
                                             chromeState.value = chromeState.value.copy(chromeVisible = !chromeState.value.chromeVisible)
                                         },
-                                        jumpRequest = pagedJumpRequest.value,
-                                        onJumpConsumed = { pagedJumpRequest.value = null },
+                                        jumpToSourceOffset = pagedJumpToSourceOffset.value,
+                                        onJumpConsumed = { pagedJumpToSourceOffset.value = null },
                                         // feature #137 WI-7b — wire the SAME selection controller + persisted
                                         // highlights the scroll body receives, so paged SELECTION (WI-7a) and
                                         // paged WASH (this WI) are LIVE in-app. Selection long-press-drag begins
@@ -1224,7 +1243,8 @@ class TxtReaderActivity : ComponentActivity() {
     @Volatile private var testPagedRenderCache: PagedRenderCache? = null
     @Volatile private var testPagedOffset: androidx.compose.runtime.MutableState<Int>? = null
     @Volatile private var testPagedBodyMounted: androidx.compose.runtime.MutableState<Boolean>? = null
-    @Volatile private var testPagedJumpRequest: androidx.compose.runtime.MutableState<Int?>? = null
+    // feature #138 WI-5a — the external-jump state, now a SOURCE OFFSET (was a pre-computed page).
+    @Volatile private var testPagedJumpToSourceOffset: androidx.compose.runtime.MutableState<Int?>? = null
     @Volatile private var testPagedBook: Book? = null
     // feature #137 WI-8/9 — the document's source length, so pagedJumpToOffsetForTest clamps an
     // out-of-range jump exactly like the live jumpToOffset (offset.coerceIn(0, text.length-1)).
@@ -1257,14 +1277,16 @@ class TxtReaderActivity : ComponentActivity() {
     /** Turn to the next page PROGRAMMATICALLY by raising the paged body's jump request (the harness cannot
      *  express a horizontal swipe on the virtual display; the request drives the SAME scroll+save seam a
      *  settled swipe would, so the pager scrolls, the navigator's currentPage advances, and the new
-     *  page-start offset is persisted). */
+     *  page-start offset is persisted). feature #138 WI-5a — the seam is now a SOURCE OFFSET: raise the
+     *  next page's START offset (`pageStart(next)`) so the body resolves it back to `next` via
+     *  pageContaining (a page START resolves to exactly that page). */
     @androidx.annotation.VisibleForTesting
     fun turnToNextPageForTest() {
         val nav = testPagedNavigator ?: return
         val idx = nav.index ?: return
-        val req = testPagedJumpRequest ?: return
+        val req = testPagedJumpToSourceOffset ?: return
         val next = (nav.currentPage + 1).coerceAtMost((idx.pageCount - 1).coerceAtLeast(0))
-        req.value = next
+        req.value = idx.pageStart(next)
     }
 
     /** Persist the current paged page-start offset immediately (the connected test's save→reopen proof). */
@@ -1278,33 +1300,36 @@ class TxtReaderActivity : ComponentActivity() {
 
     // ---- feature #137 WI-8/9 — paged CHROME (bookmark / find / scrubber / TTS-follow) test seams. The
     // harness cannot express a horizontal swipe on the virtual display, so a jump / follow is driven by
-    // raising the SAME pagedJumpRequest the chrome jumps + the TTS-follow effect raise. Set by the
+    // raising the SAME pagedJumpToSourceOffset the chrome jumps + the TTS-follow effect raise. Set by the
     // composition alongside the paged-body seams above. ----
 
-    /** feature #137 WI-8/9 — request a paged jump to the page containing source [offset] (the SAME seam
-     *  the bookmark / annotation / search-hit / scrubber jumps route through in paged mode: clamp the
-     *  offset, raise pagedJumpRequest to `pageContaining(offset)`). No-op before an index publishes. */
+    /** feature #137 WI-8/9 / #138 WI-5a — request a paged jump to source [offset] (the SAME seam the
+     *  bookmark / annotation / search-hit / scrubber jumps route through in paged mode). WI-5a: raise the
+     *  clamped SOURCE offset directly (the body resolves it to `pageContaining(offset)` via the navigator's
+     *  synchronous jumpToOffset overload) — the seam no longer pre-computes the page. No-op before an index
+     *  publishes. */
     @androidx.annotation.VisibleForTesting
     fun pagedJumpToOffsetForTest(offset: Int) {
         val nav = testPagedNavigator ?: return
-        val idx = nav.index ?: return
-        val req = testPagedJumpRequest ?: return
+        nav.index ?: return
+        val req = testPagedJumpToSourceOffset ?: return
         val docEnd = testPagedDocLength
-        val target = offset.coerceIn(0, (docEnd - 1).coerceAtLeast(0))
-        req.value = idx.pageContaining(target)
+        req.value = offset.coerceIn(0, (docEnd - 1).coerceAtLeast(0))
     }
 
-    /** feature #137 WI-9 — drive the PAGED TTS-follow with a simulated spoken SOURCE [spokenOffset]
-     *  through the EXACT production decision (pagedTtsFollowTarget over the live navigator) + jump seam.
-     *  Returns the page it advanced to, or null when the helper decided NOT to follow (spoken text on the
-     *  current page / no index / non-positive). Lets the connected test exercise the real follow path
-     *  without a real TTS engine speaking (voice data unavailable on the emulator). */
+    /** feature #137 WI-9 / #138 WI-5a — drive the PAGED TTS-follow with a simulated spoken SOURCE
+     *  [spokenOffset] through the EXACT production decision (pagedTtsFollowTarget over the live navigator)
+     *  + the source-offset jump seam. Returns the page it advanced to (the guard's page), or null when the
+     *  helper decided NOT to follow (spoken text on the current page / no index / non-positive). WI-5a: the
+     *  request raised is the SOURCE offset (spokenOffset), NOT the page — the body resolves it to the same
+     *  page the guard chose. Lets the connected test exercise the real follow path without a real TTS
+     *  engine speaking (voice data unavailable on the emulator). */
     @androidx.annotation.VisibleForTesting
     fun simulatePagedTtsFollowForTest(spokenOffset: Int): Int? {
         val nav = testPagedNavigator ?: return null
-        val req = testPagedJumpRequest ?: return null
+        val req = testPagedJumpToSourceOffset ?: return null
         val target = pagedTtsFollowTarget(spokenOffset, nav.currentPage, nav.index) ?: return null
-        req.value = target
+        req.value = spokenOffset
         return target
     }
 
