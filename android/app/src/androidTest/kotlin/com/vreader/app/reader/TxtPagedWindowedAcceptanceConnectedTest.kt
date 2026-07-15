@@ -166,6 +166,12 @@ class TxtPagedWindowedAcceptanceConnectedTest {
         var l = 0; onActivity { l = it.pagedDocLengthForTest() }; return l
     }
 
+    /** Poll until the decoded doc length is known (set once the paged body mounts). */
+    private fun ActivityScenario<TxtReaderActivity>.docLengthEventually(): Int {
+        compose.waitUntil(15_000) { docLength() > 0 }
+        return docLength()
+    }
+
     /** Poll until the sealed count STOPS growing (the background completion pass reached doc end). */
     private fun ActivityScenario<TxtReaderActivity>.awaitFinalPageCount(timeoutMs: Long = 20_000): Int {
         var stable = 0
@@ -382,13 +388,22 @@ class TxtPagedWindowedAcceptanceConnectedTest {
             compose.waitUntil(25_000) {
                 scenario.currentPage() > 0 && scenario.currentPage() == scenario.pageContaining(savedOffset)
             }
-            val landed = scenario.currentPage()
-            // The landing page is PAST the initial 3-page window → it is the GROWN index, not a
-            // first-window clamp (which would land on page ≤ 2, the old last-sealed page).
+            // Await the COMPLETE index so `pageContaining(savedOffset)` is the FINAL (grown) page, not a
+            // transient partial-frontier clamp that could coincidentally match an intermediate landing
+            // (Gate-4 finding: a live partial index can make the convergence self-referential). On the
+            // complete index the assertion is against the genuinely grown target.
+            val finalCount = scenario.awaitFinalPageCount()
+            val landedOnComplete = scenario.currentPage()
+            val resumePageOnComplete = scenario.pageContaining(savedOffset)
+            // The landing page is PAST the initial 3-page window AND strictly inside the grown book → it is
+            // the GROWN index, not a first-window clamp (which would land on page ≤ 2, the old last-sealed
+            // page) and not clamped to the OLD last page.
             assertTrue("the reveal landed PAST the initial 3-page window (grown index, NOT a first-window clamp)",
-                landed >= 4)
-            assertEquals("the reveal landed exactly on the page containing the saved offset (grown index)",
-                scenario.pageContaining(savedOffset), landed)
+                resumePageOnComplete >= 4)
+            assertTrue("the resume page is strictly inside the grown book (not clamped to the last page unless it truly is)",
+                resumePageOnComplete <= finalCount - 1)
+            assertEquals("the reveal landed exactly on the page containing the saved offset (COMPLETE grown index)",
+                resumePageOnComplete, landedOnComplete)
         }
     }
 
@@ -408,22 +423,43 @@ class TxtPagedWindowedAcceptanceConnectedTest {
         ActivityScenario.launch<TxtReaderActivity>(
             TxtReaderActivity.intent(instrumentation.targetContext, key),
         ).use { scenario ->
-            scenario.awaitPageIndex()
+            // A far (~85%) offset — deep in the book, into a region the FIRST window has NOT sealed. The
+            // decoded doc length is available the instant the paged body mounts (independent of the index),
+            // so read it up front to compute the offset used in the capture predicate below.
+            val length = scenario.docLengthEventually()
+            assertTrue("document has text", length > 0)
+            val offset = (length * 85) / 100
+            // Capture the FIRST published (partial) count AND where the far offset clamps on it — the instant
+            // an index publishes, BEFORE the background completes. Recording BOTH in the poll predicate's
+            // first-true moment avoids racing the fast background pass (a late read would see the grown page).
+            var firstPartialCount = -1
+            var partialPageForOffset = -1
+            compose.waitUntil(15_000) {
+                val c = scenario.pageCount()
+                if (c > 0 && firstPartialCount < 0) {
+                    firstPartialCount = c
+                    partialPageForOffset = scenario.pageContaining(offset)
+                }
+                c > 0
+            }
             scenario.awaitFirstLine()
             assertEquals("opens on page 0", 0, scenario.currentPage())
-            val length = scenario.docLength()
-            assertTrue("document has text", length > 0)
-            // A far (~85%) offset — deep in the book, into a region the FIRST window has not sealed.
-            val offset = (length * 85) / 100
-            // Fire the scrubber-feeder jump IMMEDIATELY (the far region is unmeasured now); it must not
-            // require a visible loading surface — the pager stays put until the extend seals through.
+            // Prove the region was genuinely UNMEASURED at the first window: on the partial index the far
+            // offset clamps SHORT of the last-sealed page (the documented beyond-frontier fallback).
+            assertTrue("the first window was partial (a far region is unmeasured)", firstPartialCount in 1..6)
+            assertTrue("on the PARTIAL index the far offset clamps into the sealed region (unmeasured beyond)",
+                partialPageForOffset in 0 until firstPartialCount)
+            // Fire the scrubber-feeder jump into that unmeasured region; it must not require a visible
+            // loading surface — the pager stays put until the extend seals through.
             scenario.onActivity { it.pagedJumpToOffsetForTest(offset) }
-            // EVENTUAL landing: poll until the index has sealed through the target AND the pager lands on
-            // the page that (on the complete index) contains the offset. A wide budget for the seal-through
-            // of a large region under class-run load (WI-5b/MEMORY #133).
-            scenario.awaitFinalPageCount()
+            // EVENTUAL landing: seal-through completes, then the pager lands on the page that (on the
+            // COMPLETE index) contains the offset — a page the far region had NOT measured when the jump
+            // fired. A wide budget for the seal-through under class-run load (WI-5b/MEMORY #133).
+            val finalCount = scenario.awaitFinalPageCount()
             val expected = scenario.pageContaining(offset)
             assertTrue("the far offset resolves to a deep non-zero page on the complete index", expected > 0)
+            assertTrue("the target page was BEYOND the first partial window (genuinely unmeasured at jump time): partial=$partialPageForOffset final=$expected count $firstPartialCount->$finalCount",
+                expected > partialPageForOffset)
             compose.waitUntil(25_000) { scenario.currentPage() == expected }
             assertEquals("the far scrubber jump into an unmeasured region EVENTUALLY landed on pageContaining(offset)",
                 expected, scenario.currentPage())
@@ -458,7 +494,10 @@ class TxtPagedWindowedAcceptanceConnectedTest {
             savedOffset = scenario.currentSourceOffset()
             assertTrue("captured a deep resume offset in Paged mode", savedOffset > 0)
         }
-        // Leg 2 — Scroll: the scroll body restores the same source offset (position carries across modes).
+        // Leg 2 — Scroll: the scroll body MOUNTS (not the paged body) AND restores the same source offset,
+        // proving the position genuinely carried into Scroll mode (not merely that Scroll opened at the top
+        // — Gate-4 finding). The scroll body maps the saved charOffset to a chunk (chunkForOffset), so the
+        // first-visible chunk must be a FORWARD (non-zero) chunk, not chunk 0.
         setLayoutAndConfirm(ReaderLayout.Scroll)
         ActivityScenario.launch<TxtReaderActivity>(
             TxtReaderActivity.intent(instrumentation.targetContext, key),
@@ -468,6 +507,16 @@ class TxtPagedWindowedAcceptanceConnectedTest {
                 scenario.onActivity { mounted = it.pagedBodyMountedForTest() }
                 mounted == false   // Scroll layout must NOT mount the paged body
             }
+            // The scroll body restores to the saved forward offset → the first-visible chunk is > 0.
+            compose.waitUntil(15_000) {
+                var chunk: Int? = null
+                scenario.onActivity { chunk = it.firstVisibleChunkForTest() }
+                (chunk ?: 0) > 0
+            }
+            var scrollChunk: Int? = null
+            scenario.onActivity { scrollChunk = it.firstVisibleChunkForTest() }
+            assertTrue("Scroll mode restored a FORWARD position (chunk > 0), not the top",
+                (scrollChunk ?: 0) > 0)
         }
         // Leg 3 — Paged again: reopening in Paged must land back on the page containing the saved offset.
         setLayoutAndConfirm(ReaderLayout.Paged)
@@ -505,46 +554,61 @@ class TxtPagedWindowedAcceptanceConnectedTest {
         ).use { scenario ->
             scenario.awaitPageIndex()
             scenario.awaitFirstLine()
-            // Render page 0 into the cache while the index is still PARTIAL (the background is completing),
-            // then let it complete — the retained render window must SURVIVE the background appends (an
-            // append never clears the cache — invariant 9). Reading the cache while page 0 is shown proves
-            // it is populated; the append that follows must not wipe it.
+            // Render page 0 into the cache while the index is still PARTIAL (the background is completing).
+            // Page 0's content (Line 001) is on screen → its render is cached. The background APPEND that
+            // follows must NOT wipe that cache — a cleared-on-append cache would drop to size 0 AND stop
+            // serving page 0.
             val cacheWhilePartial = scenario.renderCacheSize()
             assertTrue("render cache populated on the first (partial) window", cacheWhilePartial in 1..8)
+            assertTrue("page 0 (Line 001) is the rendered+cached page", lineMarkerVisible(1))
             val finalCount = scenario.awaitFinalPageCount()
             assertTrue("100 lines complete to a multi-page count", finalCount > 6)
-            // The background APPEND (count grew to finalCount) did NOT clear the render cache — it survived
-            // bounded (a cleared-on-append cache would be size 0; a whole-book render would be finalCount).
+            // APPEND SURVIVAL (invariant 9): the count grew to finalCount, yet the render cache is STILL
+            // populated (non-zero) and page 0 is STILL served from it — the append neither cleared the cache
+            // nor evicted the retained window. A cleared-on-append cache would be size 0 here.
             val cacheAfterAppends = scenario.renderCacheSize()
-            assertTrue("render cache survived the appends bounded (never cleared to 0, never the whole book)",
+            assertTrue("render cache SURVIVED the appends (non-zero, not cleared) and stayed bounded",
                 cacheAfterAppends in 1..8)
             assertTrue("render cache did not grow to the full page count", cacheAfterAppends < finalCount)
-            // Now page forward on the COMPLETE (stable-count) index to seed more of the cache before the
+            assertTrue("page 0 is still rendered from the surviving cache after the append", lineMarkerVisible(1))
+            // Page forward on the COMPLETE (stable-count) index to seed MORE pages into the cache before the
             // reflow (paging against a stable count avoids a partial-index land-short flake — MEMORY #133).
             repeat(3) { turn ->
                 scenario.onActivity { it.turnToNextPageForTest() }
                 compose.waitUntil(15_000) { scenario.currentPage() >= turn + 1 }
             }
+            val countBeforeReflow = scenario.pageCount()
+            val cacheBeforeReflow = scenario.renderCacheSize()
+            assertTrue("cache seeded with several pages before the reflow", cacheBeforeReflow in 2..8)
 
-            // Capture the pre-reflow position, then trigger a REFLOW (font-size change) — the ONLY thing
-            // that clears the render cache.
+            // Capture the pre-reflow position, then trigger a REFLOW (a LARGER font-size) — the ONLY code
+            // path that calls renderCache.clear(). A larger font re-paginates the whole book, so the
+            // COMPLETE page count MUST change → a proof the reflow re-pagination genuinely ran (the clear
+            // lives on exactly that path), not just that the cache happens to be bounded.
             val offsetBefore = scenario.currentSourceOffset()
             assertTrue("captured a forward source offset before reflow", offsetBefore > 0)
             runBlocking { app.container.readerSettingsStore.setFontSize(26f) }
 
-            // The reflow re-paginates windowed + clamps back to the captured offset; poll until it lands
-            // on the reconciled page (proves the reflow completed + reconciled).
+            // The reflow re-paginates windowed + clamps back to the captured offset; poll until BOTH the
+            // count has changed (re-pagination happened, complete-index settled) AND the pager landed on
+            // the reconciled page.
             compose.waitUntil(20_000) {
                 val idx = scenario.pageContaining(offsetBefore)
-                scenario.pageCount() > 0 && scenario.currentPage() == idx && scenario.currentPage() > 0
+                val c = scenario.pageCount()
+                c > 0 && c != countBeforeReflow && scenario.currentPage() == idx && scenario.currentPage() > 0
             }
-            // After the reflow re-pagination the cache is re-populated but still BOUNDED (it was cleared
-            // by the reflow and rebuilt to a small window — never the whole book).
+            val countAfterReflow = scenario.awaitFinalPageCount()
+            assertTrue("the reflow re-paginated the book (the COMPLETE count changed under the larger font) — the reflow (clear) path ran",
+                countAfterReflow != countBeforeReflow)
+            // After the reflow the cache is CLEARED then rebuilt to a small bounded window — never the whole
+            // re-paginated book (a not-cleared cache would still hold the pre-reflow page-number keys, but
+            // the re-paginated count is different so those keys are stale — the bounded rebuilt window proves
+            // the clear + repopulate).
             val cacheAfterReflow = scenario.renderCacheSize()
-            assertTrue("render cache re-populated bounded after the reflow (cleared + rebuilt small)",
+            assertTrue("render cache rebuilt bounded after the reflow (cleared + repopulated small)",
                 cacheAfterReflow in 1..8)
-            assertTrue("render cache after reflow did not grow to the full page count",
-                cacheAfterReflow < scenario.pageCount())
+            assertTrue("render cache after reflow did not grow to the full re-paginated page count",
+                cacheAfterReflow < countAfterReflow)
         }
     }
 }
