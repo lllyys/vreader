@@ -38,6 +38,8 @@ import com.vreader.app.reader.Utf16Range
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -81,6 +83,11 @@ class TxtPaginator(private val indexDispatcher: CoroutineDispatcher = Dispatcher
      * ([isMarkdown] picks Markdown vs Identity — so a TXT `*`/`#` is NOT stripped as a marker) — NEVER
      * the shared UI mapper. Honors both [token] and coroutine cancellation. A degenerate box returns
      * [TxtPageIndex.degenerate]; an empty doc returns 0 pages.
+     *
+     * Re-implemented on the RESUMABLE CORE (feature #138 WI-1): a fresh doc-start cursor is driven to
+     * completion with an unbounded stop condition, collecting every sealed start. Behavior is
+     * byte-identical to the pre-#138 whole-document loop for every document — the same tiling logic
+     * (min-one-line, oversized mid-chunk split, strict-advance) lives in ONE place ([measureFrom]).
      */
     suspend fun index(
         document: TxtDocument,
@@ -91,62 +98,194 @@ class TxtPaginator(private val indexDispatcher: CoroutineDispatcher = Dispatcher
         isMarkdown: Boolean = false,
     ): TxtPageIndex = withContext(indexDispatcher) {
         // Cancellation is checked FIRST — a stale token aborts even the degenerate/empty early returns
-        // (Gate-4 Medium-1).
+        // (Gate-4 Medium-1). freshCursor mirrors that (degenerate/empty → an already-complete cursor).
         checkCancelled(token)
         if (contentBox.isDegenerate) return@withContext TxtPageIndex.degenerate()
-        val docEnd = document.text.length
-        if (document.chunkCount == 0) return@withContext TxtPageIndex(IntArray(0), docEndExclusive = docEnd)
-
-        // Paginator-LOCAL mapper (its OWN LRU) — NEVER the shared UI-thread mapper (no cross-thread
-        // mutable-LRU access; Gate-2 R3 High). Format-correct: Markdown strips markers, Identity does
-        // not — the ONLY thing phase-1 needs is each rendered-line-start's source offset.
-        val localMapper = LocalChunkOffsetMapper(document, isMarkdown)
 
         val starts = GrowableIntArray()
-        var currentPageHeight = 0f
-        var pageHasLine = false
+        var cursor = freshCursor(document, style, contentBox, measurer, isMarkdown)
+        // Drive to completion with NO page/offset bound. Chunk-by-chunk under checkCancelled — the SAME
+        // sequential carry the whole-doc loop used, now factored into the resumable core.
+        while (!cursor.isComplete) {
+            cursor = measureFrom(cursor, StopCondition.None, token) { starts.push(it) }
+        }
+        TxtPageIndex(starts.toIntArray(), docEndExclusive = cursor.run.docEndExclusive)
+    }
 
-        // Central page-start push with a STRICT-ADVANCE guard: a candidate start that does NOT advance past
-        // the last page start (e.g. two narrow measured lines both mapping to the same source offset — an MD
-        // inserted-glyph bullet maps `•` and its space to source [0,2)) is REJECTED and the line stays on
-        // the current page. This preserves the forward-progress invariant — no zero-advance page (Gate-4 High-1).
+    // --- resumable measure core (feature #138 WI-1) --------------------------------------------
+
+    /**
+     * The stop condition a bounded resumable measure step honors. The core still processes whole
+     * CHUNKS (the natural resumable boundary — the sequential carry is captured there), so the step
+     * seals AT LEAST enough to satisfy the bound and stops at the next chunk boundary; it never
+     * over-seals in a way that changes the page-start SEQUENCE (only where a window happens to end).
+     */
+    private sealed interface StopCondition {
+        /** Drive to doc end (the `index(...)` completion path). */
+        data object None : StopCondition
+        /** Stop once [count] more page starts have been emitted THIS step (or doc end). */
+        data class Pages(val count: Int) : StopCondition
+        /** Stop once the sealed frontier covers [offset] — a sealed page whose start is `<= offset`
+         *  AND whose successor start is `> offset` exists (or doc end). */
+        data class ThroughOffset(val offset: Int) : StopCondition
+    }
+
+    /**
+     * Start a fresh doc-start-forward pass at chunk 0. Constructs the ONE paginator-local mapper for
+     * the whole pass (never the shared UI mapper). A degenerate box or empty doc yields an
+     * already-[MeasureCursor.isComplete] cursor that seals no pages — the `index(...)` early returns,
+     * expressed as a completed cursor so the core has ONE completion path.
+     *
+     * `internal` — consumed by [index] (WI-1) and PaginationSession (WI-4); NEVER exposed publicly.
+     */
+    internal fun freshCursor(
+        document: TxtDocument,
+        style: TextStyle,
+        contentBox: PageContentBox,
+        measurer: LineMeasurer,
+        isMarkdown: Boolean,
+    ): MeasureCursor {
+        val docEnd = document.text.length
+        val run = MeasureRun(
+            document = document, style = style, contentBox = contentBox, measurer = measurer,
+            mapper = LocalChunkOffsetMapper(document, isMarkdown), docEndExclusive = docEnd,
+        )
+        // Degenerate box / empty doc → a completed cursor with zero starts (matches index's early
+        // returns; a degenerate box's index becomes TxtPageIndex.degenerate() at the index() layer).
+        val complete = contentBox.isDegenerate || document.chunkCount == 0
+        return MeasureCursor(
+            run = run, nextChunk = 0, carryHeight = 0f, carryHasLine = false,
+            currentPageStart = -1, lastSealedStart = -1,
+            frontierSourceOffset = if (complete) docEnd else 0,
+            isComplete = complete, emittedAnyStart = false,
+        )
+    }
+
+    /**
+     * Seal at least [additionalPages] more page starts (or reach doc end), emitting each newly-SEALED
+     * page START via [emit], and return the advanced cursor. A completed cursor — or a non-positive
+     * [additionalPages] — is a no-op (returns [cursor] unchanged, emits nothing). `internal`.
+     */
+    internal suspend fun measurePages(
+        cursor: MeasureCursor, additionalPages: Int, token: PaginationToken, emit: (Int) -> Unit,
+    ): MeasureCursor {
+        if (additionalPages < 1) return cursor
+        return withContext(indexDispatcher) { measureFrom(cursor, StopCondition.Pages(additionalPages), token, emit) }
+    }
+
+    /**
+     * Seal contiguous pages forward until the sealed frontier covers [targetOffset] (a SEALED page
+     * whose `[start, end)` contains it exists) or doc end, emitting each newly-SEALED page START via
+     * [emit], and return the advanced cursor. A negative [targetOffset] is clamped to 0. A completed
+     * cursor is a no-op. `internal`.
+     */
+    internal suspend fun measureThroughOffset(
+        cursor: MeasureCursor, targetOffset: Int, token: PaginationToken, emit: (Int) -> Unit,
+    ): MeasureCursor = withContext(indexDispatcher) {
+        measureFrom(cursor, StopCondition.ThroughOffset(targetOffset.coerceAtLeast(0)), token, emit)
+    }
+
+    /**
+     * THE ONE place the tiling logic lives (min-one-line, oversized mid-chunk split, strict-advance)
+     * AND the sealed-page emission rule (Gate-2 R2 Medium 1). Resumes from [cursor] (its saved
+     * sequential carry is the exact whole-doc-loop boundary state), measures whole chunks forward, and
+     * SEALS a page — emitting its start via [emit] — only once the NEXT page's start is discovered (so
+     * the sealed page's exclusive end is final); the FINAL page seals at doc end. Discovering the first
+     * page start does NOT seal it (a +1-page lookahead); only its successor seals it. If no page was
+     * ever started on a non-empty doc, page 0 seals at doc end at offset 0. Stops at the next chunk
+     * boundary once [stop] is satisfied, or at doc end. The returned cursor is the advanced immutable
+     * copy. Honors [token] AND coroutine cancellation ([ensureActive]).
+     */
+    private suspend fun measureFrom(
+        cursor: MeasureCursor, stop: StopCondition, token: PaginationToken, emit: (Int) -> Unit,
+    ): MeasureCursor {
+        checkCancelled(token)
+        if (cursor.isComplete) return cursor
+
+        val run = cursor.run
+        val document = run.document
+        var nextChunk = cursor.nextChunk
+        var carryHeight = cursor.carryHeight
+        var carryHasLine = cursor.carryHasLine
+        var currentPageStart = cursor.currentPageStart      // the in-progress, NOT-yet-sealed page start
+        var lastSealedStart = cursor.lastSealedStart        // the most recently emitted (sealed) start
+        var emittedAny = cursor.emittedAnyStart
+        var sealedThisStep = 0
+
+        // Begin a NEW page at [candidate] with a STRICT-ADVANCE guard against the CURRENT (pending)
+        // page start: a candidate that does NOT advance past it (e.g. two narrow measured lines both
+        // mapping to the same source offset — an MD inserted-glyph bullet maps `•` and its space to
+        // source [0,2)) is REJECTED, keeping the line on the current page (no zero-advance page). When
+        // it DOES advance, the PREVIOUS page is now SEALED (its successor's start is known) → emit it,
+        // and this candidate becomes the new pending page start.
         fun tryStartPage(candidate: Int): Boolean {
-            if (starts.size == 0 || candidate > starts.last()) { starts.push(candidate); return true }
+            if (currentPageStart < 0 || candidate > currentPageStart) {
+                if (currentPageStart >= 0) { emit(currentPageStart); lastSealedStart = currentPageStart; sealedThisStep++ }
+                currentPageStart = candidate
+                emittedAny = true
+                return true
+            }
             return false
         }
 
-        for (chunkIndex in 0 until document.chunkCount) {
+        // The frontier marker = the pending page start when a page is in progress, else the source
+        // offset consumed so far. It is the exclusive end of the last sealed page.
+        fun frontierNow(): Int =
+            if (currentPageStart >= 0) currentPageStart
+            else if (nextChunk < document.chunkCount) document.offsetForChunk(nextChunk) else run.docEndExclusive
+
+        fun bound(): Boolean = when (stop) {
+            StopCondition.None -> false
+            is StopCondition.Pages -> sealedThisStep >= stop.count
+            // Covered once a SEALED page whose [start, end) contains offset exists: a sealed start
+            // `<= offset` AND the successor (pending) start `> offset` (== that sealed page's end).
+            is StopCondition.ThroughOffset ->
+                lastSealedStart in 0..stop.offset && currentPageStart > stop.offset
+        }
+
+        while (nextChunk < document.chunkCount) {
             checkCancelled(token)
-            val chunkDocStart = document.offsetForChunk(chunkIndex)
-            val rendered = localMapper.renderedText(chunkIndex)
-            val lines = measurer.measure(rendered, style, contentBox.widthPx)
+            currentCoroutineContext().ensureActive()   // cooperative coroutine cancellation per chunk
+            val chunkDocStart = document.offsetForChunk(nextChunk)
+            val rendered = run.mapper.renderedText(nextChunk)
+            val lines = run.measurer.measure(rendered, run.style, run.contentBox.widthPx)
             for (line in lines) {
-                val candidate = sourceOffsetForLineStart(localMapper, chunkIndex, chunkDocStart, line)
-                val fits = currentPageHeight + line.heightPx <= contentBox.heightPx
-                if (!pageHasLine) {
-                    // The whole doc's first line: starts.size is 0 here, so tryStartPage always pushes
-                    // page 0 at document offset 0. min-one-line forward progress.
+                val candidate = sourceOffsetForLineStart(run.mapper, nextChunk, chunkDocStart, line)
+                val fits = carryHeight + line.heightPx <= run.contentBox.heightPx
+                if (!carryHasLine) {
+                    // The whole doc's first line: currentPageStart is -1 here, so tryStartPage always
+                    // begins page 0 at document offset 0 (it seals later, at its successor or doc end).
                     tryStartPage(candidate)
-                    currentPageHeight = line.heightPx
-                    pageHasLine = true
+                    carryHeight = line.heightPx
+                    carryHasLine = true
                 } else if (fits) {
-                    currentPageHeight += line.heightPx
+                    carryHeight += line.heightPx
                 } else {
                     // Cut a NEW page at this line's source start — but only if it strictly advances; a
-                    // non-advancing candidate keeps the line on the current page (may overflow — that's the
-                    // min-one-line trade the invariant accepts) so we never emit a zero-advance page.
-                    if (tryStartPage(candidate)) {
-                        currentPageHeight = line.heightPx
-                    } else {
-                        currentPageHeight += line.heightPx
-                    }
+                    // non-advancing candidate keeps the line on the current page (may overflow — the
+                    // min-one-line trade) so we never emit a zero-advance page.
+                    if (tryStartPage(candidate)) carryHeight = line.heightPx else carryHeight += line.heightPx
                 }
             }
+            nextChunk++
+            if (bound()) break
         }
-        checkCancelled(token)
-        // No page was ever started (all chunks measured to zero lines) → whole doc is one page.
-        if (starts.size == 0) starts.push(0)
-        TxtPageIndex(starts.toIntArray(), docEndExclusive = docEnd)
+
+        val complete = nextChunk >= document.chunkCount
+        if (complete) {
+            checkCancelled(token)
+            // No page was ever started (all chunks measured to zero lines) → whole doc is one page at 0.
+            if (!emittedAny) { currentPageStart = 0; emittedAny = true }
+            // The final in-progress page seals at doc end (its exclusive end == docEndExclusive).
+            if (currentPageStart >= 0) { emit(currentPageStart); lastSealedStart = currentPageStart; sealedThisStep++ }
+            currentPageStart = -1   // nothing pending once complete
+        }
+        val frontier = if (complete) run.docEndExclusive else frontierNow()
+        return cursor.copy(
+            nextChunk = nextChunk, carryHeight = carryHeight, carryHasLine = carryHasLine,
+            currentPageStart = currentPageStart, lastSealedStart = lastSealedStart,
+            frontierSourceOffset = frontier, isComplete = complete, emittedAnyStart = emittedAny,
+        )
     }
 
     /**
@@ -277,7 +416,7 @@ class TxtPaginator(private val indexDispatcher: CoroutineDispatcher = Dispatcher
  * (b) rendered→source for a line start. It NEVER shares the UI-thread mapper. Format-correct: a
  * Markdown mapper for .md (markers stripped), an Identity mapper for .txt (raw, so `*`/`#` stay).
  */
-private class LocalChunkOffsetMapper(doc: TxtDocument, isMarkdown: Boolean) {
+internal class LocalChunkOffsetMapper(doc: TxtDocument, isMarkdown: Boolean) {
     private val inner: ChunkTextMapper =
         if (isMarkdown) MarkdownChunkTextMapper(doc) else IdentityChunkTextMapper(doc)
     fun renderedText(chunkIndex: Int): AnnotatedString = inner.renderedText(chunkIndex)
