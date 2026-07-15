@@ -142,9 +142,14 @@ internal fun TxtPagedBody(
     // detectTapGestures consumes the tap so the scaffold's fall-through won't fire; this callback keeps the
     // single chrome mechanism. Defaulted to a no-op so #129/WI-6a call sites / previews stay valid.
     onToggleChrome: () -> Unit = {},
-    // An external programmatic page jump (the test-seam page turn; future bookmark/search jumps). The host
-    // raises it to a target PAGE; the body scrolls, persists, then calls [onJumpConsumed] to clear it.
-    jumpRequest: Int? = null,
+    // feature #138 WI-5a — an external programmatic jump as a SOURCE OFFSET (the test-seam page turn +
+    // the bookmark / annotation / search-hit / scrubber / TTS-follow feeders). The host raises the raw
+    // source-UTF-16 offset; the body resolves it to a page SYNCHRONOUSLY via the navigator's
+    // `jumpToOffset(offset)` overload (`pageContaining` over the current whole-doc index), scrolls,
+    // persists, then calls [onJumpConsumed] to clear it. Retyped from a pre-computed page (WI-5a): the
+    // seam no longer converts source→page on the UI thread. The async beyond-frontier EVENTUAL landing on
+    // a PARTIAL session index is WI-5b — here the index is complete, so the resolution is exact + immediate.
+    jumpToSourceOffset: Int? = null,
     onJumpConsumed: () -> Unit = {},
     onContentBoxReady: (PageContentBox) -> Unit = {},
     // feature #137 WI-7a — paged text selection. When non-null, each visible page registers its rendered
@@ -226,8 +231,8 @@ internal fun TxtPagedBody(
     // mirrors currentPage + the offset↔page math (so the host's test seams + future bookmark/search jumps
     // read it); this Compose-state mirror is what drives recomposition (the navigator's plain fields
     // don't). NO frame-poll loop — every programmatic scroll flows through a Compose-observable target
-    // (localScrollTarget for the reflow clamp, [jumpRequest] for an external jump), so the compose-test
-    // idling resource can settle (a busy while-loop would keep it perpetually not-idle).
+    // (localScrollTarget for the reflow clamp, [jumpToSourceOffset] for an external source-offset jump),
+    // so the compose-test idling resource can settle (a busy while-loop would keep it perpetually not-idle).
     var index by remember(document) { mutableStateOf<com.vreader.app.reader.paged.TxtPageIndex?>(null) }
     // The reflow clamp's one-shot programmatic scroll target (a Compose State the pager consumes).
     var localScrollTarget by remember(document) { mutableStateOf<Int?>(null) }
@@ -365,19 +370,30 @@ internal fun TxtPagedBody(
                         onSaveSourceOffset(navigator.currentSourceOffset())
                     }
                 }
-                // An EXTERNAL jump (the test-seam page turn / future bookmark-search jump): the host raises
-                // [jumpRequest] (a target PAGE), we scroll the pager + sync the navigator + persist the new
-                // page-start offset, then clear the request via [onJumpConsumed]. `jumpRequest` is a plain
-                // parameter — read it through rememberUpdatedState so the snapshotFlow reacts to a NEW value
-                // even though this LaunchedEffect (keyed pagerState/idx) never restarts (a bare
-                // `snapshotFlow { jumpRequest }` would capture the stale first value).
-                val liveJumpRequest by rememberUpdatedState(jumpRequest)
+                // feature #138 WI-5a — an EXTERNAL jump raised as a SOURCE OFFSET (the test-seam page turn /
+                // the bookmark / annotation / search-hit / scrubber / TTS-follow feeders): the host raises
+                // [jumpToSourceOffset] (a raw source-UTF-16 offset); we RESOLVE it to a page SYNCHRONOUSLY
+                // via the navigator's `jumpToOffset(offset)` overload (`pageContaining` over the current
+                // whole-doc index; it sets currentPage + queues pendingScrollTarget), then scroll the pager
+                // + persist the new page-start offset, then clear the request via [onJumpConsumed]. The
+                // source→page conversion moved OUT of the host chrome callback into this body effect (WI-5a;
+                // both still run on main — the point is the seam no longer eagerly resolves the page). Beyond the sealed
+                // frontier of a PARTIAL session index the landing would be EVENTUAL — that async path is
+                // WI-5b; here the index is complete so the resolution is exact + immediate.
+                // `jumpToSourceOffset` is a plain parameter — read it through rememberUpdatedState so the
+                // snapshotFlow reacts to a NEW value even though this LaunchedEffect (keyed pagerState/idx)
+                // never restarts (a bare `snapshotFlow { jumpToSourceOffset }` would capture the stale first).
+                val liveJumpToSourceOffset by rememberUpdatedState(jumpToSourceOffset)
                 LaunchedEffect(pagerState, idx) {
-                    snapshotFlow { liveJumpRequest }.collect { req ->
-                        if (req == null) return@collect
-                        val clamped = req.coerceIn(0, (pageCount - 1).coerceAtLeast(0))
-                        navigator.onPagerPageChanged(clamped)
-                        if (clamped != pagerState.currentPage) runCatching { pagerState.scrollToPage(clamped) }
+                    snapshotFlow { liveJumpToSourceOffset }.collect { offset ->
+                        if (offset == null) return@collect
+                        // Resolve source offset → page over the current (complete) index. The synchronous
+                        // navigator overload sets currentPage + queues pendingScrollTarget; consume it to
+                        // scroll the (already-composed) pager. pageContaining clamps a negative / past-EOF
+                        // offset internally, so the resolved page is always in range.
+                        navigator.jumpToOffset(offset)
+                        val target = navigator.consumePendingScrollTarget() ?: navigator.pageContaining(offset)
+                        if (target != pagerState.currentPage) runCatching { pagerState.scrollToPage(target) }
                         onSaveSourceOffset(navigator.currentSourceOffset())
                         onJumpConsumed()
                     }
