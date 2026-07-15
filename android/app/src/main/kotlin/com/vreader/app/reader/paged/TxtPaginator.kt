@@ -79,18 +79,23 @@ class TxtPaginator(private val indexDispatcher: CoroutineDispatcher = Dispatcher
 
     companion object {
         /**
-         * Feature #138 WI-3 — the number of pages the SESSION (WI-4) seals in the FIRST windowed pass
-         * from a fresh doc-start cursor before publishing (and launching background completion). Sized
-         * to fill the first screen plus a small forward buffer so a page-turn near the frontier already
-         * has its successor sealed (the +1-page lookahead is inherent in the seal discipline).
+         * Feature #138 WI-3 — the TARGET number of pages the SESSION (WI-4) seals in the FIRST windowed
+         * pass from a fresh doc-start cursor before publishing (and launching background completion).
+         * Sized to fill the first screen plus a small forward buffer so a page-turn near the frontier
+         * already has its successor sealed (the +1-page lookahead is inherent in the seal discipline).
+         *
+         * NOTE this is a LOWER-BOUND target, not an exact cap: [measurePages] stops at the next CHUNK
+         * boundary once the page count is met, so a runaway (no-newline) chunk carrying several page
+         * breaks can seal a few MORE than requested in one step. The page-start SEQUENCE is unaffected
+         * (append equivalence holds) — only WHERE a pass pauses shifts to the chunk boundary.
          */
         const val DEFAULT_INITIAL_WINDOW_PAGES = 3
 
         /**
-         * Feature #138 WI-3 — the number of ADDITIONAL pages the session seals per on-demand forward
-         * extension (`measurePages(cursor, DEFAULT_EXTEND_PAGES)`) when the reader nears the sealed
-         * frontier. Smaller than the initial window: an extension is an incremental top-up, not a
-         * first-fill.
+         * Feature #138 WI-3 — the TARGET number of ADDITIONAL pages the session seals per on-demand
+         * forward extension (`measurePages(cursor, DEFAULT_EXTEND_PAGES)`) when the reader nears the
+         * sealed frontier. Smaller than the initial window: an extension is an incremental top-up, not a
+         * first-fill. Also a lower-bound target (see [DEFAULT_INITIAL_WINDOW_PAGES]).
          */
         const val DEFAULT_EXTEND_PAGES = 2
     }
@@ -267,7 +272,13 @@ class TxtPaginator(private val indexDispatcher: CoroutineDispatcher = Dispatcher
             val chunkDocStart = document.offsetForChunk(nextChunk)
             val rendered = run.mapper.renderedText(nextChunk)
             val lines = run.measurer.measure(rendered, run.style, run.contentBox.widthPx)
+            // A single runaway (no-newline) chunk can carry many measured page breaks; a cancel
+            // arriving while iterating it must NOT emit further stale starts. Re-check per line BEFORE
+            // any emit — the throw aborts before tryStartPage runs (Gate-4 WI-3 High-2). Cheap: a token
+            // flag read + coroutine active-check per measured line.
             for (line in lines) {
+                checkCancelled(token)
+                currentCoroutineContext().ensureActive()
                 val candidate = sourceOffsetForLineStart(run.mapper, nextChunk, chunkDocStart, line)
                 val fits = carryHeight + line.heightPx <= run.contentBox.heightPx
                 if (!carryHasLine) {

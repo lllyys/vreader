@@ -106,7 +106,9 @@ class TxtPaginatorWindowingTest {
 
     // === (1) windowing math: measurePages(freshCursor, K) seals first K pages; frontier == Kth end ===
 
-    @Test fun measurePagesK_sealsFirstKPages_frontierEqualsKthPageEnd() = runTest {
+    @Test fun measurePagesK_oneLinePerChunk_sealsExactlyKPages_frontierEqualsKthEnd() = runTest {
+        // ONE line per chunk (newline-per-row) → each chunk carries at most one page break, so the
+        // chunk-boundary stop coincides with the page-count stop: measurePages(K) seals EXACTLY K.
         val doc = TxtDocument.of((0 until 60).joinToString("") { "row$it\n" })
         val p = TxtPaginator(UnconfinedTestDispatcher(testScheduler))
         val m = FixedLineMeasurer(charsPerLine = 7, lineHeightPx = 10f)
@@ -118,14 +120,37 @@ class TxtPaginatorWindowingTest {
             val collected = ArrayList<Int>()
             var cursor = p.freshCursor(doc, style, boxPx, m, isMarkdown = false)
             cursor = p.measurePages(cursor, additionalPages = k, token = PaginationToken()) { collected.add(it) }
-            // Exactly K pages sealed (the doc is big enough that K < total), and they equal index()'s
-            // first K starts byte-for-byte.
+            // Exactly K pages sealed (each row-chunk carries <=1 break, so no over-seal), equalling
+            // index()'s first K starts byte-for-byte.
             assertEquals("K=$k seals exactly K pages", k, collected.size)
             assertEquals("K=$k seals index()'s first K starts", full.pageStartsUtf16.take(k), collected)
             // The cursor frontier == the Kth page's end == index()'s page K start (== pageEndExclusive(K-1)).
             assertFalse("K=$k not complete", cursor.isComplete)
             assertEquals("frontier == Kth page end", full.pageStart(k), cursor.frontierSourceOffset)
         }
+    }
+
+    @Test fun measurePagesK_isLowerBound_notExactCap_forRunawayChunk() = runTest {
+        // DOCUMENTED contract (Gate-4 WI-3 High-1): measureFrom stops at the next CHUNK boundary once
+        // the page-count target is met. A single runaway (no-newline) chunk with MANY page breaks can
+        // therefore seal MORE than K in one step — measurePages(K) is a LOWER-BOUND target, not a cap.
+        // The page-start SEQUENCE is still byte-identical to index() (append equivalence unaffected);
+        // only WHERE the pass pauses shifts to the chunk boundary.
+        val doc = TxtDocument.of("z".repeat(3000))   // ONE chunk (< 4000 max), many measured lines
+        val p = TxtPaginator(UnconfinedTestDispatcher(testScheduler))
+        val m = FixedLineMeasurer(charsPerLine = 50, lineHeightPx = 10f)   // 60 measured lines
+        val boxPx = box(20f)   // ~2 lines per page → the ONE chunk holds ~30 page breaks
+        val full = p.index(doc, style, boxPx, m, PaginationToken())
+        assertTrue("precondition: one runaway chunk → many pages", full.pageCount >= 10)
+        assertEquals("precondition: exactly one chunk", 1, doc.chunkCount)
+
+        val collected = ArrayList<Int>()
+        var cursor = p.freshCursor(doc, style, boxPx, m, isMarkdown = false)
+        // Request just 1 page — but the single chunk seals its whole page run before the boundary stop.
+        cursor = p.measurePages(cursor, additionalPages = 1, token = PaginationToken()) { collected.add(it) }
+        assertTrue("over-seals past K when one chunk carries many breaks", collected.size > 1)
+        // Even over-sealed, the prefix is still index()'s exact starts (sequence unaffected).
+        assertEquals("over-sealed prefix == index() prefix", full.pageStartsUtf16.take(collected.size).toList(), collected)
     }
 
     // === (2) the +1-page lookahead: sealing page 0 requires measuring INTO page 1 ===
@@ -165,7 +190,7 @@ class TxtPaginatorWindowingTest {
             // A complete pass's frontier is doc end; the last sealed page's exclusive end is doc end.
             assertEquals("'${s.name}' frontier == doc end", doc.text.length, cursor.frontierSourceOffset)
             if (collected.isNotEmpty()) {
-                val full = p.index(doc, style, boxPx, m, PaginationToken())
+                val full = p.index(doc, style, boxPx, m, PaginationToken(), s.isMarkdown)
                 assertEquals(
                     "'${s.name}' last sealed page ends at doc end",
                     doc.text.length, full.pageEndExclusive(collected.size - 1),
@@ -187,7 +212,9 @@ class TxtPaginatorWindowingTest {
             val p = TxtPaginator(UnconfinedTestDispatcher(testScheduler))
             val m = FixedLineMeasurer(s.charsPerLine, s.lineHeightPx)
             val boxPx = box(s.heightPx)
-            val full = p.index(doc, style, boxPx, m, PaginationToken())
+            // index() MUST use the same isMarkdown as the drive — an MD scenario compares an MD drive
+            // against an MD index (markers stripped identically), never a TXT index (Gate-4 WI-3 Med-3).
+            val full = p.index(doc, style, boxPx, m, PaginationToken(), s.isMarkdown)
             val (collected, cursor) = driveToCompletion(p, doc, boxPx, m, s.isMarkdown, window = 1)
             assertEquals(
                 "'${s.name}' one-page-at-a-time drive == index() starts byte-for-byte",
@@ -214,7 +241,7 @@ class TxtPaginatorWindowingTest {
             val p = TxtPaginator(UnconfinedTestDispatcher(testScheduler))
             val m = FixedLineMeasurer(s.charsPerLine, s.lineHeightPx)
             val boxPx = box(s.heightPx)
-            val full = p.index(doc, style, boxPx, m, PaginationToken()).pageStartsUtf16.toList()
+            val full = p.index(doc, style, boxPx, m, PaginationToken(), s.isMarkdown).pageStartsUtf16.toList()
             for (window in listOf(1, 2, 3, 5, 17)) {
                 val (collected, cursor) = driveToCompletion(p, doc, boxPx, m, s.isMarkdown, window)
                 assertEquals("'${s.name}' window=$window == index()", full, collected)
@@ -338,6 +365,11 @@ class TxtPaginatorWindowingTest {
             for (i in collected.indices) assertEquals(full.pageStartsUtf16[i], collected[i])
             // "Exactly enough": we did not seal WILDLY past the target. The last sealed page is the
             // target page, OR at most one lookahead page beyond (its successor is the pending frontier).
+            // The tight `<= tp + 2` bound holds here because this fixture is ONE line per chunk (each
+            // row-chunk carries <=1 page break, so the chunk-boundary stop coincides with the coverage
+            // stop). A runaway no-newline chunk could seal more in one step (documented lower-bound
+            // behavior — see measurePagesK_isLowerBound_notExactCap_forRunawayChunk); the COVERAGE and
+            // pageContaining(X) exactness above hold regardless.
             assertTrue(
                 "sealed exactly enough to cover target (no over-run)",
                 collected.size <= tp + 2,
@@ -374,6 +406,34 @@ class TxtPaginatorWindowingTest {
             p.measureThroughOffset(cursor, targetOffset = doc.text.length, token = token) { }
             fail("a cancelled token must abort measureThroughOffset")
         } catch (e: CancellationException) { /* expected */ }
+    }
+
+    @Test fun cancellation_midChunk_stopsFurtherStaleEmits() = runTest {
+        // Gate-4 WI-3 High-2: a single runaway (no-newline) chunk carries MANY page breaks. If the token
+        // is cancelled WHILE iterating that chunk's lines, no further stale starts may be emitted — the
+        // per-line cancellation check aborts BEFORE the next tryStartPage. We cancel inside the emit
+        // callback (after the first seal) and assert the abort throws with a bounded emit count.
+        val doc = TxtDocument.of("z".repeat(3000))   // ONE chunk, ~60 measured lines → ~30 page breaks
+        val p = TxtPaginator(UnconfinedTestDispatcher(testScheduler))
+        val m = FixedLineMeasurer(charsPerLine = 50, lineHeightPx = 10f)
+        val boxPx = box(20f)   // ~2 lines per page → the ONE chunk holds ~30 breaks
+        val full = p.index(doc, style, boxPx, m, PaginationToken())
+        assertTrue("precondition: one runaway chunk with many breaks", full.pageCount >= 10)
+        assertEquals("precondition: exactly one chunk", 1, doc.chunkCount)
+
+        val token = PaginationToken()
+        val cursor = p.freshCursor(doc, style, boxPx, m, isMarkdown = false)
+        val collected = ArrayList<Int>()
+        try {
+            // Ask for the whole chunk's worth of pages, but cancel after the very first seal.
+            p.measurePages(cursor, additionalPages = full.pageCount, token = token) {
+                collected.add(it)
+                if (collected.size == 1) token.cancel()
+            }
+            fail("a token cancelled mid-chunk must abort the pass")
+        } catch (e: CancellationException) { /* expected */ }
+        // The per-line check aborted before sealing the whole runaway chunk — far fewer than pageCount.
+        assertTrue("cancel mid-chunk sealed only a bounded prefix", collected.size < full.pageCount)
     }
 
     // === (8) min-one-line forward progress across a WINDOW boundary ===
