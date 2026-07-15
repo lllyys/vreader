@@ -77,6 +77,24 @@ class PaginationToken {
  */
 class TxtPaginator(private val indexDispatcher: CoroutineDispatcher = Dispatchers.Default) {
 
+    companion object {
+        /**
+         * Feature #138 WI-3 — the number of pages the SESSION (WI-4) seals in the FIRST windowed pass
+         * from a fresh doc-start cursor before publishing (and launching background completion). Sized
+         * to fill the first screen plus a small forward buffer so a page-turn near the frontier already
+         * has its successor sealed (the +1-page lookahead is inherent in the seal discipline).
+         */
+        const val DEFAULT_INITIAL_WINDOW_PAGES = 3
+
+        /**
+         * Feature #138 WI-3 — the number of ADDITIONAL pages the session seals per on-demand forward
+         * extension (`measurePages(cursor, DEFAULT_EXTEND_PAGES)`) when the reader nears the sealed
+         * frontier. Smaller than the initial window: an extension is an incremental top-up, not a
+         * first-fill.
+         */
+        const val DEFAULT_EXTEND_PAGES = 2
+    }
+
     /**
      * PHASE 1 — measure the whole document against [contentBox] and return the page-boundary index.
      * Runs on [indexDispatcher] (off-main, enforced). Constructs its OWN paginator-local chunk mapper
