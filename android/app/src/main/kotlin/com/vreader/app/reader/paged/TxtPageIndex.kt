@@ -12,8 +12,8 @@
 // page start; not in `pageStartsUtf16`) mark a partial index. The subtle correctness point (Gate-2
 // R1 High 3 / R2 Medium 1): a page is SEALED only once its exclusive end is FINAL — for every page
 // but the last that means the NEXT page's start is known (a +1-page lookahead), so a partial index
-// publishes SEALED pages ONLY and `pageEndExclusive(lastSealedPage)` == the frontier (the
-// known-but-unpublished next sealed start). The FINAL page is sealed by DOC END, so a COMPLETE
+// publishes SEALED pages ONLY and `pageEndExclusive(lastPublishedPage)` == the frontier (the start
+// of the next pending/unpublished page — that page is not itself sealed). The FINAL page is sealed by DOC END, so a COMPLETE
 // index's frontier == `docEndExclusive` and its last page ends at `docEndExclusive` (unchanged
 // behavior). For a beyond-frontier offset `pageContaining` keeps the clamp as a FALLBACK; the
 // SESSION must `ensureMeasuredThrough(offset)` (WI-4) BEFORE querying beyond the frontier — this
@@ -38,8 +38,9 @@ package com.vreader.app.reader.paged
  * document and the last page ends at [docEndExclusive]. A PARTIAL index ([isComplete] = false) holds
  * only the pages SEALED so far; [frontierSourceOffset] is the source offset up to which pages are
  * sealed — a FRONTIER MARKER, NOT a page start (it is not in [pageStartsUtf16]) — and the last
- * published page's exclusive end is that frontier (the next sealed page's start). For a complete
- * index [frontierSourceOffset] == [docEndExclusive].
+ * published page's exclusive end is that frontier (the START of the next pending/unpublished page;
+ * that next page is not itself sealed — the LAST PUBLISHED page becomes sealed precisely because
+ * its successor's start is now known). For a complete index [frontierSourceOffset] == [docEndExclusive].
  */
 class TxtPageIndex(
     pageStartsUtf16: IntArray,
@@ -54,19 +55,25 @@ class TxtPageIndex(
     val isComplete: Boolean = true,
     /**
      * The source offset up to which pages are SEALED — a FRONTIER MARKER, not a page start. For a
-     * PARTIAL index it is the next (known-but-unpublished) sealed page's start, i.e. the exclusive
-     * end of the last published page. Defaults (via an [Int.MIN_VALUE] sentinel) to
+     * PARTIAL index it is the next known start (the pending/unpublished page's start), i.e. the
+     * exclusive end of the last published page. Defaults (via an [Int.MIN_VALUE] sentinel) to
      * [docEndExclusive], so every existing/complete construction reports a frontier at doc end with
-     * no call-site change. Measuring lives in the SESSION, never here.
+     * no call-site change. IGNORED when [isComplete] is true — a complete index's frontier is ALWAYS
+     * [docEndExclusive] (see the resolved property below), so a complete index can never change its
+     * last page's end. Measuring lives in the SESSION, never here.
      */
     frontierSourceOffset: Int = Int.MIN_VALUE,
 ) {
     /**
-     * The frontier marker (see the ctor param). Resolves the [Int.MIN_VALUE] sentinel to
-     * [docEndExclusive] so a complete/existing construction's frontier is doc end by default.
+     * The frontier marker (see the ctor param). A COMPLETE index's frontier is ALWAYS
+     * [docEndExclusive] — the ctor arg is ignored when [isComplete], so a contradictory
+     * `isComplete=true, frontierSourceOffset=<not docEnd>` construction can never change
+     * complete-index behavior (Gate-4 invariant). For a PARTIAL index the [Int.MIN_VALUE] sentinel
+     * resolves to [docEndExclusive]; any other value is the caller's sealed frontier.
      */
     val frontierSourceOffset: Int =
-        if (frontierSourceOffset == Int.MIN_VALUE) docEndExclusive else frontierSourceOffset
+        if (isComplete || frontierSourceOffset == Int.MIN_VALUE) docEndExclusive
+        else frontierSourceOffset
 
     // Defensive copy so the immutable index cannot be mutated through the caller's array (Gate-4 Low-1);
     // reads go through pageStart/pageEndExclusive/pageContaining, never the raw backing store.

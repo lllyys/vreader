@@ -174,4 +174,30 @@ class TxtPageIndexPartialTest {
         assertEquals(50, idx.frontierSourceOffset)
         assertEquals(50, idx.pageEndExclusive(0))
     }
+
+    // --- Gate-4 invariant: a COMPLETE index's frontier is ALWAYS docEndExclusive, even if a caller
+    //     contradictorily passes an explicit frontier — complete-index behavior can never change ---
+
+    @Test fun completeIndex_ignoresExplicitFrontier_frontierIsDocEnd() {
+        // Contradictory construction: isComplete=true but an explicit frontier != docEnd. The
+        // complete-index invariant wins — frontier resolves to docEndExclusive.
+        val idx = TxtPageIndex(
+            intArrayOf(0, 40),
+            docEndExclusive = 100,
+            isComplete = true,
+            frontierSourceOffset = 70,
+        )
+        assertEquals(100, idx.frontierSourceOffset)
+    }
+
+    @Test fun completeIndex_ignoresExplicitFrontier_lastPageEndsAtDocEnd() {
+        val idx = TxtPageIndex(
+            intArrayOf(0, 40),
+            docEndExclusive = 100,
+            isComplete = true,
+            frontierSourceOffset = 70,
+        )
+        // Last page still ends at docEnd (100), NOT the bogus 70 — no complete-index behavior change.
+        assertEquals(100, idx.pageEndExclusive(1))
+    }
 }
