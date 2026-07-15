@@ -113,6 +113,8 @@ import com.vreader.app.reader.paged.TxtPaginator
 import com.vreader.app.reader.paged.pagedTapZones
 import com.vreader.app.ui.theme.VReaderColors
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
@@ -295,10 +297,20 @@ internal fun TxtPagedBody(
     // whatever coroutine context the completion loop resumes on — OBSERVED to be a Dispatchers.Default
     // worker thread for some republishes — so they must NOT write Compose state directly (a background
     // write throws "multithreaded access to SnapshotStateObserver" during a layout read). Instead they
-    // publish into these thread-safe MutableStateFlows; a MAIN-dispatcher collector below marshals every
-    // update into Compose state + the navigator. `openSeq` distinguishes a fresh open / reflow generation
-    // so the main collector clamps the FIRST snapshot of the current pass exactly once.
-    val snapshotFlowOut = remember(document) { MutableStateFlow<com.vreader.app.reader.paged.TxtPageIndex?>(null) }
+    // publish here; a MAIN-dispatcher collector below marshals every update into Compose state + the
+    // navigator. `openSeq` distinguishes a fresh open / reflow generation so the main collector clamps the
+    // FIRST snapshot of the current pass exactly once.
+    //
+    // snapshotFlowOut is a NON-conflated buffered MutableSharedFlow (Gate-4 R2 High): a StateFlow conflates,
+    // so if the session republishes faster than the main collector drains, the true FIRST window could be
+    // dropped and a later grown snapshot mistaken for it — routing a deep resume through the wrong (clamp)
+    // path. An unbounded buffer + DROP_OLDEST overflow guarantee the collector sees every snapshot IN ORDER
+    // (so the first non-null of a pass is genuinely its first window); reveal/anchor are low-rate → StateFlow.
+    val snapshotFlowOut = remember(document) {
+        MutableSharedFlow<com.vreader.app.reader.paged.TxtPageIndex?>(
+            replay = 1, extraBufferCapacity = 64, onBufferOverflow = BufferOverflow.SUSPEND,
+        )
+    }
     val revealFlowOut = remember(document) { MutableStateFlow<Int?>(null) }
     val capturedAnchorFlow = remember(document) { MutableStateFlow(0) }
     var openSeq by remember(document) { mutableStateOf(0) }
@@ -333,7 +345,7 @@ internal fun TxtPagedBody(
         // this reset it would replay the PREVIOUS generation's last snapshot, consuming the once-per-pass
         // clamp on stale data. A null is ignored by the collector, so the first NON-null it sees is genuinely
         // this pass's first window.
-        snapshotFlowOut.value = null
+        snapshotFlowOut.tryEmit(null)
         revealFlowOut.value = null
         openSeq += 1
         // NOTE `restored` is NOT set here. It flips to true only once the FIRST pass's resume anchor has
@@ -347,7 +359,7 @@ internal fun TxtPagedBody(
             isMarkdown = isMarkdown, resumeAnchorOffset = captured,
             // Off-main-safe: publish into the thread-safe flows ONLY (no Compose-state write here; the
             // callbacks may fire on a worker thread — the main collector marshals them into Compose state).
-            onSnapshot = { snapshot -> snapshotFlowOut.value = snapshot },
+            onSnapshot = { snapshot -> snapshotFlowOut.tryEmit(snapshot) },
             onReveal = { revealOffset -> revealFlowOut.value = revealOffset },
         )
     }
@@ -514,16 +526,19 @@ internal fun TxtPagedBody(
                         val recreationSettled = resumePage != null && settled == resumePage
                         val programmaticPending = localScrollTarget != null || (resumePage != null && !recreationSettled)
                         navigator.onPagerPageChanged(settled)
-                        // The deep-resume recreation has landed on its page → clear resumePage so a later user
-                        // swipe is no longer masked (and the save below persists the resumed page).
-                        if (recreationSettled) resumePage = null
-                        if (!programmaticPending) {
+                        if (recreationSettled) {
+                            // The deep-resume recreation has LANDED on its page → the first pass is now RESTORED
+                            // (Gate-4 R2: restored flips only after the resume lands), clear resumePage so a
+                            // later user swipe is no longer masked, and persist the resumed page.
+                            resumePage = null
+                            restored = true
                             onSaveSourceOffset(navigator.currentSourceOffset())
-                            // A settle with no pending programmatic scroll is a user swipe → the user has
-                            // taken over; a still-pending deep-resume reveal is now DROPPED (no yank). The
-                            // recreation-landed settle also passes here (resumePage just cleared) — harmless,
-                            // it persists the correct resumed page and marks the pass as interacted-past.
-                            if (settled > 0 && !recreationSettled) userInteractedSinceOpen = true
+                        } else if (!programmaticPending) {
+                            onSaveSourceOffset(navigator.currentSourceOffset())
+                            // A settle with no pending programmatic scroll is a user swipe → the user has taken
+                            // over; a still-pending deep-resume reveal is DROPPED by the reveal collector (no
+                            // yank) once it sees userInteractedSinceOpen.
+                            if (settled > 0) userInteractedSinceOpen = true
                         }
                         // Arm on-demand extension when nearing the frontier of a PARTIAL index (append-only;
                         // a complete index needs none). The collector below coalesces this into the session.
@@ -561,19 +576,24 @@ internal fun TxtPagedBody(
                             (live.pageCount > 0 && reveal.coerceAtLeast(0) < live.frontierSourceOffset)
                         if (!sealedThrough) return@collect            // leave pending; a later grown publish resolves it
                         val target = live.pageContaining(reveal)
+                        pendingResumeReveal = null                    // one-shot: consumed (landed or a no-op at 0)
                         if (target > 0 && pagerState.currentPage == 0) {
                             // Land the DEEP resume by RECREATING the pager on the resume page (Gate-2 R2
                             // Medium-4) rather than scrolling — a far scroll clamps to the pager's frame-lagged
                             // internal count and can settle short under load. Reflect the page in the navigator
                             // + persist it; the pager is reborn on `resumePage` with the current grown count.
+                            // `restored` is NOT flipped here — it flips only when the recreation SETTLES on its
+                            // page (the recreationSettled branch of the settled collector — Gate-4 R2), so the
+                            // invariant "restored flips only after the resume LANDS" holds and a spurious reflow
+                            // in the interim still re-captures the resume offset (via onPagerPageChanged above).
                             navigator.onPagerPageChanged(target)
                             resumePage = target
                             onSaveSourceOffset(navigator.currentSourceOffset())
+                        } else {
+                            // A no-op reveal (offset resolves to page 0, or the user already left page 0): there
+                            // is no recreation to await, so the first pass is RESTORED immediately.
+                            restored = true
                         }
-                        pendingResumeReveal = null                    // one-shot: consumed (landed or a no-op at 0)
-                        // The DEEP resume has landed (queued the pager recreation) → the first pass is RESTORED;
-                        // a later contentBox change is now a genuine reflow that re-captures the live page.
-                        restored = true
                     }
                 }
                 // feature #138 WI-5b — on-demand forward extension: when the reader nears the sealed frontier
@@ -595,7 +615,7 @@ internal fun TxtPagedBody(
                             // ensureMeasuredThrough hops to the measure dispatcher internally; publish the
                             // grown snapshot into the THREAD-SAFE hand-off flow so the MAIN collector mirrors
                             // it into Compose state + the navigator (never a background Compose-state write).
-                            snapshotFlowOut.value = extended
+                            snapshotFlowOut.tryEmit(extended)
                         }
                         extendThroughPage = null
                     }
