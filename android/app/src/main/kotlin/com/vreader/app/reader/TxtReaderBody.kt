@@ -301,14 +301,18 @@ internal fun TxtPagedBody(
     // navigator. `openSeq` distinguishes a fresh open / reflow generation so the main collector clamps the
     // FIRST snapshot of the current pass exactly once.
     //
-    // snapshotFlowOut is a NON-conflated buffered MutableSharedFlow (Gate-4 R2 High): a StateFlow conflates,
-    // so if the session republishes faster than the main collector drains, the true FIRST window could be
-    // dropped and a later grown snapshot mistaken for it — routing a deep resume through the wrong (clamp)
-    // path. An unbounded buffer + DROP_OLDEST overflow guarantee the collector sees every snapshot IN ORDER
-    // (so the first non-null of a pass is genuinely its first window); reveal/anchor are low-rate → StateFlow.
+    // snapshotFlowOut is a NON-conflated buffered MutableSharedFlow (Gate-4 R2/R3 High): a StateFlow
+    // conflates, so a fast republish burst could drop the true FIRST window and let a later grown snapshot
+    // be mistaken for it. A large buffer + DROP_OLDEST make every off-main `tryEmit` succeed WITHOUT
+    // suspending (the callback is a plain lambda that cannot suspend, and SUSPEND-overflow tryEmit silently
+    // drops), so the collector drains snapshots in order and the FINAL (complete) snapshot always lands. If a
+    // burst ever exceeds the buffer, DROP_OLDEST drops an INTERMEDIATE window — harmless: the frontier grows
+    // monotonically, so the clamp decision (anchor sealed in the first window the collector sees) stays
+    // correct (a shallow anchor is still sealed in a bigger window; a deep anchor still isn't → the reveal
+    // owns it), and append-only growth + the complete snapshot are preserved.
     val snapshotFlowOut = remember(document) {
         MutableSharedFlow<com.vreader.app.reader.paged.TxtPageIndex?>(
-            replay = 1, extraBufferCapacity = 64, onBufferOverflow = BufferOverflow.SUSPEND,
+            replay = 1, extraBufferCapacity = 256, onBufferOverflow = BufferOverflow.DROP_OLDEST,
         )
     }
     val revealFlowOut = remember(document) { MutableStateFlow<Int?>(null) }
@@ -577,7 +581,11 @@ internal fun TxtPagedBody(
                         if (!sealedThrough) return@collect            // leave pending; a later grown publish resolves it
                         val target = live.pageContaining(reveal)
                         pendingResumeReveal = null                    // one-shot: consumed (landed or a no-op at 0)
-                        if (target > 0 && pagerState.currentPage == 0) {
+                        // Also DROP the reveal if the user has an IN-PROGRESS drag from page 0 (Gate-4 R3
+                        // Medium): userInteractedSinceOpen is only set once a swipe SETTLES on a non-zero
+                        // page, so a drag that begins right as the anchor seals — before settledPage changes —
+                        // would otherwise be overridden by the recreation. isScrollInProgress catches that.
+                        if (target > 0 && pagerState.currentPage == 0 && !pagerState.isScrollInProgress) {
                             // Land the DEEP resume by RECREATING the pager on the resume page (Gate-2 R2
                             // Medium-4) rather than scrolling — a far scroll clamps to the pager's frame-lagged
                             // internal count and can settle short under load. Reflect the page in the navigator
