@@ -328,6 +328,12 @@ internal fun TxtPagedBody(
         pendingResumeReveal = null
         userInteractedSinceOpen = false
         capturedAnchorFlow.value = captured
+        // Reset BOTH hand-off flows to null for the new pass BEFORE bumping openSeq (Gate-4 High-1): the
+        // snapshot collector restarts on the openSeq change and re-emits the flow's CURRENT value — without
+        // this reset it would replay the PREVIOUS generation's last snapshot, consuming the once-per-pass
+        // clamp on stale data. A null is ignored by the collector, so the first NON-null it sees is genuinely
+        // this pass's first window.
+        snapshotFlowOut.value = null
         revealFlowOut.value = null
         openSeq += 1
         // NOTE `restored` is NOT set here. It flips to true only once the FIRST pass's resume anchor has
@@ -357,6 +363,15 @@ internal fun TxtPagedBody(
     LaunchedEffect(snapshotFlowOut, openSeq) {
         snapshotFlowOut.collect { snapshot ->
             if (snapshot == null) return@collect
+            // Append-only guard (Gate-4 Medium): WITHIN a pass the sealed count only GROWS. An on-demand
+            // ensureMeasuredThrough returns a snapshot captured before a concurrent background append may
+            // have advanced further, so installing it could transiently SHRINK pageCount. Drop a snapshot
+            // that is smaller than the one already installed for THIS pass (never on the pass's FIRST
+            // snapshot — a reflow legitimately replaces the index with a possibly-smaller count).
+            if (clampedForSeq == openSeq && !snapshot.isComplete) {
+                val current = index
+                if (current != null && !current.isDegenerate && snapshot.pageCount < current.pageCount) return@collect
+            }
             navigator.setIndex(snapshot)
             index = snapshot
             // The clamp decision is made EXACTLY ONCE per pass, on the FIRST published snapshot of that pass
@@ -490,17 +505,25 @@ internal fun TxtPagedBody(
                 LaunchedEffect(pagerState, idx) {
                     snapshotFlow { pagerState.settledPage }.collect { settled ->
                         // A settle is PROGRAMMATIC (not a user swipe) while a reflow clamp / on-demand-extend
-                        // scroll is queued (localScrollTarget) OR the deep-resume reveal is still driving the
-                        // pager toward its target (pendingResumeReveal) — the reveal uses requestScrollToPage,
-                        // not localScrollTarget, so it must be included here or the reveal's OWN scroll would
-                        // be misread as a user swipe and drop the reveal before it lands (Gate-2 R2 High 1).
-                        val programmaticPending = localScrollTarget != null || pendingResumeReveal != null
+                        // scroll is queued (localScrollTarget) OR a deep-resume pager RECREATION is in flight
+                        // (resumePage != null — the recreated pager is BORN on that page, so its first settle
+                        // there is programmatic, not a swipe). NOTE it is NOT keyed on `pendingResumeReveal`
+                        // (Gate-4 High-2): while the reveal is merely ARMED-and-waiting (the anchor not yet
+                        // sealed) the pager still sits on page 0, so a REAL user swipe in that window must
+                        // register + drop the reveal — suppressing it would let the reveal later yank the user.
+                        val recreationSettled = resumePage != null && settled == resumePage
+                        val programmaticPending = localScrollTarget != null || (resumePage != null && !recreationSettled)
                         navigator.onPagerPageChanged(settled)
+                        // The deep-resume recreation has landed on its page → clear resumePage so a later user
+                        // swipe is no longer masked (and the save below persists the resumed page).
+                        if (recreationSettled) resumePage = null
                         if (!programmaticPending) {
                             onSaveSourceOffset(navigator.currentSourceOffset())
                             // A settle with no pending programmatic scroll is a user swipe → the user has
-                            // taken over; a still-pending deep-resume reveal is now DROPPED (no yank).
-                            if (settled > 0) userInteractedSinceOpen = true
+                            // taken over; a still-pending deep-resume reveal is now DROPPED (no yank). The
+                            // recreation-landed settle also passes here (resumePage just cleared) — harmless,
+                            // it persists the correct resumed page and marks the pass as interacted-past.
+                            if (settled > 0 && !recreationSettled) userInteractedSinceOpen = true
                         }
                         // Arm on-demand extension when nearing the frontier of a PARTIAL index (append-only;
                         // a complete index needs none). The collector below coalesces this into the session.
@@ -511,19 +534,18 @@ internal fun TxtPagedBody(
                     }
                 }
                 // feature #138 WI-5b — the CONDITIONAL deep-resume reveal collector (Gate-2 R2 High 1), a
-                // STICKY re-asserting one-shot DISTINCT from localScrollTarget: `pendingResumeReveal` is the
-                // resume SOURCE OFFSET the session armed once the deep anchor's page first sealed. This
-                // collector re-runs on EVERY index publish (keyed on idx) and:
+                // one-shot DISTINCT from localScrollTarget: `pendingResumeReveal` is the resume SOURCE OFFSET
+                // the session armed once the deep anchor's page first sealed. This collector re-runs on every
+                // index publish (keyed on idx) and:
                 //   • DROPS the reveal (no yank) the instant the user has taken over (userInteractedSinceOpen);
-                //   • LEAVES it pending while the offset is still beyond the published frontier (never scrolls
-                //     to a clamped last-sealed page — the hazard localScrollTarget's consumer has);
-                //   • once the offset is genuinely sealed, RE-REQUESTS a scroll to pageContaining(offset) on
-                //     each publish UNTIL the pager actually reaches that page, then clears. Re-asserting is
-                //     load-bearing: the pager's own pageCount lags a fresh republish by a frame, so a single
-                //     requestScrollToPage(farPage) right after a grow can clamp SHORT (land on an earlier
-                //     page) — re-issuing on the next publish lands it exactly. It scrolls only while the pager
-                //     is still on the doc-start default region (currentPage < target), so it never fights the
-                //     user or overshoots.
+                //   • LEAVES it pending while the offset is still beyond the published frontier (never lands on
+                //     a clamped last-sealed page — the hazard localScrollTarget's consumer has);
+                //   • once the offset is genuinely sealed AND the pager is still on the doc-start page 0, LANDS
+                //     the deep resume by RECREATING the pager on pageContaining(offset) (setting `resumePage`
+                //     → the pager is reborn there with the current grown count). Recreation is robust where a
+                //     far scroll is not: a requestScrollToPage(farPage) clamps to the pager's frame-lagged
+                //     internal count and can settle SHORT under load; a pager BORN on the resume page lands
+                //     exactly. One-shot (cleared after it acts), so it never fights the user or overshoots.
                 LaunchedEffect(pagerState, idx) {
                     snapshotFlow { pendingResumeReveal }.collect { reveal ->
                         if (reveal == null) return@collect
@@ -633,7 +655,17 @@ internal fun TxtPagedBody(
                             session.ensureMeasuredThrough(offset)
                         } else null
                         withContext(Dispatchers.Main) {
-                            if (extended != null) { navigator.setIndex(extended); index = extended }
+                            // Install the extended snapshot only if it does NOT shrink the count (Gate-4
+                            // Medium — a concurrent background append may have grown past what
+                            // ensureMeasuredThrough returned); the newer (larger) snapshot the background
+                            // collector installs still covers this offset, so resolving over `navigator.index`
+                            // stays correct either way.
+                            if (extended != null) {
+                                val cur = navigator.index
+                                if (cur == null || cur.isDegenerate || extended.pageCount >= cur.pageCount) {
+                                    navigator.setIndex(extended); index = extended
+                                }
+                            }
                             navigator.jumpToOffset(offset)
                             val target = navigator.consumePendingScrollTarget() ?: navigator.pageContaining(offset)
                             if (target != pagerState.currentPage) {

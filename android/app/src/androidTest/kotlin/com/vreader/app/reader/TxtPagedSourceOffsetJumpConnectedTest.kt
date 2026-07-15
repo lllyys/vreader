@@ -100,6 +100,26 @@ class TxtPagedSourceOffsetJumpConnectedTest {
         return p
     }
 
+    private fun ActivityScenario<TxtReaderActivity>.pageCount(): Int {
+        var c = 0; onActivity { c = it.pagedPageCountForTest() ?: 0 }; return c
+    }
+
+    /** feature #138 WI-5b — the paged index is now published WINDOWED: at open it may be PARTIAL (only the
+     *  first sealed window), so `pageContaining(farOffset)` clamps to the last sealed page until the
+     *  background completion pass finishes. Poll until the sealed count STOPS growing so a far offset
+     *  resolves to its FINAL page (a fresh open on a loaded class run stretches that window — MEMORY #133). */
+    private fun ActivityScenario<TxtReaderActivity>.awaitCompleteIndex(timeoutMs: Long = 20_000): Int {
+        var stable = 0
+        var lastSeen = -1
+        compose.waitUntil(timeoutMs) {
+            val now = pageCount()
+            if (now > 0 && now == lastSeen) stable++ else stable = 0
+            lastSeen = now
+            stable >= 3
+        }
+        return lastSeen
+    }
+
     private fun ActivityScenario<TxtReaderActivity>.docLength(): Int {
         var l = 0
         onActivity { l = it.pagedDocLengthForTest() }
@@ -124,6 +144,7 @@ class TxtPagedSourceOffsetJumpConnectedTest {
     fun nearSourceOffsetJump_landsOnPageContaining() {
         openPaged().use { scenario ->
             assertEquals("opens on page 0", 0, scenario.currentPage())
+            scenario.awaitCompleteIndex()   // WI-5b: resolve pageContaining on the COMPLETE (not partial) index
             val length = scenario.docLength()
             assertTrue("document has text", length > 0)
             // ~15% in — a modest offset that still resolves to a page beyond 0 for this sample.
@@ -132,7 +153,7 @@ class TxtPagedSourceOffsetJumpConnectedTest {
             assertTrue("a modest offset resolves to a real page", expected >= 0)
 
             scenario.onActivity { it.pagedJumpToOffsetForTest(offset) }
-            compose.waitUntil(15_000) { scenario.currentPage() == expected }
+            compose.waitUntil(25_000) { scenario.currentPage() == expected }
             assertEquals("source-offset jump landed on pageContaining(offset)", expected, scenario.currentPage())
         }
     }
@@ -142,6 +163,10 @@ class TxtPagedSourceOffsetJumpConnectedTest {
     @Test
     fun farSourceOffsetJump_landsExactlyOnPageContaining() {
         openPaged().use { scenario ->
+            // WI-5b: the index is now published WINDOWED, so a far offset's page is only known once the
+            // background completion (or the jump's own ensureMeasuredThrough) has sealed through it. Wait
+            // for the complete index so `expected` is the FINAL page, then jump + poll for convergence.
+            scenario.awaitCompleteIndex()
             val length = scenario.docLength()
             // ~80% in — a deep offset; on the complete index it maps to a definite non-zero page.
             val offset = (length * 80) / 100
@@ -149,7 +174,7 @@ class TxtPagedSourceOffsetJumpConnectedTest {
             assertTrue("a deep offset is a non-zero page", expected > 0)
 
             scenario.onActivity { it.pagedJumpToOffsetForTest(offset) }
-            compose.waitUntil(15_000) { scenario.currentPage() == expected }
+            compose.waitUntil(25_000) { scenario.currentPage() == expected }
             assertEquals("far source-offset jump landed exactly on pageContaining(offset)", expected, scenario.currentPage())
         }
     }
@@ -158,13 +183,14 @@ class TxtPagedSourceOffsetJumpConnectedTest {
     @Test
     fun sourceOffsetJumpRoundTrip_returnsToPageZero() {
         openPaged().use { scenario ->
+            scenario.awaitCompleteIndex()   // WI-5b: resolve the far page on the COMPLETE index
             val length = scenario.docLength()
             val offset = (length * 70) / 100
             val expected = scenario.pageContaining(offset)
             assertTrue("deep offset is a non-zero page", expected > 0)
 
             scenario.onActivity { it.pagedJumpToOffsetForTest(offset) }
-            compose.waitUntil(15_000) { scenario.currentPage() == expected }
+            compose.waitUntil(25_000) { scenario.currentPage() == expected }
             assertEquals(expected, scenario.currentPage())
 
             // Jump back to the document start (offset 0) → page 0.
