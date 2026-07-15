@@ -82,8 +82,12 @@ class PaginationSession(
     /** The latest published immutable snapshot (null before the first window / after a fresh open). */
     private val published = AtomicReference<TxtPageIndex?>(null)
 
-    // --- mutation state — cursor/sealedStarts/docEnd touched ONLY under [mutex]; generation + token
-    //     are @Volatile so supersede() (synchronous) is visible to the in-flight measuring loop. ------
+    // --- mutation state — cursor/sealedStarts/docEnd touched ONLY under [mutex]. The generation + token
+    //     pair is guarded by its OWN monitor [genLock] so the synchronous supersede() and the
+    //     openFromStart generation-seed are atomic w.r.t. each other (a supersede can never interleave
+    //     between the ++generation and the token swap). Reads by the measuring loop are @Volatile so the
+    //     bump is visible immediately. ---------------------------------------------------------------
+    private val genLock = Any()
     private var cursor: MeasureCursor? = null
     private var sealedStarts: MutableList<Int> = ArrayList()
     private var docEndExclusive: Int = 0
@@ -122,10 +126,14 @@ class PaginationSession(
         mutex.withLock {
             lockHeld.set(true)
             try {
-                activeToken?.cancel()
-                myGeneration = ++generation
-                val token = PaginationToken()
-                activeToken = token
+                // Bump the generation + swap the token ATOMICALLY (under genLock) so a concurrent
+                // supersede() can never interleave and leave a stale token on the newer generation.
+                myGeneration = synchronized(genLock) {
+                    activeToken?.cancel()
+                    val g = ++generation
+                    activeToken = PaginationToken()
+                    g
+                }
                 cursor = paginator.freshCursor(document, style, contentBox, measurer, isMarkdown)
                 sealedStarts = ArrayList()
                 docEndExclusive = document.text.length
@@ -185,8 +193,15 @@ class PaginationSession(
             }
             // Publish AFTER releasing the lock, re-checking the generation IMMEDIATELY before the store
             // so a supersede/reflow in the gap drops it.
-            if (step.publish && step.snapshot != null && step.gen == generation) published.set(step.snapshot)
-            if (step.done) return step.snapshot ?: published.get() ?: buildEmptySnapshot()
+            val stillCurrent = step.gen == generation
+            if (step.publish && step.snapshot != null && stillCurrent) published.set(step.snapshot)
+            if (step.done) {
+                // If the generation moved on (a supersede/reflow superseded THIS extend), never RETURN
+                // the stale snapshot — the navigator would install it. Return the newest published
+                // snapshot instead (or an empty one before any window of the new generation).
+                return if (stillCurrent) (step.snapshot ?: published.get() ?: buildEmptySnapshot())
+                else (published.get() ?: buildEmptySnapshot())
+            }
         }
     }
 
@@ -200,9 +215,11 @@ class PaginationSession(
      * (visible immediately) before every measure step and every publish.
      */
     fun supersede() {
-        activeToken?.cancel()
-        activeToken = null
-        generation++
+        synchronized(genLock) {
+            activeToken?.cancel()
+            activeToken = null
+            generation++
+        }
     }
 
     // --- the coalesced background completion loop ----------------------------------------------
@@ -229,7 +246,14 @@ class PaginationSession(
                     if (myGeneration != generation) return@withLock null   // superseded → stop
                     val c = cursor ?: return@withLock null
                     val token = activeToken ?: return@withLock null
-                    if (c.isComplete) return@withLock StepResult(buildSnapshot(c), complete = true, revealNow = false)
+                    if (c.isComplete) {
+                        // A concurrent ensureMeasuredThrough may have completed the pass (sealing THROUGH
+                        // the anchor) before this loop iteration ran. Still evaluate the reveal so it is
+                        // not missed on that completion path.
+                        val revealOnComplete = revealDue(c, resumeAnchorOffset)
+                        if (revealOnComplete) revealFired = true
+                        return@withLock StepResult(buildSnapshot(c), complete = true, revealNow = revealOnComplete)
+                    }
                     val localStarts = ArrayList<Int>()
                     val advanced = try {
                         paginator.measurePages(c, windowPages, token) { localStarts.add(it) }
@@ -244,12 +268,7 @@ class PaginationSession(
                     if (myGeneration != generation) return@withLock null
                     sealedStarts.addAll(localStarts)
                     cursor = advanced
-                    val revealNow = !revealFired &&
-                        resumeAnchorOffset > 0 &&
-                        isOffsetSealed(advanced, resumeAnchorOffset) &&
-                        // NOT the first published snapshot of THIS generation: if the very first window
-                        // already covers the anchor, the body has it — no deep-resume auto-scroll.
-                        published.get() != null
+                    val revealNow = revealDue(advanced, resumeAnchorOffset)
                     if (revealNow) revealFired = true
                     StepResult(buildSnapshot(advanced), complete = advanced.isComplete, revealNow = revealNow)
                 } finally {
@@ -273,6 +292,18 @@ class PaginationSession(
 
     /** One background/on-demand step's result: the snapshot to publish + terminal + reveal flags. */
     private data class StepResult(val snapshot: TxtPageIndex, val complete: Boolean, val revealNow: Boolean)
+
+    /**
+     * True when the resume-anchor reveal is DUE this step (called under [mutex]): the anchor page is
+     * now sealed in [c], the anchor is a genuine deep anchor (> 0), the reveal has not already fired,
+     * AND this is NOT the FIRST published snapshot of this generation (an anchor already in the first
+     * window is contained in that first snapshot — the body has it, no deep-resume auto-scroll needed).
+     */
+    private fun revealDue(c: MeasureCursor, resumeAnchorOffset: Int): Boolean =
+        !revealFired &&
+            resumeAnchorOffset > 0 &&
+            isOffsetSealed(c, resumeAnchorOffset) &&
+            published.get() != null
 
     /** Build the immutable sealed-partial [TxtPageIndex] from the current sealed starts + cursor. */
     private fun buildSnapshot(c: MeasureCursor): TxtPageIndex {

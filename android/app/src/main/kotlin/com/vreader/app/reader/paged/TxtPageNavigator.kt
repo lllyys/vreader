@@ -275,10 +275,12 @@ class TxtPageNavigator(private val paginator: TxtPaginator) {
         val target = newIndex.pageContaining(capturedOffset)
         currentPage = target
         // Only queue a programmatic scroll when the captured offset is genuinely covered — never to a
-        // clamped last-sealed page while the frontier is still short of the anchor.
+        // clamped last-sealed page while the frontier is still short of the anchor. When it is NOT yet
+        // sealed, CLEAR any stale pending target so the pager never consumes an old target against this
+        // new partial index (the correct scroll lands on a later, sealed snapshot).
         val anchorSealed = newIndex.isComplete ||
             (newIndex.pageCount > 0 && capturedOffset.coerceAtLeast(0) < newIndex.frontierSourceOffset)
-        if (anchorSealed) pendingScrollTarget = target
+        pendingScrollTarget = if (anchorSealed) target else null
     }
 
     // --- helpers -------------------------------------------------------------------------------
