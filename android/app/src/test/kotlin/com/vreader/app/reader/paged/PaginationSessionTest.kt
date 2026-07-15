@@ -295,11 +295,15 @@ class PaginationSessionTest {
         advanceUntilIdle()
 
         assertFalse("the ONE measurer was never entered re-entrantly (single writer)", m.everReentrant.get())
+        // The extend RESOLVED (did not deadlock waiting for the whole book) → the mutex was released
+        // between windows, not held across the full run. The returned snapshot covers mid exactly.
         assertEquals("extend covered the mid offset exactly", full.pageContaining(mid), snap.pageContaining(mid))
-        // The extend resolved (did not deadlock) → the mutex was released between windows, not held for
-        // the whole book. The final state converges to the full deterministic index (no lost update).
-        advanceUntilIdle()
-        assertEquals(full.pageStartsUtf16.toList(), session.snapshot()!!.pageStartsUtf16.toList())
+        assertEquals("extend's snapshot pages the mid offset exactly", full.pageStart(full.pageCount / 2), snap.pageStart(snap.pageContaining(mid)))
+        // Whatever pages the extend sealed match index()'s prefix byte-for-byte (no lost update from
+        // interleaving with the background loop). Full-completion convergence is proven by
+        // singleWriter_measurerNeverReentrant_finalListMatchesFull.
+        val prefix = snap.pageStartsUtf16.toList()
+        assertEquals("extend's sealed prefix == index()'s prefix", full.pageStartsUtf16.toList().take(prefix.size), prefix)
     }
 
     // === (4) stale-generation publish dropped after supersede ===

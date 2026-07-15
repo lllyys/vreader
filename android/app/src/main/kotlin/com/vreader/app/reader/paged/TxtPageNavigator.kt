@@ -260,14 +260,25 @@ class TxtPageNavigator(private val paginator: TxtPaginator) {
         }
     }
 
-    /** Install a session snapshot during a reflow: set the index + clamp the position to the anchor. */
+    /**
+     * Install a session snapshot during a reflow: set the index + clamp the position to the anchor.
+     * Issue a [pendingScrollTarget] ONLY once the captured offset is actually SEALED (within the
+     * snapshot's frontier), OR the snapshot is complete — so a PARTIAL snapshot whose frontier is short
+     * of the captured offset does NOT enqueue a scroll to a clamped (wrong, transient) last-sealed page
+     * (the pager would visibly chase the growing frontier). `currentPage` still clamps so the index
+     * stays consistent; the real scroll lands once the anchor's page is known.
+     */
     private fun installReflowSnapshot(newIndex: TxtPageIndex, capturedOffset: Int) {
         index = newIndex
         // Clamp to the page containing the captured source offset — count grown OR shrank, degenerate
         // or empty (pageContaining returns 0 for a zero-page index — safe degrade, no crash).
         val target = newIndex.pageContaining(capturedOffset)
         currentPage = target
-        pendingScrollTarget = target
+        // Only queue a programmatic scroll when the captured offset is genuinely covered — never to a
+        // clamped last-sealed page while the frontier is still short of the anchor.
+        val anchorSealed = newIndex.isComplete ||
+            (newIndex.pageCount > 0 && capturedOffset.coerceAtLeast(0) < newIndex.frontierSourceOffset)
+        if (anchorSealed) pendingScrollTarget = target
     }
 
     // --- helpers -------------------------------------------------------------------------------
