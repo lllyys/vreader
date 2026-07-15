@@ -376,7 +376,8 @@ internal fun TxtPagedBody(
                 // via the navigator's `jumpToOffset(offset)` overload (`pageContaining` over the current
                 // whole-doc index; it sets currentPage + queues pendingScrollTarget), then scroll the pager
                 // + persist the new page-start offset, then clear the request via [onJumpConsumed]. The
-                // source→page conversion moved OFF the host UI thread into here (WI-5a). Beyond the sealed
+                // source→page conversion moved OUT of the host chrome callback into this body effect (WI-5a;
+                // both still run on main — the point is the seam no longer eagerly resolves the page). Beyond the sealed
                 // frontier of a PARTIAL session index the landing would be EVENTUAL — that async path is
                 // WI-5b; here the index is complete so the resolution is exact + immediate.
                 // `jumpToSourceOffset` is a plain parameter — read it through rememberUpdatedState so the
