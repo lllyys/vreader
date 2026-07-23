@@ -101,5 +101,45 @@ EMPTY="$TMP/empty.sh"; printf '#!/usr/bin/env bash\necho "{\\"devices\\":{}}"\n'
 OUT="$(env LOCK_OWNER_PID=$$ SIM_LEASE_LOCK_ROOT="$TMP/locks2" SIM_LEASE_STATE_DIR="$TMP/state2" SIM_LEASE_DISCOVER_CMD="$EMPTY" SIM_LEASE_BOOT_CMD="$BOOT" bash "$CLI" acquire test 2>&1)"; RC=$?
 if [ "$RC" -eq 1 ]; then ok "no available sims → exit 1"; else fail "empty pool (rc=$RC): $OUT"; fi
 
+echo "== sim-lease.sh android emulator leases (feature #138 follow-up) =="
+# Android emulator discovery injected via ANDROID_DEVICES_CMD (no real adb). Two online emulators.
+ADEV_TWO="$TMP/adev2.sh"; printf '#!/usr/bin/env bash\nprintf "List of devices attached\\nemulator-5554\\tdevice\\nemulator-5556\\tdevice\\n"\n' > "$ADEV_TWO"; chmod +x "$ADEV_TWO"
+ADEV_NONE="$TMP/adev0.sh"; printf '#!/usr/bin/env bash\nprintf "List of devices attached\\n"\n' > "$ADEV_NONE"; chmod +x "$ADEV_NONE"
+arun() { env LOCK_OWNER_PID=$$ SIM_LEASE_LOCK_ROOT="$TMP/alocks" SIM_LEASE_STATE_DIR="$TMP/astate" ANDROID_DEVICES_CMD="$1" bash "$CLI" "${@:2}" 2>&1; }
+
+# 8. two android leases resolve to DISTINCT online serials
+A1="$(arun "$ADEV_TWO" acquire android | grep -oE 'emulator-[0-9]+' | head -1)"
+A2="$(arun "$ADEV_TWO" acquire android | grep -oE 'emulator-[0-9]+' | head -1)"
+if [ -n "$A1" ] && [ -n "$A2" ] && [ "$A1" != "$A2" ]; then ok "two android leases → distinct serials ($A1,$A2)"; else fail "android leases A1=$A1 A2=$A2"; fi
+
+# 9. capacity = online emulator count: a third acquire with both leased → BUSY exit 2
+OUT="$(arun "$ADEV_TWO" acquire android)"; RC=$?
+if [ "$RC" -eq 2 ]; then ok "android capacity = online count (2) → third BUSY"; else fail "android cap (rc=$RC): $OUT"; fi
+
+# 10. no online emulator → ERROR exit 1 (no boot-on-demand)
+OUT="$(arun "$ADEV_NONE" acquire android)"; RC=$?
+if [ "$RC" -eq 1 ]; then ok "no online emulator → ERROR exit 1"; else fail "android none (rc=$RC): $OUT"; fi
+
+# 11. release both serials → zero held
+arun "$ADEV_TWO" release "$A1" >/dev/null; arun "$ADEV_TWO" release "$A2" >/dev/null
+OUT="$(arun "$ADEV_TWO" status)"
+if ! grep -q "held" <<<"$OUT"; then ok "android leases released → zero held"; else fail "android leases left: $OUT"; fi
+
+# 12. a FAILING device command (adb missing / errors) → graceful ERROR + RESULT line, NOT a silent
+#     set -e exit (Gate-4 Medium: `serials="$(list_emulators)"` must not crash the script).
+OUT="$(arun "false" acquire android)"; RC=$?
+if [ "$RC" -eq 1 ] && grep -q "SIM-LEASE RESULT: ERROR" <<<"$OUT"; then ok "failing device cmd → ERROR + RESULT line (no silent set -e exit)"; else fail "failing device cmd (rc=$RC): $OUT"; fi
+
+# 13. CONCURRENCY: 4 concurrent `acquire android` on 2 online emulators → exactly 2 winners (the same
+#     SELECT_LOCK serializes discovery+capacity+lease for android as for test — mirrors race test 6b).
+AWINS="$TMP/arace-wins"; : > "$AWINS"
+for i in 1 2 3 4; do
+    ( env LOCK_OWNER_PID=$$ SIM_LEASE_LOCK_ROOT="$TMP/alocks-race" SIM_LEASE_STATE_DIR="$TMP/astate-race" \
+        ANDROID_DEVICES_CMD="$ADEV_TWO" bash "$CLI" acquire android >> "$AWINS" 2>/dev/null ) &
+done
+wait
+ARACE_OK=$(grep -c "ACQUIRED android" "$AWINS" || true)
+if [ "$ARACE_OK" -eq 2 ]; then ok "4-way android race → exactly 2 leases (capacity = online count)"; else fail "android race: $ARACE_OK winners"; fi
+
 echo
 if [ "$fails" -eq 0 ]; then echo "ALL PASS"; exit 0; else echo "$fails FAILURE(S)"; exit 1; fi

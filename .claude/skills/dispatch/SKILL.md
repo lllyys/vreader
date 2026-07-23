@@ -27,8 +27,11 @@ docs sync) and all policy decisions. Lanes never decide anything.
    `dispatch` lock**, released when the inline flow finishes.
 4. **Width**: default 1 lane; open a second ONLY with memory headroom —
    check `vm_stat` free+inactive pages ≳ 4GB equivalent. Hard cap 2.
-   `android-app`/`android-spike` items always width 1 (no ANDROID_SERIAL
-   routing yet).
+   `android-app`/`android-spike` items are width 1 **in practice** because only
+   one AVD is booted by default (the `android` lease capacity = online-emulator
+   count). Routing exists — `run-android-tests.sh` honors `ANDROID_SERIAL` and
+   `sim-lease.sh acquire android` leases a distinct serial — so width 2 is
+   possible once a **second AVD** is booted (rule 55 Android tier / rule 52).
 
 ## Step 1 — intake + the ephemeral ledger
 
@@ -37,7 +40,7 @@ tracker rows, GH gate-timeline comments, `git worktree list`,
 `scripts/sim-lease.sh status`, `scripts/agent-lock.sh status`):
 
 ```
-| item | branch | write-set | UDID | status | verdict/version |
+| item | branch | write-set | device (UDID or emulator serial) | status | verdict/version |
 ```
 
 Statuses: dispatched → returned → integrating → merged | requeued | escalated.
@@ -68,8 +71,11 @@ For each candidate item:
 
 Per item, in order: main tree clean (pbxproj signing carve-out excepted) →
 `scripts/worktree-setup.sh <id> <branch>` (records the ABSOLUTE path) →
-GH issue exists with `GH: #N` stamped → `scripts/sim-lease.sh acquire test`
-(record UDID in the ledger) → brief generated from the template below.
+GH issue exists with `GH: #N` stamped → **lease the device by platform**
+(`code_paths_platform`): an iOS/`shared` item → `scripts/sim-lease.sh acquire
+test` (record the UDID); an `android-app`/`android-spike` item →
+`scripts/sim-lease.sh acquire android` (record the `emulator-NNNN` SERIAL) →
+brief generated from the template below.
 
 ## Step 3 — the lane brief (generated, NEVER hand-written)
 
@@ -99,15 +105,19 @@ the interest of brevity.
 ```
 
 2. The six-field contract instantiated (objective = the one item; inputs =
-   Spec block or micro-spec + exact file list + leased `TEST_UDID`; allowed
-   writes = the `writes:` prefixes; forbidden = rule 55's shared surfaces +
-   "no Bash file edits" + nothing outside the write-set; output = the
-   rule-55 HANDOFF JSON; stop = ready-for-integration or blocked).
+   Spec block or micro-spec + exact file list + the leased device: `TEST_UDID`
+   for iOS/`shared`, or `ANDROID_SERIAL=<emulator-NNNN>` for an Android item;
+   allowed writes = the `writes:` prefixes; forbidden = rule 55's shared
+   surfaces + "no Bash file edits" + nothing outside the write-set; output =
+   the rule-55 HANDOFF JSON; stop = ready-for-integration or blocked).
 3. **Skill-override clause**: the lane contract OVERRIDES any standing
    skill phases — no PR creation, no tracker edits, no close-gate, no
    version bump, no `git tag`; STOP at ready-for-integration + HANDOFF.
-4. Test gate shape: `TEST_UDID=<udid> scripts/run-tests.sh <targeted-suite>`
-   (Android: `scripts/run-android-tests.sh`) — wrappers only, targeted only.
+4. Test gate shape: iOS/`shared` → `TEST_UDID=<udid> scripts/run-tests.sh
+   <targeted-suite>`; Android → `ANDROID_SERIAL=<emulator-NNNN> ANDROID_CMD="…"
+   scripts/run-android-tests.sh` (the runner validates + re-exports the serial,
+   so the connected task targets the leased emulator). Wrappers only, targeted
+   only — never a bare `xcodebuild`/`gradle`.
 5. Gate-4 ladder (probed 2026-07-09): `scripts/run-codex.sh` (rule 53) is
    the lanes' PRIMARY audit rung — custom agents have no Skill tool
    (probe: "Skill exists but is not enabled in this context") — artifact
@@ -133,7 +143,8 @@ contamination check (both probes — see "Contamination checks" below).
 
 **One cleanup routine for EVERY non-ready outcome** (invalid HANDOFF,
 missing HANDOFF, `outcome: failed`, `outcome: blocked`): release the lane's
-lease (`scripts/sim-lease.sh release <udid>`), tear down the worktree
+lease (`scripts/sim-lease.sh release <udid-or-serial>` — the ledger's device
+column, whichever kind the lane leased), tear down the worktree
 (`scripts/worktree-teardown.sh <id>` — or preserve it with an explicit
 "preserved for investigation" ledger note when the failure needs forensics),
 update the ledger row, THEN requeue-once (fresh lane) or escalate per cause.
@@ -149,9 +160,10 @@ a. `scripts/check-write-set.sh <worktree> <declared-prefixes>` (+
 b. Rebase the branch on `origin/main` IN the worktree. Conflict ⇒
    `git rebase --abort`, requeue for serialized redo (fresh lane brief:
    "rebase onto current main and resolve"), no version burned, no PR.
-c. Independent re-run of the lane's declared targeted suite
-   (`TEST_UDID=<its udid> scripts/run-tests.sh <suite>`) — never trust the
-   HANDOFF's RESULT line.
+c. Independent re-run of the lane's declared targeted suite — never trust the
+   HANDOFF's RESULT line. iOS/`shared`: `TEST_UDID=<its udid>
+   scripts/run-tests.sh <suite>`; Android: `ANDROID_SERIAL=<its serial>
+   ANDROID_CMD="…" scripts/run-android-tests.sh`.
 d. Apply `tracker_edit` + `docs_sync` yourself via Edit **on files under
    `<worktree>/`** (e.g. `<worktree>/docs/bugs.md`), committed on the lane
    branch with `git -C <worktree> commit` — the tracker/docs deltas ride
@@ -183,7 +195,9 @@ g. **Tag per PR, immediately**: on the MAIN checkout `git pull --rebase`
    single batch-end tag pass (rule 40: every PR's bump gets its tag on
    its own merge commit; a batch-end pass can miss earlier PRs and
    corrupts version-at-slot's latest-tag input for the NEXT slot).
-h. Lane cleanup: `scripts/sim-lease.sh release <udid>` +
+h. Lane cleanup: `scripts/sim-lease.sh release <udid-or-serial>` (the
+   ledger's device column — an Android lane's `emulator-NNNN` serial lease
+   releases through the same command) +
    `scripts/worktree-teardown.sh <id> --delete-branch` (post-merge).
    Batch ends with `sim-lease.sh status` clean.
 
@@ -219,6 +233,15 @@ transcripts, or plan bodies (Spec blocks + HANDOFFs only). You never run
 rows (grep, never a full Read of the 499KB tracker), one-line gh results,
 `RUN-* RESULT:` lines, `--name-only` lists, `<worktree>/.reports/` paths
 (pass them on, don't open them).
+
+## Within-WI fan-out is the ORCHESTRATOR's, never the lane's (rule 57)
+
+A lane is a restricted-tool `implementer` subagent — no `Agent`/Workflow tool, and Workflow nesting
+is one level — so a lane CANNOT fan out. Under ultracode, the analytical fan-out that rule 57
+mandates (parallel context sweep, pre-write adversarial brainstorm, deep+broad audit) is front-loaded
+by the **orchestrator** *before* dispatch (it already owns Gate-2's deep+broad plan audit) and folded
+into the generated lane brief's Spec block. The lane then authors solo against a pre-hardened spec.
+Never expect a lane to run a Workflow.
 
 ## Escalation
 

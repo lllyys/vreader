@@ -10,7 +10,13 @@
 #    owner, one completion channel; the watchdog is cancelled the instant the
 #    run finishes, so it never outlives this invocation.
 #  - Emits ONE unambiguous final line:
-#    "RUN-ANDROID-TESTS RESULT: SUCCEEDED|FAILED|TIMEOUT|NO_EMULATOR".
+#    "RUN-ANDROID-TESTS RESULT: SUCCEEDED|FAILED|TIMEOUT|NO_EMULATOR|AMBIGUOUS_SERIAL".
+#  - Targets a SPECIFIC emulator via ANDROID_SERIAL (validated + exported), so
+#    two AVDs never race on an ambiguous `adb` (feature #138 follow-up — rule 52
+#    Cause D / rule 55 Android tier). Create a 2nd AVD for parallel runs with:
+#      avdmanager create avd -n vreader-test-2 -k "system-images;android-35;google_apis;arm64-v8a"
+#      emulator -avd vreader-test-2 -no-snapshot-save &   # boots as emulator-5556
+#    then pass ANDROID_SERIAL=emulator-5556 to route a run to it.
 #
 # Target: until feature #106's `android/` app shell exists there is NO root
 # `./gradlew` — the only real Android target is the Spike-B harness, so this
@@ -22,6 +28,8 @@
 #   ANDROID_CMD="./gradlew :app:testDebugUnitTest" scripts/run-android-tests.sh   # post-#106
 #   ANDROID_CMD="true" scripts/run-android-tests.sh       # contract self-test
 #   TIMEOUT_SECS=600 scripts/run-android-tests.sh
+#   ANDROID_SERIAL=emulator-5556 ANDROID_CMD="cd android && ./gradlew :app:connectedDebugAndroidTest" \
+#     scripts/run-android-tests.sh                        # route to a SPECIFIC emulator
 #
 # IMPORTANT (rule 52): do NOT drive the SAME emulator (adb/am instrument/
 # screenshots) while this runs — contention is what wedges Gradle/instrumentation.
@@ -42,14 +50,57 @@ else
   REQUIRE_EMULATOR=1
 fi
 
-# Real "booted emulator" detection (Codex Gate-4): `adb get-state` is not it —
-# it passes for a physical device and errors with multiple devices. Require an
-# `emulator-NNNN` serial in `device` state.
-emulator_online() {
-  command -v adb >/dev/null 2>&1 || return 1
-  adb devices 2>/dev/null | awk '/^emulator-[0-9]+[[:space:]]+device$/ {f=1} END {exit !f}'
+# The `adb devices` source, overridable for tests (ANDROID_DEVICES_CMD — the
+# emulator analog of sim-lease's SIM_LEASE_DISCOVER_CMD). ALWAYS exits 0 (prints
+# nothing when adb is absent) so a missing-adb pipe never trips a caller.
+android_devices() {
+  if [ -n "${ANDROID_DEVICES_CMD:-}" ]; then eval "$ANDROID_DEVICES_CMD" || true
+  elif command -v adb >/dev/null 2>&1; then adb devices 2>/dev/null || true
+  fi
+  return 0
 }
-if [ "$REQUIRE_EMULATOR" -eq 1 ] && ! emulator_online; then
+# Real "booted emulator" detection (Codex Gate-4): `adb get-state` is not it —
+# it passes for a physical device and errors with multiple devices. With $1 = a
+# specific serial, check ONLY that serial is online in `device` state (a physical
+# device serial is a valid ANDROID_SERIAL target too); without $1, check ANY
+# `emulator-NNNN` is online (the spike genuinely needs an emulator).
+emulator_online() {
+  if [ -n "${1:-}" ]; then
+    android_devices | awk -v s="$1" '$1==s && $2=="device" {f=1} END {exit !f}'
+  else
+    android_devices | awk '/^emulator-[0-9]+[[:space:]]+device$/ {f=1} END {exit !f}'
+  fi
+}
+# ALL online devices in `device` state (emulator + physical) — bare `adb`/Gradle
+# is ambiguous ("more than one device") with >1 of EITHER kind, so the ambiguity
+# guard counts both, not just emulators (Gate-4: a physical phone counts too).
+online_device_count() { android_devices | awk '$2=="device" {n++} END {print n+0}'; }
+
+# ANDROID_SERIAL routing (feature #138 follow-up — parallel-emulator support;
+# rule 52 Cause D / rule 55 Android tier). One AVD is the default today, but a
+# run MUST be able to TARGET a specific device so two AVDs (once created) don't
+# race on an ambiguous `adb`. adb + Gradle's connected task both honor the
+# exported ANDROID_SERIAL env var natively, so routing = validate + export.
+ANDROID_SERIAL="${ANDROID_SERIAL:-}"
+if [ -n "$ANDROID_SERIAL" ]; then
+  if ! emulator_online "$ANDROID_SERIAL"; then
+    echo "RUN-ANDROID-TESTS RESULT: NO_EMULATOR (ANDROID_SERIAL=$ANDROID_SERIAL not online in 'device' state)"
+    exit 2
+  fi
+  export ANDROID_SERIAL   # every adb/Gradle connected command now targets THIS device
+elif [ "$(online_device_count)" -gt 1 ]; then
+  # >1 device online + no serial → bare adb is ambiguous ("more than one device").
+  # Hard-fail the device-driving default/spike path; only WARN for a caller-owned
+  # ANDROID_CMD (which may be a device-less JVM task like testDebugUnitTest —
+  # forcing a serial there would be wrong).
+  if [ "$REQUIRE_EMULATOR" -eq 1 ]; then
+    echo "RUN-ANDROID-TESTS RESULT: AMBIGUOUS_SERIAL ($(online_device_count) devices online — set ANDROID_SERIAL=<serial> to pick one)"
+    exit 2
+  fi
+  echo "[run-android-tests] WARNING: $(online_device_count) devices online + no ANDROID_SERIAL — an adb/connected task may fail ambiguously; set ANDROID_SERIAL=<serial> to target one."
+fi
+
+if [ "$REQUIRE_EMULATOR" -eq 1 ] && ! emulator_online "$ANDROID_SERIAL"; then
   echo "RUN-ANDROID-TESTS RESULT: NO_EMULATOR (no emulator-NNNN device online — boot an AVD or pass ANDROID_CMD)"
   exit 2
 fi

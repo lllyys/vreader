@@ -74,7 +74,10 @@ The Android lane has the same ghost-class shapes as iOS, with Android tools:
   flags only a wedged `am instrument` or a detached `adb … logcat` capture.
 - **Emulator contention = simulator contention.** Driving the SAME emulator
   (`adb` / `am instrument` / screenshots) while an instrumentation run is in
-  flight wedges it. Serialize, or use a second emulator (AVD).
+  flight wedges it. Serialize, or use a second emulator (AVD): boot a 2nd AVD and
+  route each run to a distinct device via `ANDROID_SERIAL` (validated + exported
+  by `scripts/run-android-tests.sh`; leased per-serial by `sim-lease.sh acquire
+  android`) — never two runs on one emulator serial.
 - **Always run the Android gate through `scripts/run-android-tests.sh`** (the
   Android `run-tests.sh`): hard wall-clock timeout, exact-pid wait (rule 49),
   kills the process tree + Gradle daemon on timeout, prints one
