@@ -33,7 +33,6 @@ Claude writes the code; Codex audits it independently. Cross-model verification 
 ├── agents/                # Subagent definitions for /feature-workflow
 ├── hooks/                 # UserPromptSubmit hook (>>-prefix prompt refinement)
 ├── docs-guardian/         # (currently empty — see Notes below)
-├── tdd-guardian/          # TDD Guardian config (xcodebuild test command)
 └── loc-guardian.local.md  # Per-file LOC limit + Swift extraction patterns
 ```
 
@@ -92,7 +91,6 @@ orchestrating session + the rules they duplicated.
 
 ## Guardian Configs
 
-- **`tdd-guardian/config.json`** — drives the TDD Guardian agents. Configured with vreader's `xcodebuild build-for-testing && xcodebuild test-without-building` flow.
 - **`docs-guardian/`** — directory exists but the config has been removed; vreader has no website docs that need automated audit.
 - **`loc-guardian.local.md`** — 300-line cap per file, with Swift-aware extraction patterns (PersistenceActor extensions, ReaderContainerView+Concern.swift, etc.).
 

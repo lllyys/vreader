@@ -58,5 +58,7 @@
       }
     ]
   },
-  "enabledPlugins": {}
+  "enabledPlugins": {
+    "tdd-guardian@xiaolai": false
+  }
 }

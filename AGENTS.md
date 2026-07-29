@@ -41,10 +41,10 @@ cross-platform rewrite. **Source of truth for the Android strategy:
   - **Test / verify**: Android runs through **`scripts/run-android-tests.sh`** /
     **`scripts/run-android-verify.sh`** (rule 49/52/53 watchdogs — never a bare
     `./gradlew`; rule 52 "Cause D" covers the Gradle-daemon/emulator ghost
-    classes, swept by `scripts/sweep-ghosts.sh`). The TDD Guardian routes through
-    `scripts/tdd-guardian-test.sh` so a Kotlin change can't false-green on the iOS
-    command. `check_audit_debt.sh` now classifies `android/`/`*.kt`/`contracts/`
-    as code at Stop time too.
+    classes, swept by `scripts/sweep-ghosts.sh`). A Kotlin change is gated by the
+    platform-aware `code_paths_platform` classifier + `run-android-tests.sh`, so
+    it can't false-green on the iOS command. `check_audit_debt.sh` now classifies
+    `android/`/`*.kt`/`contracts/` as code at Stop time too.
   - **SKIP-Android-until-ready**: the app shell is **#106**. Until it lands the
     only Android target is the `spikes/` harness, so an `android-app` change can't
     reach Gate-5 — the crons skip auto-starting it and the verify skill marks it

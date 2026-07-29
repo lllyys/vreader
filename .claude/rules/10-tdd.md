@@ -203,8 +203,6 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild test \
 ... -only-testing:vreaderTests/MyClassTests/test_specificThing
 ```
 
-The TDD Guardian config at `.claude/tdd-guardian/config.json` invokes the same `xcodebuild test` flow.
-
 ## Android / Kotlin TDD (feature #107 — the workflow can drive Android)
 
 The RED→GREEN→REFACTOR discipline is platform-neutral; only the framework + run

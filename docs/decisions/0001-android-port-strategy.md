@@ -197,7 +197,7 @@ library/CLI harnesses first — an empty `android/` directory is low-value).
   vectors into `contracts/`.
 - **Spike B — CJK WebView reader, INSTRUMENTATION-first.** The cron's ability to
   drive an Android emulator/device is **UNVERIFIED** — the verification stack
-  (rule 47, `cron-prompts/verify.md`, `tdd-guardian/config.json`) is iOS-specific.
+  (rule 47, `cron-prompts/verify.md`) is iOS-specific.
   Make Spike B benchmark/instrumentation-driven (scroll / memory / CFI / selection
   metrics on a real 1000+-spine CJK novel via Readium-Kotlin), **not**
   UI-automation-dependent. Standing up a *minimally-automatable* Android
