@@ -13,9 +13,11 @@
 //   There is deliberately NO density guard, NO saturation guard, NO ambiguous-rule set and NO
 //   format-specific exemption — plan §4.4 (Option A) DELETED that machinery after four Gate-2
 //   rounds failed to make an invented heuristic sound, and iOS ships none across features #23/#12.
-//   A mis-detected TOC is ugly, not harmful: `LazyColumn` bounds rendering, the cap bounds memory,
-//   nothing crashes. `TxtMdTocProviderTest.noDensityOrSaturationGuardExists` pins the deletion; if
-//   a real book ever needs a guard it is designed FROM that failure (follow-up F6), not before it.
+//   A mis-detected TOC is then ugly rather than harmful: the cap bounds memory, and WI-6 makes the
+//   Contents sheet lazy so it bounds rendering too — WI-6 lands BEFORE WI-7 wires this provider to
+//   a host, so no user can reach a large TOC through today's eager sheet.
+//   `TxtMdTocProviderTest.noDensityOrSaturationGuardExists` pins the deletion; if a real book ever
+//   needs a guard it is designed FROM that failure (follow-up F6), not before it.
 // - The cap REJECTS rather than truncates. A Contents list that silently stops at entry 50 000 of a
 //   larger book is worse than none, because the user cannot tell it is incomplete.
 // - Both scanners are called with `MAX_TOC_ENTRIES + 1`, so [ExtractResult.hitLimit] reads exactly
