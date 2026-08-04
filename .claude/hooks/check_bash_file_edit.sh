@@ -320,6 +320,15 @@ WRITE_API = re.compile(
     r"|\.write_text\s*\(|\.write_bytes\s*\("
     r"|File\.(?:write|open)|IO\.write|fs\.writeFile|fs\.appendFile")
 LITERAL = re.compile(r"([\"\x27])([^\"\x27\n]+)\1")   # paired quotes only
+# Simple `name = "literal"` bindings anywhere in the interpreter body.
+# Without this, a multi-line script that binds its path to a variable and
+# writes to it later is invisible to the bounded window below — the longer
+# the script, the more reliably it evades. Found 2026-08-04 by replaying a
+# real `python3 - <<PY` heredoc whose `p = "dev-docs/plans/…"` sat ~180 chars
+# above its `open(p, "w")`, i.e. outside the window.
+ASSIGN = re.compile(r"(?m)^[ \t]*([A-Za-z_]\w*)[ \t]*=[ \t]*([\"\x27])([^\"\x27\n]+)\2")
+BOUND = {m.group(1): m.group(3) for m in ASSIGN.finditer(full)}
+IDENT = re.compile(r"\b([A-Za-z_]\w*)\b")
 if INTERP.search(code):
     lang = INTERP.search(code).group(1)
     for hit in WRITE_API.finditer(full):
@@ -336,6 +345,26 @@ if INTERP.search(code):
             lit = lm.group(2)
             if "/" in lit or lit in TRACKED_ROOT_FILES:
                 record("interpreter write (`%s`)" % lang, lit)
+        # Resolve a bare identifier in the PATH POSITION only:
+        #   open(p, "w")            -> first call argument
+        #   fs.writeFileSync(p, …)  -> first call argument
+        #   p.write_text(…)         -> receiver immediately before the dot
+        # Deliberately NOT every identifier in the call: `open(out,"w").write(note)`
+        # must stay allowed when `out` is /tmp, even though `note` holds a repo
+        # path. The path position is the only one that decides where bytes land.
+        seg = full[hit.start():end]
+        cands = []
+        firstarg = re.search(r"\(\s*([A-Za-z_]\w*)\s*[,)]", seg)
+        if firstarg:
+            cands.append(firstarg.group(1))
+        recv = re.search(r"([A-Za-z_]\w*)\s*\.\s*write_(?:text|bytes)\s*$",
+                         full[max(0, hit.start() - 80):hit.end()])
+        if recv:
+            cands.append(recv.group(1))
+        for name in cands:
+            lit = BOUND.get(name)
+            if lit and ("/" in lit or lit in TRACKED_ROOT_FILES):
+                record("interpreter write (`%s`, via `%s`)" % (lang, name), lit)
 
 for construct, rel in findings[:6]:
     print("%s\t%s" % (rel, construct))
