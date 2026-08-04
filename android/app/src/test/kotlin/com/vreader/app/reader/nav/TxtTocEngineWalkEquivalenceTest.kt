@@ -252,8 +252,8 @@ class TxtTocEngineWalkEquivalenceTest {
 
     /**
      * Every rule the oracle runs: all 25 shipped rules (disabled ones included — `extractHeadings`
-     * never looks at `enabled`, so a disabled rule is still a live extraction path) plus the five
-     * synthetic ones that reach behaviours no shipped rule can.
+     * never looks at `enabled`, so a disabled rule is still a live extraction path) plus the eight
+     * synthetic ones in [extraRules], which reach behaviours no shipped rule can.
      */
     private val allRules: List<TxtTocRule> = TxtTocRules.defaults + extraRules
 
@@ -374,6 +374,108 @@ class TxtTocEngineWalkEquivalenceTest {
         // every assertion above and prove nothing.
         assertTrue("the sweep must actually run", comparisons > 1_000)
         assertTrue("the sweep must actually COMPARE headings, not just empty lists", pairsCompared > 1_000)
+    }
+
+    /**
+     * The two resume strategies agree on the RAW match offsets — including the ones
+     * [newWalkEmitsTheIdenticalTitleAndOffsetSequenceAsTheLegacyWalk] structurally cannot see.
+     *
+     * **Why this exists** (Gate-4 R2 Medium). [emptyPatternRule] and [endAnchorRule] match
+     * zero-width — inside a surrogate pair, at end-of-input — and every such match trims to `""`,
+     * so `extractHeadings` DROPS it. The sweep above therefore compares two empty lists on exactly
+     * the positions those rules were added to cover: a walk that skipped the inside-a-surrogate
+     * position would pass it. The claim was real but the observation was not.
+     *
+     * So this test drops below the engine and compares the two strategies themselves:
+     *
+     *  - [legacyResumeOffsets] — a FRESH `Matcher` per match with `find(from)`, `from = end + (if
+     *    end == start) 1 else 0`, stopping when `from` exceeds the length. That is
+     *    `MatcherMatchResult.next()` transcribed.
+     *  - [newResumeOffsets] — ONE `Matcher`, `while (find())`. That is what the engine now does.
+     *
+     * Every offset is compared, dropped or not. The invisible positions are additionally asserted
+     * to be PRESENT, so the coverage claim is checked rather than assumed.
+     */
+    @Test
+    fun theTwoResumeStrategiesAgreeOnRawOffsetsIncludingTheInvisibleOnes() {
+        var swept = 0
+        for (doc in corpus()) {
+            for (rule in allRules) {
+                val pattern = try {
+                    Pattern.compile(rule.pattern, Pattern.MULTILINE)
+                } catch (_: PatternSyntaxException) {
+                    continue
+                }
+                val legacy = legacyResumeOffsets(pattern, doc.text)
+                val new = newResumeOffsets(pattern, doc.text)
+                assertEquals(
+                    "doc='${doc.name}' rule=${rule.id} — the two resume strategies found a " +
+                        "different NUMBER of raw matches",
+                    legacy.size, new.size,
+                )
+                legacy.forEachIndexed { i, want ->
+                    assertEquals(
+                        "doc='${doc.name}' rule=${rule.id} — raw match $i starts at a different offset",
+                        want, new[i],
+                    )
+                }
+                swept++
+            }
+        }
+        assertTrue("the raw sweep must actually run", swept > 1_000)
+
+        // The two positions the emitted-output sweep cannot see, asserted directly.
+        val astral = Pattern.compile(emptyPatternRule.pattern, Pattern.MULTILINE)
+        val insidePair = newResumeOffsets(astral, ASTRAL).toList()
+        assertEquals(
+            "an empty pattern must match at EVERY code unit of a surrogate pair, i.e. advancement " +
+                "is by code UNIT — if either strategy advanced by code POINT they would diverge here",
+            listOf(0, 1, 2), insidePair,
+        )
+        assertEquals(
+            "and the legacy strategy must agree on that interior position",
+            insidePair, legacyResumeOffsets(astral, ASTRAL).toList(),
+        )
+
+        val eofDoc = "第一章 甲"
+        val dollar = Pattern.compile(endAnchorRule.pattern, Pattern.MULTILINE)
+        val eofOffsets = newResumeOffsets(dollar, eofDoc).toList()
+        assertTrue(
+            "a bare \$ must produce a zero-width match AT end-of-input (offset ${eofDoc.length}), " +
+                "which is the boundary where a resume position can run off the end: $eofOffsets",
+            eofOffsets.contains(eofDoc.length),
+        )
+        assertEquals(
+            "and the legacy strategy must agree at end-of-input",
+            eofOffsets, legacyResumeOffsets(dollar, eofDoc).toList(),
+        )
+    }
+
+    /** `MatcherMatchResult.next()` transcribed: a FRESH matcher per match, resumed with `find(from)`. */
+    private fun legacyResumeOffsets(pattern: Pattern, text: String): IntArray {
+        val out = ArrayList<Int>()
+        val cap = 2 * text.length + 16 // a non-advancing walk must FAIL, never hang the suite
+        var from = 0
+        while (from <= text.length) {
+            assertTrue("the legacy resume strategy failed to advance", out.size <= cap)
+            val m = pattern.matcher(text)
+            if (!m.find(from)) break
+            out.add(m.start())
+            from = m.end() + if (m.end() == m.start()) 1 else 0
+        }
+        return out.toIntArray()
+    }
+
+    /** What the engine now does: ONE matcher, advanced by its own no-arg `find()`. */
+    private fun newResumeOffsets(pattern: Pattern, text: String): IntArray {
+        val out = ArrayList<Int>()
+        val cap = 2 * text.length + 16
+        val m = pattern.matcher(text)
+        while (m.find()) {
+            assertTrue("the new resume strategy failed to advance", out.size <= cap)
+            out.add(m.start())
+        }
+        return out.toIntArray()
     }
 
     /** Detection walks the same matches too — `countMatches` was rewritten with the same shape. */
@@ -725,10 +827,11 @@ class TxtTocEngineWalkEquivalenceTest {
         runWithJob(countingDetection) {
             TxtTocRuleEngine.detectBestRule(blanks, listOf(blankTitleRule))
         }.getOrThrow()
-        assertTrue(
-            "countMatches must check cancellation DURING the count, not only around it " +
-                "(${countingDetection.checks} checks over $blankMatches matches)",
-            countingDetection.checks >= 2 + blankMatches / interval,
+        assertEquals(
+            "detection's cadence is EXACTLY 1 entry + 1 per rule + ${blankMatches / interval} " +
+                "interval checks inside countMatches + 1 post-loop; asserting only a lower bound " +
+                "would permit an over-checking regression (Gate-4 R2 Low)",
+            1 + 1 + blankMatches / interval + 1, countingDetection.checks,
         )
     }
 
