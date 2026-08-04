@@ -592,6 +592,19 @@ language reconcile).
   (`contracts/identity/locator.md`): precise-first / canonical-fallback,
   with `ResumeTarget.Precise` carrying the canonical fallback so the host can
   degrade if the Readium anchor won't reapply.
+- `reader.nav.TxtMdTocProvider` (feature #139) is the `TocProvider` for TXT/MD —
+  the auto-generated Contents source beside `ReadiumTocProvider` (EPUB) and
+  `EmptyTocProvider` (PDF/AZW3). It runs the ported iOS heuristics over the
+  already-decoded document on an **injected** dispatcher it hops onto itself
+  (`TxtTocRuleEngine` = the 25 Legado-derived regex rules with the ICU→Java
+  `\d`/`\s` repairs, ≥2-match confidence threshold, for `.txt`; `MdTocScanner`
+  = ATX/fence/setext/YAML-front-matter line walk for `.md`), and emits
+  `TocEntry` rows whose `canonicalLocator` is built by the same
+  `txtBookmarkLocator` a #135 bookmark uses, so a chapter row and a bookmark at
+  one source offset are one position. Detection policy is exactly iOS's: no
+  density or saturation guard, plus a `MAX_TOC_ENTRIES = 50_000` backstop that
+  **rejects rather than truncates**. Nothing is persisted — the TOC is derived
+  per reader session, so a display-settings reflow cannot invalidate it.
 
 ### In-book search (`com.vreader.app.search`) — feature #133
 
