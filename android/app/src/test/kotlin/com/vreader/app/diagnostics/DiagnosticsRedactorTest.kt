@@ -910,6 +910,28 @@ class DiagnosticsRedactorTest {
     }
 
     @Test
+    fun negative_nonCredentialSignatureIdentifiersSurvive() {
+        // Gate-4 round 2, Low. Android package-signing diagnostics and JVM tooling emit these, and
+        // none of them authenticate anything. A DENY-list (not an allow-list) gates them, so an
+        // unrecognised `*signature` still redacts.
+        assertUnchanged("verify methodSignature=(Ljava/lang/String;)V result=ok")
+        assertUnchanged("apk packageSignature=308201e2 typeSignature=Lcom/vreader/Book;")
+        // …while every credential-bearing spelling still goes.
+        check(
+            "blob url ?sig=QWxhZGRpbjpvcGVuIHNlc2FtZQ== retrying",
+            "blob url ?sig=$redacted retrying",
+            secrets = listOf("QWxhZGRpbjpvcGVuIHNlc2FtZQ=="),
+            context = listOf("blob url", "retrying"),
+        )
+        check(
+            "signed request signature=QWxhZGRpbjpvcGVuIHNlc2FtZQ== -> 403",
+            "signed request signature=$redacted -> 403",
+            secrets = listOf("QWxhZGRpbjpvcGVuIHNlc2FtZQ=="),
+            context = listOf("signed request", "-> 403"),
+        )
+    }
+
+    @Test
     fun lowercaseCompoundCredentialKeys_areStillRedacted() {
         // The deliberate ASYMMETRY: the boundary rule applies to `authorization` ONLY. A lowercase
         // compound like `dbpassword` is a plausible third-party field name, and missing a

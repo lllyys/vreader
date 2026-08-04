@@ -79,7 +79,12 @@ package com.vreader.app.diagnostics
  *   in every `toString()` costs exactly this; no lexical rule can tell the two apart.
  * - An unrecognised `Authorization` scheme consumes the rest of the line, so same-line text after
  *   such a header is lost. A quoted value whose closing quote appears many lines later
- *   over-redacts to that quote (the safe direction).
+ *   over-redacts to that quote (the safe direction), as does a value that itself ends in a
+ *   backslash (indistinguishable from an escaped inner quote).
+ * - A BARE `signature=` is treated as a credential. `methodSignature` / `packageSignature` and the
+ *   rest of [SIGNATURE_NON_CREDENTIAL] are excluded, but an unqualified package-signing
+ *   `signature=<cert>` line loses that one token. Keeping it is the safe side: an HTTP-Signature
+ *   header spells its credential exactly that way.
  * - Book titles and filenames are NOT redacted (parity with iOS #96) — redacting them would gut the
  *   export's diagnostic value, since most import/reader failures name the book.
  *
@@ -117,7 +122,19 @@ object DiagnosticsRedactor {
     )
 
     /** Keys whose value is a single whitespace-free token. */
-    private val TOKEN_WORDS = listOf("apikey", "api_key", "api-key", "signature", "sig")
+    private val TOKEN_WORDS = listOf("apikey", "api_key", "api-key", "sig")
+
+    /**
+     * `*signature` qualifiers that mean "NOT a credential". Gate-4 round 2 named the real ones:
+     * Android package-signing diagnostics and JVM tooling emit `methodSignature=` / a type or
+     * package signature, none of which authenticate anything. This is a DENY-list rather than the
+     * allow-list used for `token`/`key`, so an unrecognised `*signature` still redacts — `sig=`,
+     * `X-Amz-Signature=` and an HTTP-Signature `signature=` are all credentials.
+     */
+    private val SIGNATURE_NON_CREDENTIAL = listOf(
+        "method", "type", "class", "package", "cert", "certificate", "schema", "function",
+        "field", "descriptor", "jvm", "java", "kotlin",
+    )
 
     /** `*token` is a credential only behind these qualifiers — see the class doc. */
     private val TOKEN_QUALIFIERS = listOf(
@@ -143,6 +160,11 @@ object DiagnosticsRedactor {
         if (lower.endsWith("authorization") && boundaryAt(id, id.length - 13)) return Kind.AUTH
         SPACED_WORDS.forEach { if (lower.endsWith(it)) return Kind.SPACED }
         TOKEN_WORDS.forEach { if (lower.endsWith(it)) return Kind.TOKEN }
+        if (lower.endsWith("signature") &&
+            !qualified(id, id.length - 9, SIGNATURE_NON_CREDENTIAL, allowEmpty = false)
+        ) {
+            return Kind.TOKEN
+        }
         if (lower.endsWith("token") && qualified(id, id.length - 5, TOKEN_QUALIFIERS, true)) {
             return Kind.TOKEN
         }
@@ -156,6 +178,9 @@ object DiagnosticsRedactor {
      * True when the identifier text before [cut] ends with one of [quals] at a word boundary —
      * position 0, after a `_`/`-`, or at a camelCase hump. The boundary check is what keeps
      * `validToken` (`val` + `id`) and `PaginationToken` out while admitting `x-auth-token`.
+     *
+     * Used as an ALLOW-list for `token`/`key` and as a DENY-list for `signature`; [allowEmpty]
+     * decides which way a bare, unqualified word falls.
      */
     private fun qualified(id: String, cut: Int, quals: List<String>, allowEmpty: Boolean): Boolean {
         var p = id.substring(0, cut)
