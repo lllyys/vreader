@@ -8,7 +8,8 @@
 // - Detection samples the first [SAMPLE_SIZE_UTF16] code units and requires [MIN_MATCHES] hits,
 //   both iOS parity. Ties resolve toward the rule that appears FIRST in the supplied list
 //   (strictly-greater comparison), which is [TxtTocRules.defaults]' serialNumber order.
-// - Patterns compile with `RegexOption.MULTILINE` and NOTHING else. `DOT_MATCHES_ALL` would let a
+// - Patterns compile with `Pattern.MULTILINE` and NOTHING else — the same int
+//   `RegexOption.MULTILINE` carries, so this is unchanged from the port. `DOT_MATCHES_ALL` would let a
 //   title swallow the rest of the document (the bounded `.{0,30}$` tail cannot cross a line
 //   terminator) and `IGNORE_CASE` would reintroduce the Unicode case-folding divergence the rules
 //   avoid by spelling both cases. See TxtTocRules' header for the D1/D1b class repairs.
@@ -23,19 +24,39 @@
 //   offset and never land inside a surrogate pair. `^` under MULTILINE only matches at 0 or just
 //   after a line terminator, and no terminator is a surrogate, so the boundary property holds by
 //   construction — and is pinned by test.
-// - Extraction is BOUNDED BEFORE MATERIALIZATION: it walks matches one at a time via
-//   `MatchResult.next()` and returns the moment it has `limit` headings, so a pathological
-//   all-match document never builds a full match list to be truncated afterwards (plan §4.4).
+// - Extraction is BOUNDED BEFORE MATERIALIZATION: it walks matches one at a time and returns the
+//   moment it has `limit` headings, so a pathological all-match document never builds a full match
+//   list to be truncated afterwards (#139 plan §4.4).
+// - THE WALK IS HAND-WRITTEN OVER ONE `java.util.regex.Matcher`, NOT `Regex.findAll` /
+//   `MatchResult.next()` — DO NOT "modernise" IT BACK (feature #172 WI-2). Kotlin's
+//   `MatcherMatchResult.next()` calls `Pattern.matcher(input)`, i.e. it builds a BRAND-NEW
+//   `Matcher` over the WHOLE input for EVERY match. On Android (API 35) that construction+reset is
+//   LENGTH-PROPORTIONAL — measured at 0.2734-0.2897 ns per character, ~7 GB/s, the signature of a
+//   linear copy of the UTF-16 buffer — where on the desktop JVM it is effectively free. So the
+//   idiomatic walk is O(matches x text length): on the real 14 MB CJK book (7 029 609 code units,
+//   1 859 chapters) it cost 6 525 ms and grew process PSS by 1.07 GB, against 61-62 ms and 14 MB
+//   for the identical walk over one reused `Matcher` — a 105x difference, measured on-device by
+//   `TxtTocScanCostTest` before this code was written, not predicted.
+//   The walk MUST be driven by NO-ARG `find()`, which resumes from the matcher's own last match.
+//   `find(int)` additionally RESETS, and the reset is the expensive half: arm (h) priced
+//   `find(int) - find()` at 1.7-2.1 ms per call on this input, so a reused `Matcher` driven by
+//   `find(int)` would still cost ~3 200 ms. `TxtTocScanCostTest#extractionMeetsEngineBudget` holds
+//   a 300 ms budget precisely so that regression fails too, and
+//   `TxtTocEngineWalkEquivalenceTest` pins that this walk emits the identical `(title, offset)`
+//   sequence the Kotlin idiom emitted. The equivalence is exact, not approximate: `next()` resumes
+//   at `end + (if (end == start) 1 else 0)` and no-arg `find()` applies the same rule, and the
+//   reset `find(int)` performs is unobservable here (no region is ever set, no append is
+//   performed, and matching uses the full text with default bounds).
 // - No Android imports and no logging: this is pure CPU work that must stay JVM-unit-testable
 //   (`android.util.Log` throws "not mocked" in a plain unit test). A rule that fails to compile is
 //   skipped, mirroring iOS's `try?` — degrading to "no Contents" beats crashing a working reader,
 //   and TxtTocRulesTest already pins that all 25 shipped rules compile.
 // - Both entry points are cancellation-cooperative, with a PRECISELY BOUNDED granularity: a check
 //   at entry, one before each detection rule, and one every [CANCELLATION_CHECK_INTERVAL] matches.
-//   A single `find()` / `next()` is a non-suspending `java.util.regex` call that cannot observe
+//   A single `Matcher.find()` is a non-suspending `java.util.regex` call that cannot observe
 //   cancellation, so the worst case after a cancel is one uninterrupted walk of the gap to the
 //   next match — bounded by a full pass over the text (measured at ~100 ms for the real 14 MB CJK
-//   book, plan §5 / Appendix A.1). That pass is off the MAIN thread only because
+//   book, #139 plan §5 / Appendix A.1). That pass is off the MAIN thread only because
 //   `TxtMdTocProvider` (WI-4) owns the `withContext(dispatcher)` hop; this engine does not hop by
 //   itself and must not be called on the main thread. Splitting the scan into line-bounded
 //   regions to tighten that was REJECTED, not overlooked: `TxtTocRules.WS` widens whitespace to
@@ -48,6 +69,7 @@
 package com.vreader.app.reader.nav
 
 import kotlinx.coroutines.ensureActive
+import java.util.regex.Pattern
 import java.util.regex.PatternSyntaxException
 import kotlin.coroutines.coroutineContext
 
@@ -101,8 +123,8 @@ object TxtTocRuleEngine {
         for (rule in rules) {
             if (!rule.enabled) continue
             coroutineContext.ensureActive()
-            val regex = compile(rule) ?: continue
-            val count = countMatches(regex, sample)
+            val pattern = compile(rule) ?: continue
+            val count = countMatches(pattern, sample)
             if (count > bestCount) {
                 bestCount = count
                 bestRule = rule
@@ -135,27 +157,28 @@ object TxtTocRuleEngine {
         require(limit > 0) { "limit must be positive, was $limit" }
         coroutineContext.ensureActive()
         if (text.isEmpty()) return ExtractResult.EMPTY
-        val regex = compile(rule) ?: return ExtractResult.EMPTY
+        val pattern = compile(rule) ?: return ExtractResult.EMPTY
 
         val headings = ArrayList<DetectedHeading>()
         var sinceCheck = 0
-        var match = regex.find(text)
+        // ONE Matcher for the whole scan, advanced by its own no-arg find(). See the file header's
+        // "the walk is hand-written" decision for why this must not become Regex.findAll/next().
+        val matcher = pattern.matcher(text)
 
-        while (match != null) {
+        while (matcher.find()) {
             if (++sinceCheck >= CANCELLATION_CHECK_INTERVAL) {
                 sinceCheck = 0
                 coroutineContext.ensureActive()
             }
-            val title = match.value.trim()
+            val title = matcher.group().trim()
             if (title.isNotEmpty()) {
-                headings.add(DetectedHeading(title = title, sourceOffsetUtf16 = match.range.first))
+                headings.add(DetectedHeading(title = title, sourceOffsetUtf16 = matcher.start()))
                 // Stop the SCAN, not just the returned list: the next match is never even sought.
                 if (headings.size == limit) return ExtractResult(headings, hitLimit = true)
             }
-            match = match.next()
         }
 
-        // A cancel landing DURING the final `next()` — the long walk to end-of-text — would
+        // A cancel landing DURING the final `find()` — the long walk to end-of-text — would
         // otherwise be swallowed: the loop exits on null and returns a normal result. Check once
         // more so the outcome is always "cancelled" rather than "a full result for a job nobody
         // is waiting on".
@@ -181,25 +204,36 @@ object TxtTocRuleEngine {
         return text.substring(0, end)
     }
 
-    /** Streams over the matches rather than collecting them — the sample is up to 512 KB. */
-    private suspend fun countMatches(regex: Regex, sample: String): Int {
+    /**
+     * Streams over the matches rather than collecting them — the sample is up to 512 KB.
+     *
+     * ONE [java.util.regex.Matcher] per call, advanced by its own no-arg `find()`, for the same
+     * reason [extractHeadings] does (file header). Detection runs this once per enabled rule, so
+     * the per-match construction it replaces was paid 14 times over.
+     */
+    private suspend fun countMatches(pattern: Pattern, sample: String): Int {
         var count = 0
         var sinceCheck = 0
-        var match = regex.find(sample)
-        while (match != null) {
+        val matcher = pattern.matcher(sample)
+        while (matcher.find()) {
             count++
             if (++sinceCheck >= CANCELLATION_CHECK_INTERVAL) {
                 sinceCheck = 0
                 coroutineContext.ensureActive()
             }
-            match = match.next()
         }
         return count
     }
 
-    /** `null` for a pattern `java.util.regex` rejects — iOS's `try?` skips the same way. */
-    private fun compile(rule: TxtTocRule): Regex? = try {
-        Regex(rule.pattern, RegexOption.MULTILINE)
+    /**
+     * `null` for a pattern `java.util.regex` rejects — iOS's `try?` skips the same way.
+     *
+     * Returns the raw [java.util.regex.Pattern] rather than a Kotlin [Regex] because the walks
+     * need the `Matcher` directly. `RegexOption.MULTILINE` IS [Pattern.MULTILINE] (it is a thin
+     * wrapper over the same int), so the compiled semantics are byte-for-byte what they were.
+     */
+    private fun compile(rule: TxtTocRule): Pattern? = try {
+        Pattern.compile(rule.pattern, Pattern.MULTILINE)
     } catch (_: PatternSyntaxException) {
         null
     }
