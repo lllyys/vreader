@@ -39,7 +39,7 @@ class VLogTest {
     fun setUp() {
         ShadowLog.clear()
         ring = RingBufferDiagnosticsSource(capacity = 64)
-        VLog.install(ring) { fixedTime }
+        VLog.install(ring, clock = { fixedTime })
     }
 
     @After
@@ -85,7 +85,7 @@ class VLogTest {
     @Test
     fun installReplacesThePreviousSink() {
         val replacement = RingBufferDiagnosticsSource(capacity = 4)
-        VLog.install(replacement) { fixedTime }
+        VLog.install(replacement, clock = { fixedTime })
         VLog.w(DiagnosticsCategory.SYNC, "WebDavClient", "after swap")
 
         assertTrue(recorded().isEmpty())
@@ -198,6 +198,67 @@ class VLogTest {
         assertEquals(ringEntry.category, parsed.category)
         assertEquals(ringEntry.level, parsed.level)
         assertFalse("marker must never reach the store: ${parsed.message}", parsed.message.contains(VLogMarker.OPEN))
+    }
+
+    /**
+     * Gate-4 High regression. logd keeps entries across process launches; the ring does not. With a
+     * bare per-launch counter, launch #2's first ids would be launch #1's first ids, and the
+     * composite (ring wins a collision) would drop the prior-launch entries — precisely the
+     * pre-crash trail the platform log exists to provide.
+     */
+    @Test
+    fun idsFromTwoLaunchesNeverCollide() {
+        val firstLaunch = RingBufferDiagnosticsSource(capacity = 16)
+        VLog.install(firstLaunch, { fixedTime }, launchNonce = 1L)
+        repeat(3) { VLog.i(DiagnosticsCategory.READER, "ReaderActivity", "launch-1 #$it") }
+        val firstIds = runBlocking {
+            (firstLaunch.recentEntries(null, 10) as SourceResult.Available).entries.mapNotNull { it.sequenceId }
+        }
+
+        val secondLaunch = RingBufferDiagnosticsSource(capacity = 16)
+        VLog.install(secondLaunch, { fixedTime }, launchNonce = 2L)
+        repeat(3) { VLog.i(DiagnosticsCategory.READER, "ReaderActivity", "launch-2 #$it") }
+        val secondIds = runBlocking {
+            (secondLaunch.recentEntries(null, 10) as SourceResult.Available).entries.mapNotNull { it.sequenceId }
+        }
+
+        assertEquals(3, firstIds.size)
+        assertEquals(3, secondIds.size)
+        assertEquals(emptySet<Long>(), firstIds.toSet() intersect secondIds.toSet())
+        // Still monotonic WITHIN each launch — the nonce is fixed, only the counter moves.
+        assertEquals(firstIds.sorted(), firstIds)
+        assertEquals(secondIds.sorted(), secondIds)
+    }
+
+    /**
+     * The same defect at the composite boundary, end to end: a prior launch's entry read back from
+     * logcat must SURVIVE alongside the current launch's ring entry, even though both are "the
+     * first entry of their process".
+     */
+    @Test
+    fun aPriorLaunchLogcatEntryIsNotDroppedByTheCurrentLaunchsRing() = runBlocking {
+        val priorRing = RingBufferDiagnosticsSource(capacity = 4)
+        VLog.install(priorRing, { fixedTime }, launchNonce = 11L)
+        VLog.w(DiagnosticsCategory.READER, "ReaderActivity", "died here")
+        val priorPayload = logged().single().msg
+        val priorLine = "2026-08-04 19:26:12.114 +0000  10209  3312  3312 W Reader: $priorPayload"
+        val priorFromLogcat = LogcatLineParser.parse(sequenceOf(priorLine), ownUid = 10209)
+
+        ShadowLog.clear()
+        val currentRing = RingBufferDiagnosticsSource(capacity = 4)
+        VLog.install(currentRing, { fixedTime + 1 }, launchNonce = 12L)
+        VLog.w(DiagnosticsCategory.READER, "ReaderActivity", "fresh start")
+
+        val logcat = object : DiagnosticsLogSource {
+            override suspend fun recentEntries(sinceMillis: Long?, limit: Int) =
+                SourceResult.Available(priorFromLogcat)
+        }
+        val merged = CompositeDiagnosticsSource(logcat, currentRing).recentEntries(null, 50)
+
+        assertEquals(
+            listOf("[ReaderActivity] died here", "[ReaderActivity] fresh start"),
+            (merged as SourceResult.Available).entries.map { it.message },
+        )
     }
 
     // ---------------------------------------------------------------- uninstalled

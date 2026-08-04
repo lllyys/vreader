@@ -7,7 +7,9 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 
 /**
@@ -169,26 +171,42 @@ class RingBufferDiagnosticsSourceTest {
     // ---------------------------------------------------------------- concurrency
 
     /**
-     * Writers from many threads while a reader loops. Two failure shapes are caught:
-     * a lost/duplicated entry (the set + size assertions), and a snapshot taken over a live
-     * collection (`ConcurrentModificationException` on the reader thread). Capacity is sized
-     * ABOVE the total so eviction cannot mask a lost write.
+     * Writers from many threads while a reader loops. Three failure shapes are caught: a
+     * lost/duplicated entry (the set + size assertions), a snapshot taken over a live collection
+     * (`ConcurrentModificationException` on the reader thread), and — the reason for the handshake
+     * below — the test itself quietly failing to overlap at all.
+     *
+     * A shared start latch alone does NOT establish "a read in flight": a legal scheduler may run
+     * every writer to completion before the reader takes its first snapshot, so a ring with its
+     * synchronisation removed could pass by luck. So the two sides are coupled: each writer emits
+     * one entry, then waits until the reader has observed a PARTIAL snapshot (strictly between
+     * empty and complete — a state that can only exist mid-write) before emitting the rest, and the
+     * run asserts that such an observation actually happened. The wait is deadline-bounded so a
+     * regression fails the assertion instead of hanging the suite.
+     *
+     * Capacity is sized ABOVE the total so eviction cannot mask a lost write.
      */
     @Test
     fun concurrentRecordLosesNothingWhileAReadIsInFlight() {
         val threads = 8
         val perThread = 500
-        val ring = RingBufferDiagnosticsSource(capacity = threads * perThread)
+        val total = threads * perThread
+        val ring = RingBufferDiagnosticsSource(capacity = total)
         val start = CountDownLatch(1)
         val stopReading = AtomicBoolean(false)
+        val partialSnapshots = AtomicLong(0)
         val readerFailure = AtomicReference<Throwable?>(null)
         val writerFailure = AtomicReference<Throwable?>(null)
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30)
 
         val reader = Thread {
             start.await()
             try {
                 while (!stopReading.get()) {
-                    runBlocking { ring.recentEntries(null, Int.MAX_VALUE) }
+                    val size = runBlocking {
+                        (ring.recentEntries(null, Int.MAX_VALUE) as SourceResult.Available).entries.size
+                    }
+                    if (size in 1 until total) partialSnapshots.incrementAndGet()
                 }
             } catch (t: Throwable) {
                 readerFailure.set(t)
@@ -198,7 +216,10 @@ class RingBufferDiagnosticsSourceTest {
             Thread {
                 start.await()
                 try {
-                    repeat(perThread) { i -> ring.put("$t-$i", at = i.toLong()) }
+                    ring.put("$t-0", at = 0L)
+                    // Hold until the reader has demonstrably read mid-write.
+                    while (partialSnapshots.get() == 0L && System.nanoTime() < deadline) Thread.yield()
+                    for (i in 1 until perThread) ring.put("$t-$i", at = i.toLong())
                 } catch (e: Throwable) {
                     writerFailure.set(e)
                 }
@@ -214,10 +235,14 @@ class RingBufferDiagnosticsSourceTest {
 
         assertNull("reader threw: ${readerFailure.get()}", readerFailure.get())
         assertNull("writer threw: ${writerFailure.get()}", writerFailure.get())
+        assertTrue(
+            "no snapshot overlapped the writes — this run proved nothing about concurrent reads",
+            partialSnapshots.get() > 0L,
+        )
 
         val got = entries(ring)
         val expected = (0 until threads).flatMap { t -> (0 until perThread).map { "$t-$it" } }.toSet()
-        assertEquals("lost or duplicated entries", threads * perThread, got.size)
+        assertEquals("lost or duplicated entries", total, got.size)
         assertEquals(expected, got.map { it.message }.toSet())
     }
 
