@@ -195,18 +195,26 @@ plan where it's wrong — focusing on:
    cases, function signatures, file paths the plan names actually
    exist in the current codebase? (This catches the largest class
    of pre-implementation bugs.)
-2. Risks + missing edge cases — what failure modes the plan misses.
-3. Protocol signature critique — are new interfaces well-shaped,
+2. Wiring-claim verification — check every claim the plan makes about
+   *existing* code against the codebase, especially any assertion that
+   an entry point, route, menu item, or integration "is wired" /
+   "is reachable". Find the call site or call it a **High** finding.
+   Precedent (rule 47 Gate 2): `…-feature-118-android-ai-provider-chat.md:53-55`
+   and `…-feature-120-android-opds-ui.md:39-40` both claimed a wired
+   production Settings entry that did not exist; both features reached
+   `VERIFIED` with unreachable UI.
+3. Risks + missing edge cases — what failure modes the plan misses.
+4. Protocol signature critique — are new interfaces well-shaped,
    or do they leak implementation concerns?
-4. Concurrency hazards — actor isolation, Sendable, race conditions
+5. Concurrency hazards — actor isolation, Sendable, race conditions
    in mutable state, @MainActor correctness.
-5. Cohesion check — is the WI split right, or are some WIs too big
+6. Cohesion check — is the WI split right, or are some WIs too big
    or too small?
-6. Foundational-vs-behavioral classification — is each WI's tier
+7. Foundational-vs-behavioral classification — is each WI's tier
    correct? (Foundational = DTOs/protocols/utilities, no user-observable
    behavior. Behavioral = anything that changes app behavior, persistence,
    networking, backup format, reader rendering, or UI flow.)
-7. Spec-block ↔ test-catalogue alignment (feature #130 / rule 55) — does
+8. Spec-block ↔ test-catalogue alignment (feature #130 / rule 55) — does
    every WI carry a machine-readable Spec block; does every acceptance
    criterion map to a NAMED test in `tests:`; are the `writes:` prefixes
    consistent with the surface-area section and disjoint where the plan
@@ -531,7 +539,7 @@ EOF
 | Owner / auditor | Author = verifier (orchestrator or designated subagent). 5b is "evidence-bearing"; SCHEMA result-field semantics gate any `VERIFIED` flip |
 | Status transition | 5a alone does NOT change status. After 5b lands with `result: pass`, row → `VERIFIED` |
 | Blocking hook | `check_terminal_status_evidence.sh` blocks the `VERIFIED` flip without 5b file present at the documented path |
-| Exit criteria | 5a: PR's slice verification recorded honestly; 5b: every acceptance criterion exercised end-to-end with `result: pass` (or `partial` / `fail` per SCHEMA semantics) |
+| Exit criteria | 5a: PR's slice verification recorded honestly, through a production entry point for behavioral tiers; 5b: every acceptance criterion exercised end-to-end via the named production entry path with `result: pass` (or `partial` / `fail` per SCHEMA semantics) |
 
 Gate 5 has two phases — **5a (pre-merge slice)** and **5b (post-merge
 final acceptance)** — because the SCHEMA.md evidence file requires the
@@ -543,8 +551,24 @@ WI's merge.
 | WI tier | Verification depth (pre-merge) | Where recorded |
 |---|---|---|
 | **Foundational** (DTOs, protocols, utilities, pure types — no user-observable behavior) | Unit + integration tests + Gate 4 audit are sufficient | PR description "Gate 5a Verification" line |
-| **Behavioral** (anything that changes app behavior, persistence, networking, backup format, reader rendering, or UI flow) | **Slice verification** — exercise the slice end-to-end against the real environment available at this point. iPhone 17 Pro Simulator with `vreader-debug://` harness; for backup/network features, against real WebDAV (or local Docker WebDAV); for reader features, with a fixture book. | PR description "Gate 5a Verification" section: what was run, what was observed |
-| **Final WI** (the one that completes the feature) | **Pre-merge slice** of the final acceptance criteria — exercise what's exercisable on the working-tree binary against the real backend. Defer anything that requires a merged-on-main build. | PR description "Gate 5a Verification" + a note "5b post-merge evidence file pending" |
+| **Behavioral** (anything that changes app behavior, persistence, networking, backup format, reader rendering, or UI flow) | **Slice verification** — exercise the slice end-to-end against the real environment available at this point, **through a production entry point** (see below). iPhone 17 Pro Simulator with `vreader-debug://` harness; for backup/network features, against real WebDAV (or local Docker WebDAV); for reader features, with a fixture book. | PR description "Gate 5a Verification" section: what was run, what was observed, **the user-visible path taken** |
+| **Final WI** (the one that completes the feature) | **Pre-merge slice** of the final acceptance criteria — exercise what's exercisable on the working-tree binary against the real backend, through the production entry point. Defer anything that requires a merged-on-main build. | PR description "Gate 5a Verification" + a note "5b post-merge evidence file pending" |
+
+**Production reachability (binding — rule 47 Gate 5).** A behavioral
+slice is verified through the path a real user takes: launch a
+release-configured build and navigate the shipped UI. A
+`android/app/src/debug/` launcher (excluded from the release APK), a
+`vreader-debug://` DebugBridge command, and a test that invokes a
+composable / View directly are **setup mechanisms, not entry points** —
+they may seed state, they do not show the feature is reachable. iOS is
+not exempt. If no production entry point exists, say so in the PR: the
+row is capped at `DONE`, the missing entry point is filed as a tracked
+blocker (rule 51 `needs-design` when the surface is undesigned), and the
+feature does not reach `VERIFIED`. `scripts/check-orphan-surfaces.sh`
+detects the symptom (top-level composables with no production call
+site); it is a detector, not a gate — the discipline is the gate.
+Precedent: Android #114/#118/#120/#122 all reached `VERIFIED` with
+unreachable UI.
 
 5a is the pre-merge gate that lets Gate 6 merge land. It is NOT the
 final acceptance pass.
@@ -580,6 +604,13 @@ result: pass | partial | fail
 
 - `## Acceptance criteria` — table mapping each criterion from the
   plan to observed behavior + pass/fail.
+- `## Entry path` — the user-visible route taken to reach the feature
+  in a release-configured build, written as navigation steps (e.g.
+  "Library → gear → Backup → Restore from WebDAV"). A DEBUG-only
+  launcher, a `vreader-debug://` command, or a direct composable/View
+  invocation is NOT an entry path; if that is all that exists, the
+  evidence file cannot support a `VERIFIED` flip (rule 47 Gate 5,
+  "Production reachability").
 - `## Commands run` — fenced code blocks of the actual shell /
   `simctl` / `xcrun` / curl commands used. Reproducible recipe.
 - `## Observations` — what surprised you, what was almost a
@@ -589,10 +620,13 @@ result: pass | partial | fail
 
 **Result-field semantics** (binding):
 
-- `pass` — every acceptance criterion verified end-to-end. Tracker
-  may move to `VERIFIED`; GH issue may be closed.
-- `partial` — some criteria deferred. Tracker stays at `DONE`; a
-  follow-up evidence file is required.
+- `pass` — every acceptance criterion verified end-to-end **through the
+  production entry path named in `## Entry path`**. Tracker may move to
+  `VERIFIED`; GH issue may be closed.
+- `partial` — some criteria deferred, **or the feature has no
+  production entry point** (criteria only reachable via DEBUG/test
+  harness). Tracker stays at `DONE`; a follow-up evidence file is
+  required, and the missing entry point is filed as a tracked blocker.
 - `fail` — at least one criterion regressed. Tracker moves back to
   `IN PROGRESS`; do NOT flip to `VERIFIED`.
 
@@ -733,9 +767,15 @@ may close — only when:
 1. All Work Items merged via Gate 6.
 2. Final WI's `dev-docs/verification/feature-<id>-<YYYYMMDD>.md` has
    `result: pass` covering every acceptance criterion from the plan.
-3. Closure comment posted with commit SHA, what was tested, what was
+3. **Reachability**: that evidence file names a production entry path
+   (`## Entry path`) exercised in a release-configured build. A feature
+   whose UI is reachable only from `android/app/src/debug/`, a
+   `vreader-debug://` command, or a test's direct invocation is capped
+   at `DONE` — file the missing entry point as a tracked blocker and
+   leave the row unflipped (rule 47 Gate 5).
+4. Closure comment posted with commit SHA, what was tested, what was
    observed.
-4. `gh issue close <feature-gh-issue>` executed.
+5. `gh issue close <feature-gh-issue>` executed.
 
 If uncertain at any gate: stop and ask. Don't guess your way past a
 gate — that's how rule 47 was tightened in the first place.

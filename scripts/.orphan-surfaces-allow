@@ -1,0 +1,14 @@
+# Allowlist for scripts/check-orphan-surfaces.sh
+#
+# One bare @Composable symbol name per line. A listed surface is exempt from
+# the ORPHANED / DEBUG-ONLY gate — use it ONLY for a surface that is
+# deliberately unwired (e.g. staged behind an entry point that has not landed
+# yet), and note why on the line above it.
+#
+# An entry here is DEBT, not an answer: an unreachable surface still ships dead
+# code in the release APK and still passes connected tests that prove nothing
+# about reachability. Remove the entry as soon as the surface is wired up.
+#
+# Example:
+#   # wired up by feature #NNN WI-3 (entry point not merged yet)
+#   SomeStagedScreen

@@ -10,7 +10,7 @@ last unchecked box reaches `VERIFIED`, #110 is complete (modulo the explicit DEF
 > *capability-block* definition of parity ("does Android have a reader / library / backup / AI / TTS
 > at all"), not feature-for-feature parity: iOS shipped ~90 VERIFIED features and Android implements
 > roughly a third of them. A code-level sweep on 2026-08-04 found **31 concrete remaining gaps**,
-> filed as rows **#139–#169** and organised into boxes **G1–G8** in the
+> filed as rows **#139–#171** and organised into boxes **G0–G8** in the
 > [Phase 4](#phase-4--the-remaining-iosandroid-gap-filed-2026-08-04) section below. **Phase 4 is the
 > live build queue; A–F below are history — do not re-open them.**
 
@@ -38,10 +38,17 @@ These are done — listed so progress is visible and parity isn't re-litigated.
 - [x] **PDF reader** — `PdfRenderer` continuous scroll + page resume — #115 (`android/v0.7.0`)
 - [x] **Backup format model** — `@Serializable` DTOs, golden-vector conformance — #113 (`android/v0.6.1`)
 - [x] **WebDAV backup/restore backend** — client + blob store + collector/importer (live rclone round-trip) — #116 (`android/v0.7.7`)
-- [x] **Backup & WebDAV restore UI** — the 5 designed Compose surfaces — #114 (`android/v0.6.0`)
+- [~] **Backup & WebDAV restore UI** — the 5 designed Compose surfaces — #114 (`android/v0.6.0`).
+  **UNCHECKED 2026-08-04 — UNREACHABLE**: zero production call sites; only launcher is
+  `src/debug/BackupDebugActivity`, excluded from the release APK. Blocked on #171 / needs-design #2018.
 - [x] **OPDS catalog backend** — feed parse + HTTP + acquisition→import — #117
-- [x] **OPDS catalog UI** — source list + add/edit + browse + download → in-library — #120 (`android/v0.8.1`–`v0.8.4`)
-- [x] **AI provider + chat/summary** — provider list/editor + OpenAI-compat & Anthropic SSE + chat panel — #118 (`android/v0.8.0`)
+- [~] **OPDS catalog UI** — source list + add/edit + browse + download → in-library — #120 (`android/v0.8.1`–`v0.8.4`).
+  **UNCHECKED 2026-08-04 — UNREACHABLE**: `OpdsSourceListScreen`/`OpdsBrowseScreen`/`OpdsAddSheet`
+  have zero production call sites. Blocked on #171 / needs-design #2018.
+- [~] **AI provider + chat/summary** — provider list/editor + OpenAI-compat & Anthropic SSE + chat panel — #118 (`android/v0.8.0`).
+  **UNCHECKED 2026-08-04 — PARTLY UNREACHABLE**: `AiChatPanel` + `AiProviderListScreen` have zero
+  production call sites (provider *config* was later reachable via #131's bilingual Set-up flow, but
+  chat/summarize never was). Blocked on #171 / needs-design #2018.
 - [x] **TTS read-aloud** — `TextToSpeech` engine + control bar + voice/speed sheets + TXT highlight — #121 (`android/v0.8.5`–`v0.9.0`)
 
 ---
@@ -51,8 +58,11 @@ These are done — listed so progress is visible and parity isn't re-litigated.
 The finite list. Each is autonomously buildable (its design is committed; none is design-blocked).
 Build order is roughly reuse-leverage / dependency order.
 
-- [x] **A. Reading stats** — in-reader session pill + time-detail card + dashboard (window bar · hero ·
+- [~] **A. Reading stats** — in-reader session pill + time-detail card + dashboard (window bar · hero ·
   14-day chart · per-book table) over a Room reading-time tracker.
+  **UNCHECKED 2026-08-04 — DASHBOARD UNREACHABLE**: `StatsDashboard` has zero production call sites.
+  The tracker backend is live and the in-reader pill IS reachable, so time is recorded but the
+  dashboard can never be opened. Blocked on #171 / needs-design #2018.
   Design: `vreader-stats-android.jsx`. Status: **VERIFIED 2026-06-28** — #122, all 4 WIs merged
   (`android/v0.9.1`→`v0.10.0`); Gate-5b `dev-docs/verification/feature-122-20260628.md` (`result: pass`).
   GH #1828 closed.
@@ -147,7 +157,7 @@ have a reader, a library, backup, AI, TTS, annotations at all. They are all `[x]
 ~90 VERIFIED features and Android implements roughly a third of them, so "every box checked" ≠ "the
 two apps do the same things". A 2026-08-04 code-level sweep (iOS `docs/features.md` VERIFIED rows ×
 the actual `android/app/src/main/kotlin` surface) found **31 concrete gaps**, now filed as
-`docs/features.md` rows **#139–#169**.
+`docs/features.md` rows **#139–#171**.
 
 These are deliberately *small* features (2–6 WIs each) so they can be run in batches, several lanes
 at a time, through `/dispatch` (rule 55) or `/feature-workflow` individually.
@@ -155,6 +165,25 @@ at a time, through `/dispatch` (rule 55) or `/feature-workflow` individually.
 **Legend:** same as above. Each box lists its feature row; dependency edges are the machine-readable
 `Deps:[…]` tokens in the tracker (`scripts/deps-check.sh feature <id>` is the gate — nothing
 dispatches that isn't READY).
+
+## G0. Reachability — the Settings hub (BLOCKS the value of four shipped features)
+
+> **Found 2026-08-04.** Boxes A–F certified *"the code exists and its tests pass"*, not *"a user can
+> open it"*. Four features shipped `VERIFIED` with UI that has **zero call sites** in
+> `android/app/src/main/kotlin`. This box exists so parity can never again be declared on
+> unreachable code.
+
+- [ ] **#171 Settings hub + production entry-point wiring** — `MainActivity` hosts only Library +
+      Search; no `SettingsScreen` has ever existed on Android. Wiring it makes #114 (backup/WebDAV
+      UI), #118 (AI chat + provider list), #120 (OPDS UI) and #122 (stats dashboard) reachable, and
+      is the acceptance criterion for those four re-earning `VERIFIED`.
+      **BLOCKED: needs-design (#2018)** — the hub's *content* is designed for iOS
+      (`vreader-panels.jsx:810-901` + `diagnostics-artboards.jsx:28-83`) and reuses per #106, but the
+      Android **entry point** is not: `vreader-library-android.jsx:99-132` shows only Search + More
+      with no Settings icon and no depicted destination, which *contradicts* the iOS default rather
+      than merely omitting it — so the #106 reuse policy does not cover it.
+
+**Highest-value item in phase 4**: it ships no new capability and makes four existing ones usable.
 
 ## G1. Reader navigation — Contents (TOC) on every format
 
@@ -195,8 +224,13 @@ dispatches that isn't READY).
 
 ## G5. Library
 
-- [ ] **#152 Cover extraction + generated fallback** — every book renders a tinted `FallbackCover`;
-      no real art is ever extracted. iOS: #43. **Highest user-visible gap in phase 4.**
+- [ ] **#152 Generative typographic covers** — every book renders a flat 5-tint `FallbackCover`;
+      iOS ships the design's 5 style families × 12 `COVER_PALETTES`, assigned deterministically from
+      `fingerprintKey`. iOS: **#60 WI-10**. **Highest user-visible gap in phase 4.**
+      *Re-scoped during Gate 1*: iOS #43 (extract embedded art) was superseded by #60 WI-10 — iOS
+      feeds its cover image slot from `CustomCoverStore` only and never displays publisher artwork,
+      so an extraction pipeline would be non-parity work. Determinism must use FNV-1a (not
+      `hashCode()`) so a book gets the same cover on both platforms.
 - [ ] **#153 Custom book covers** — iOS: #30. `Deps:[feat:#152]`.
 - [ ] **#154 Library sort order** — no sort exists. iOS: #20. `Deps:[feat:#152]`.
 - [ ] **#155 Open-with / system document handler** — manifest declares LAUNCHER only, so vreader
@@ -247,8 +281,14 @@ dispatches that isn't READY).
 
 ## Definition of done (phase 4)
 
-- **Phase-4 parity reached** when G1–G8 are all `[x] VERIFIED` (the three DEFERRED rows excepted,
-  pending their go/no-go).
+- **Reachability is part of done.** A box may only be checked when the capability is exercised
+  through a **production entry point in a release-configured build** — the path a real user takes.
+  A DEBUG-source-set launcher, a `vreader-debug://` command, or a test invoking a composable
+  directly does **not** count (rule 47 Gate 5, "Production reachability"). This clause exists
+  because A–F were all checked while four features were unreachable.
+- **Phase-4 parity reached** when G0–G8 are all `[x] VERIFIED` (the three DEFERRED rows excepted,
+  pending their go/no-go). **G0 is the gating item** — until it lands, four already-shipped features
+  remain unusable.
 - Each row follows the standard rule-47 6 gates: it gets its GH issue at the Gate-2 → `PLANNED`
   flip, and its box is checked here on `VERIFIED`.
 - **Do not re-open the A–F boxes** — they are the capability-block definition and are complete.

@@ -66,6 +66,34 @@ changed paths classify `android-app`/`android-spike` via
 The rest of this skill (real-books-first, evidence schema, terminal actions) is
 platform-neutral; only the harness + commands differ.
 
+## Verify through the production entry point (binding — rule 47 Gate 5)
+
+Verification means a **user** can reach the thing, not that a test can call it.
+Every behavioral surface is exercised through a **production entry point in a
+release-configured build**: launch the shipped app and navigate its UI to the
+surface. The CU-free harness below is how you *drive* that navigation and assert
+state — it is not a substitute for it.
+
+**Not acceptance, on either platform:**
+
+- a launcher that lives in `android/app/src/debug/` (excluded from the release APK),
+- a `vreader-debug://` DebugBridge command used as the *only* way in,
+- a test that invokes a composable / View / screen directly.
+
+These are setup mechanisms. Use them to seed books, wipe state, or jump to a
+locator — then still reach the surface itself the way a user does, and record
+that route (e.g. "Library → gear → Backup") in the evidence file's `## Entry path`.
+
+**If no production entry point exists**, the feature is NOT verified: leave the
+row at `DONE` (`result: partial`), note the gap in the row's Notes, and file the
+missing entry point as a tracked blocker — a `needs-design` issue per rule 51
+when the surface is undesigned, otherwise a feature row. Do not flip `VERIFIED`
+on harness-only reachability. Precedent: Android #114/#118/#120/#122 each reached
+`VERIFIED` with GH issues closed while their composables had zero production call
+sites. `scripts/check-orphan-surfaces.sh` detects that symptom (top-level
+composables with no production call site) — a useful pre-check, but a detector,
+not a gate.
+
 ## The CU-free method
 
 Computer-use is unavailable in cron contexts. Verify through the XCUITest
@@ -134,19 +162,26 @@ For each `awaiting-device-verification` issue you take:
 
 1. **Pick + read** — a `DONE` feature; read its `docs/features.md` row +
    `dev-docs/plans/` plan. The acceptance criteria are the contract.
-2. **Exercise the criteria** — add or run a verification XCUITest under
-   `vreaderUITests/Verification/`; drive state via the DebugBridge harness.
-3. **Write the evidence file** —
+2. **Find the entry point first** — before running anything, locate the
+   production call site that gets a user to this feature's surface (a
+   `main`-source-set navigation route / menu item, not a `debug/` launcher).
+   No production call site → the feature is not verifiable; go to step 6.
+3. **Exercise the criteria** — add or run a verification XCUITest under
+   `vreaderUITests/Verification/`; drive state via the DebugBridge harness, but
+   reach the surface itself through the entry point from step 2.
+4. **Write the evidence file** —
    `dev-docs/verification/feature-<id>-<YYYYMMDD>.md` per
    `dev-docs/verification/SCHEMA.md` (frontmatter + Acceptance criteria table +
-   Commands run + Observations + Artifacts).
-4. **All criteria pass** → flip the row to `VERIFIED`. The
-   `check_terminal_status_evidence.sh` hook needs the evidence file to exist
+   `## Entry path` naming the user-visible route + Commands run + Observations +
+   Artifacts).
+5. **All criteria pass through the entry path** → flip the row to `VERIFIED`.
+   The `check_terminal_status_evidence.sh` hook needs the evidence file to exist
    first; `check_gh_issue_mirror.sh` needs `GH: #N` in the row's Notes.
-5. **Some criteria un-verifiable CU-free** → `result: partial` in the evidence
-   file, document the deferred slices in the row's Notes, leave the row at
-   `DONE` (do not flip to `VERIFIED`).
-6. **Verification-exception / verification-blocked** — for failure modes that
+6. **Some criteria un-verifiable CU-free, or no production entry point** →
+   `result: partial` in the evidence file, document the deferred slices (or the
+   missing entry point + the blocker issue you filed) in the row's Notes, leave
+   the row at `DONE` (do not flip to `VERIFIED`).
+7. **Verification-exception / verification-blocked** — for failure modes that
    physically cannot be device-reproduced, follow the AGENTS.md close-gate
    exception path (a high-fidelity integration test at real subsystem
    boundaries + the `verification-exception` label), or `verification-blocked`
