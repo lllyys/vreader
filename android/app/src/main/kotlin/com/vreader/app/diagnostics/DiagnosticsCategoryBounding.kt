@@ -66,10 +66,17 @@ object DiagnosticsCategoryBounding {
         "readium" to DiagnosticsCategory.READER,
     )
 
-    /** The chip an entry with this raw [category] is filed under. Never returns `All`. */
-    fun chipFor(category: String): String? {
+    /**
+     * The chip an entry with this raw [category] is filed under. Never returns [ALL].
+     *
+     * A BLANK category is bucketed, not dropped (Gate-4 round-2 Low): `LogcatLineParser` yields
+     * `""` for an otherwise valid line whose tag column is absent, and dropping it would make those
+     * entries reachable only under `All` — contradicting rule 3 and this object's own promise that
+     * filtering still reaches every collapsed entry.
+     */
+    fun chipFor(category: String): String {
         val trimmed = category.trim()
-        if (trimmed.isEmpty()) return null
+        if (trimmed.isEmpty()) return COLLAPSED_BUCKET
         val key = trimmed.lowercase()
         DESIGNED[key]?.let { return it }
         KNOWN_TAGS[key]?.let { return it.tag }
@@ -85,7 +92,7 @@ object DiagnosticsCategoryBounding {
     fun chips(entries: List<DiagnosticsLogEntry>): List<String> {
         val counts = LinkedHashMap<String, Int>()
         for (entry in entries) {
-            val chip = chipFor(entry.category) ?: continue
+            val chip = chipFor(entry.category)
             counts[chip] = (counts[chip] ?: 0) + 1
         }
         val ranked = counts.entries

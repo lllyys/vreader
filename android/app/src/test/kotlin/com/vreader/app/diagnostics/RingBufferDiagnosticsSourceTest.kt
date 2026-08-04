@@ -3,13 +3,13 @@ package com.vreader.app.diagnostics
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.util.Collections
 import java.util.concurrent.CountDownLatch
-import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
-import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 
 /**
@@ -21,6 +21,15 @@ import java.util.concurrent.atomic.AtomicReference
  * capacity" is the invariant that keeps a long-running process from growing without bound.
  */
 class RingBufferDiagnosticsSourceTest {
+
+    /**
+     * Deliberately far below what a healthy run produces (hundreds), so the floor detects "the
+     * reader never got a look in" without becoming a load-sensitive flake.
+     */
+    private val MIN_INTERLEAVED_READS = 10
+
+    /** Snapshots the reader takes on the empty ring before the writers are released. */
+    private val WARMUP_READS = 200
 
     private fun entries(
         source: RingBufferDiagnosticsSource,
@@ -178,48 +187,56 @@ class RingBufferDiagnosticsSourceTest {
      *
      * A shared start latch alone does NOT establish "a read in flight": a legal scheduler may run
      * every writer to completion before the reader takes its first snapshot, so a ring with its
-     * synchronisation removed could pass by luck. So the two sides are coupled: each writer emits
-     * one entry, then waits until the reader has observed a PARTIAL snapshot (strictly between
-     * empty and complete — a state that can only exist mid-write) before emitting the rest, and the
-     * run asserts that such an observation actually happened. The wait is deadline-bounded so a
-     * regression fails the assertion instead of hanging the suite.
+     * synchronisation removed could pass by luck. The run therefore RECORDS how many DISTINCT
+     * intermediate sizes the reader observed (strictly between empty and complete) and asserts a
+     * floor. One intermediate size proves only that a read happened early; many distinct ones can
+     * only be produced by reads interleaved through the write stream. Capacity equals the total, so
+     * no eviction can manufacture an intermediate size after the writers finish.
      *
-     * Capacity is sized ABOVE the total so eviction cannot mask a lost write.
+     * The earlier revision instead had writers spin on `Thread.yield()` until the reader signalled
+     * a partial observation. That coupling was CI-hostile (a scheduling hint, not a guarantee, with
+     * a 30s deadline) and proved less. What the reader genuinely needs is not a handshake per write
+     * but a WARM-UP: its first `runBlocking` snapshot pays coroutine/classload costs far larger
+     * than the whole write burst, so a cold reader reliably takes its first sample after the
+     * writers are done. It therefore does warm-up snapshots on the empty ring first and releases
+     * the writers only once it is looping hot.
      */
     @Test
     fun concurrentRecordLosesNothingWhileAReadIsInFlight() {
         val threads = 8
-        val perThread = 500
+        val perThread = 2_000
         val total = threads * perThread
         val ring = RingBufferDiagnosticsSource(capacity = total)
         val start = CountDownLatch(1)
+        val readerWarm = CountDownLatch(1)
         val stopReading = AtomicBoolean(false)
-        val partialSnapshots = AtomicLong(0)
+        val intermediateSizes = Collections.synchronizedSet(HashSet<Int>())
         val readerFailure = AtomicReference<Throwable?>(null)
         val writerFailure = AtomicReference<Throwable?>(null)
-        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30)
 
         val reader = Thread {
             start.await()
             try {
+                var reads = 0
                 while (!stopReading.get()) {
                     val size = runBlocking {
                         (ring.recentEntries(null, Int.MAX_VALUE) as SourceResult.Available).entries.size
                     }
-                    if (size in 1 until total) partialSnapshots.incrementAndGet()
+                    if (size in 1 until total) intermediateSizes.add(size)
+                    if (++reads == WARMUP_READS) readerWarm.countDown()
                 }
             } catch (t: Throwable) {
                 readerFailure.set(t)
+            } finally {
+                readerWarm.countDown()   // never strand the writers if the reader dies
             }
         }
         val writers = (0 until threads).map { t ->
             Thread {
                 start.await()
+                readerWarm.await()
                 try {
-                    ring.put("$t-0", at = 0L)
-                    // Hold until the reader has demonstrably read mid-write.
-                    while (partialSnapshots.get() == 0L && System.nanoTime() < deadline) Thread.yield()
-                    for (i in 1 until perThread) ring.put("$t-$i", at = i.toLong())
+                    repeat(perThread) { i -> ring.put("$t-$i", at = i.toLong()) }
                 } catch (e: Throwable) {
                     writerFailure.set(e)
                 }
@@ -233,11 +250,14 @@ class RingBufferDiagnosticsSourceTest {
         stopReading.set(true)
         reader.join(60_000)
 
+        writers.forEachIndexed { i, w -> assertFalse("writer $i still alive", w.isAlive) }
+        assertFalse("reader still alive", reader.isAlive)
         assertNull("reader threw: ${readerFailure.get()}", readerFailure.get())
         assertNull("writer threw: ${writerFailure.get()}", writerFailure.get())
         assertTrue(
-            "no snapshot overlapped the writes — this run proved nothing about concurrent reads",
-            partialSnapshots.get() > 0L,
+            "reads did not interleave with the writes (${intermediateSizes.size} distinct " +
+                "intermediate sizes) — this run proved nothing about concurrent reads",
+            intermediateSizes.size >= MIN_INTERLEAVED_READS,
         )
 
         val got = entries(ring)

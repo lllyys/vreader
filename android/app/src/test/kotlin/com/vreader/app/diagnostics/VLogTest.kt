@@ -205,9 +205,13 @@ class VLogTest {
      * bare per-launch counter, launch #2's first ids would be launch #1's first ids, and the
      * composite (ring wins a collision) would drop the prior-launch entries — precisely the
      * pre-crash trail the platform log exists to provide.
+     *
+     * The name says DISTINCT nonces, not "never": production draws the nonce at random, so the
+     * guarantee is probabilistic (~1 in 2^21 per launch pair), and overclaiming it in a test name
+     * would misrepresent what is actually asserted.
      */
     @Test
-    fun idsFromTwoLaunchesNeverCollide() {
+    fun idsFromTwoLaunchesWithDistinctNoncesDoNotCollide() {
         val firstLaunch = RingBufferDiagnosticsSource(capacity = 16)
         VLog.install(firstLaunch, { fixedTime }, launchNonce = 1L)
         repeat(3) { VLog.i(DiagnosticsCategory.READER, "ReaderActivity", "launch-1 #$it") }
@@ -357,9 +361,14 @@ class DiagnosticsCategoryBoundingTest {
         assertEquals(listOf("All", DiagnosticsCategoryBounding.COLLAPSED_BUCKET), chips)
     }
 
+    /**
+     * A tagless logcat line parses to `category == ""`. It must be FILTERABLE (via the bucket), not
+     * silently reachable only under `All`.
+     */
     @Test
-    fun anEmptyCategoryIsIgnoredEntirely() {
-        assertEquals(listOf("All"), chipsOf("", "  "))
+    fun aBlankCategoryIsBucketedNotDropped() {
+        assertEquals(listOf("All", DiagnosticsCategoryBounding.COLLAPSED_BUCKET), chipsOf("", "  "))
+        assertEquals(DiagnosticsCategoryBounding.COLLAPSED_BUCKET, DiagnosticsCategoryBounding.chipFor(""))
     }
 
     @Test

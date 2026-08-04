@@ -4,6 +4,7 @@ import android.util.Log
 import java.io.PrintWriter
 import java.io.StringWriter
 import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.random.Random
 
 /**
@@ -58,10 +59,19 @@ object VLog {
     @Volatile
     private var clock: () -> Long = System::currentTimeMillis
 
-    private val counter = AtomicLong(0L)
+    /**
+     * A nonce and ITS OWN counter, swapped as one immutable unit (Gate-4 round-2 High). Holding
+     * them as two independent fields (`@Volatile` nonce + shared `AtomicLong`) made the pair
+     * non-atomic: an `emit` could read the old nonce, be descheduled while `install` reset the
+     * counter, and then issue `oldNonce|1` — a duplicate of an id the old generation already used,
+     * which the composite would silently collapse into one entry. Each generation owning its own
+     * counter makes that interleaving unrepresentable.
+     */
+    private class Generation(val nonce: Long) {
+        val counter = AtomicLong(0L)
+    }
 
-    @Volatile
-    private var launchNonce: Long = randomLaunchNonce()
+    private val generation = AtomicReference(Generation(randomLaunchNonce()))
 
     /**
      * Wire the capture floor. Called once from `VReaderApp.onCreate`.
@@ -75,12 +85,11 @@ object VLog {
         launchNonce: Long = randomLaunchNonce(),
     ) {
         this.clock = clock
-        this.launchNonce = launchNonce and NONCE_MASK
-        // The counter restarts because the nonce it is namespaced by just changed — a new nonce IS
-        // a new id space. This is also what makes a two-launch test faithful in one JVM: without
-        // the reset, the second "launch" would keep counting up and could never collide, so the
-        // test would pass against the very defect it exists to catch.
-        counter.set(0L)
+        // A new nonce IS a new id space, so it arrives with a counter of its own rather than
+        // resetting a shared one. This is also what makes a two-launch test faithful inside one
+        // JVM: without the restart the second "launch" would keep counting up and could never
+        // collide, so the test would pass against the very defect it exists to catch.
+        generation.set(Generation(launchNonce and NONCE_MASK))
         this.sink = sink
     }
 
@@ -114,7 +123,7 @@ object VLog {
         message: String,
         t: Throwable?,
     ) {
-        val sequenceId = (launchNonce shl COUNTER_BITS) or (counter.incrementAndGet() and COUNTER_MASK)
+        val sequenceId = nextSequenceId()
         val body = buildString {
             append('[').append(origin).append("] ").append(message)
             if (t != null) append('\n').append(stackTraceOf(t))
@@ -136,6 +145,12 @@ object VLog {
             DiagnosticsLevel.WARN -> Log.w(tag, payload)
             DiagnosticsLevel.ERROR, DiagnosticsLevel.ASSERT -> Log.e(tag, payload)
         }
+    }
+
+    /** ONE snapshot of the generation, so nonce and counter can never come from different ones. */
+    private fun nextSequenceId(): Long {
+        val current = generation.get()
+        return (current.nonce shl COUNTER_BITS) or (current.counter.incrementAndGet() and COUNTER_MASK)
     }
 
     private fun stackTraceOf(t: Throwable): String {
