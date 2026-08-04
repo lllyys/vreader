@@ -13,8 +13,7 @@
 // slot, replacing the pre-chrome TtsEntryBar) which opens the ReaderSettingsSheet.
 //
 // feature #132 WI-6: the FIRST host to render the shared ReaderChromeScaffold (ReaderTopChrome +
-// the extended ReaderBottomChrome Contents/Notes/Display toolbar + the Notes review sheet). TXT/MD has
-// no TOC → Contents is hidden (EmptyTocProvider / empty tocEntries). Notes opens the
+// the extended ReaderBottomChrome Contents/Notes/Display toolbar + the Notes review sheet). Notes opens the
 // AnnotationsReviewSheet over this book's annotationsForBook snapshot; onJumpToAnnotation is non-null
 // (TXT/MD jump via the plain Locator's charRangeStartUTF16/charOffsetUTF16 → the existing chunk scroll
 // seam). The #129 Display sheet + the #121 TTS bar are preserved unchanged inside the scaffold's bottom
@@ -37,6 +36,18 @@
 // long-press on translation is excluded from the nearest-source-chunk fallback (gesture exclusion). TTS
 // auto-scroll visibility now keys off the registered SOURCE `Text` bounds (isSourceChunkInViewport), not
 // the item index, since an in-item translation makes items taller than their source line (round-5/6).
+//
+// feature #139 WI-7: TXT/MD now HAS a table of contents. A per-document TxtMdTocProvider scan (over the
+// already-decoded text, on the provider's own injected dispatcher) publishes the detected chapters into
+// `tocEntries`, so the scaffold's existing empty-list rule un-hides the Contents control for a book with
+// headings and still hides it for one without (no new visible surface — rule 51). The scan is GATED on
+// readiness (plan §4.5): `withFrameNanos` in both layouts, plus — while the PAGED body is mounted — the
+// host-owned `pagedOffset` settled-page signal, so it never competes with first paint. Both gate signals
+// are Compose state, deliberately NOT TxtPageNavigator.index (a plain `var` that would never re-emit),
+// and the paged predicate also releases when the body flips to scroll mid-wait so a bilingual/layout
+// toggle cannot strand the scan. `currentTocIndex` is txtTocIndexFor(liveOffset, entryOffsets) and a
+// tapped row jumps through the EXISTING mode-aware jumpToOffset seam (pager in paged, chunk scroll in
+// scroll) — nothing in the pagination stack changes.
 package com.vreader.app.reader
 
 import android.os.Bundle
@@ -63,8 +74,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.State
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.AnnotatedString
@@ -80,6 +93,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -139,6 +153,10 @@ import com.vreader.app.reader.chrome.ReaderChromeStateSaver
 import com.vreader.app.reader.nav.BookmarkPreviewProvider
 import com.vreader.app.reader.nav.BookmarkRowItem
 import com.vreader.app.reader.nav.JumpResult
+import com.vreader.app.reader.nav.TocEntry
+import com.vreader.app.reader.nav.TocProvider
+import com.vreader.app.reader.nav.TxtMdTocProvider
+import com.vreader.app.reader.nav.txtTocIndexFor
 import com.vreader.app.reader.settings.ReaderSettings
 import com.vreader.app.reader.settings.ReaderSettingsSheet
 import com.vreader.app.search.InBookSearchSheet
@@ -358,11 +376,13 @@ class TxtReaderActivity : ComponentActivity() {
                         // (pagedBodyMounted == false). In paged mode the scroll LazyListState is hidden, so
                         // animating it would be a wasted no-op; the paged pager-follow effect (below, after
                         // usePaged/jumpToOffset are in scope) drives the spoken page instead.
+                        // feature #139 WI-7 — the body moved UNCHANGED into [followSpokenChunkInScroll] so the
+                        // connected TOC-jump test can drive the SAME decision (a real TTS engine cannot speak
+                        // on the emulator — no voice data; the #137 simulatePagedTtsFollowForTest precedent).
+                        // The effect KEYS are unchanged, and they are what make a scroll-mode TOC jump get
+                        // re-followed immediately: the jump changes firstVisibleItemIndex, which re-runs this.
                         LaunchedEffect(spokenChunk, listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset, pagedBodyMounted.value) {
-                            if (spokenChunk < 0 || pagedBodyMounted.value) return@LaunchedEffect
-                            val visible = selectionController?.isSourceChunkInViewport(spokenChunk)
-                                ?: listState.layoutInfo.visibleItemsInfo.any { it.index == spokenChunk }
-                            if (!visible) runCatching { listState.animateScrollToItem(spokenChunk) }
+                            followSpokenChunkInScroll(spokenChunk, pagedBodyMounted.value, selectionController, listState)
                         }
                         val popoverVm = remember(bookKey) { com.vreader.app.annotations.SelectionPopoverViewModel() }
                         val popoverState by popoverVm.state.collectAsStateWithLifecycle()
@@ -590,6 +610,48 @@ class TxtReaderActivity : ComponentActivity() {
                             }
                         }
 
+                        // feature #139 WI-7 — the auto-generated TXT/MD table of contents. ONE provider per
+                        // document over the ALREADY-decoded text (no new I/O, no new memory class); it owns
+                        // its own dispatcher hop, so the host never wraps the call. `originalFormat` is the
+                        // SAME typed format MainActivity routed on (there is no parallel format column on
+                        // Android), and it selects the scanner: txt → rule engine, md → the MD scanner.
+                        val tocProvider: TocProvider = remember(s.document, s.book) {
+                            TxtMdTocProvider(
+                                text = s.document.text,
+                                book = s.book,
+                                format = s.book.originalFormat,
+                                dispatcher = Dispatchers.Default,
+                            )
+                        }
+                        // Empty until the gated scan publishes → the scaffold hides Contents → the pre-scan
+                        // frame is behaviorally identical to pre-#139. Keyed on the DOCUMENT, so a reload /
+                        // rotation re-scans but a layout toggle or any other recomposition does NOT.
+                        val tocEntriesState = remember(s.document) { mutableStateOf(emptyList<TocEntry>()) }
+                        LaunchedEffect(s.document) {
+                            runTxtTocScan(tocProvider, pagedBodyMounted, pagedOffset) { scanned ->
+                                tocEntriesState.value = scanned
+                                testTocEntries = scanned
+                                testTocScanned = true
+                            }
+                        }
+                        val tocEntries = tocEntriesState.value
+                        val tocOffsets = remember(tocEntries) { txtTocEntryOffsets(tocEntries) }
+                        // The highlighted row for the CURRENT position — mode-aware via liveOffset (the paged
+                        // page-start offset in paged mode, the top-visible chunk's offset in scroll mode).
+                        val currentTocIndex = txtTocIndexFor(liveOffset, tocOffsets)
+                        // A tapped row navigates through the EXISTING mode-aware seam: the pager in paged
+                        // mode (which extends a partial #138 window on demand), the chunk scroll otherwise.
+                        // An out-of-range row / offset returns false → the sheet stays open (rule 51).
+                        val onJumpToc: (Int) -> Boolean = { index ->
+                            val target = txtTocJumpTarget(tocEntries, index, s.document.text.length)
+                            if (target == null) false else { jumpToOffset(target); true }
+                        }
+                        SideEffect {
+                            testTocEntries = tocEntries
+                            testCurrentTocIndex = currentTocIndex
+                            testJumpToc = onJumpToc
+                        }
+
                         // feature #137 WI-9 / #138 WI-5a — PAGED TTS follow: auto-advance the pager to the page
                         // containing the currently-spoken SOURCE offset (tts.charStart, the SAME signal
                         // spokenChunk is derived from). Keyed ONLY on the NARRATION signal (tts.phase +
@@ -620,6 +682,11 @@ class TxtReaderActivity : ComponentActivity() {
                             chromeState = chromeState,
                             annotations = annotationsSnapshot,
                             onBack = ::finish,
+                            // feature #139 WI-7 — the detected TXT/MD chapters + the live highlight + the
+                            // row jump. An EMPTY list keeps the Contents control hidden (scaffold rule).
+                            tocEntries = tocEntries,
+                            currentTocIndex = currentTocIndex,
+                            onJumpToc = onJumpToc,
                             bookDetails = bookDetails,
                             onShareBook = { com.vreader.app.reader.share.shareBook(this@TxtReaderActivity, s.book) },
                             onCopyFingerprint = { copyFingerprint(it) },
@@ -1365,6 +1432,55 @@ class TxtReaderActivity : ComponentActivity() {
     @androidx.annotation.VisibleForTesting
     fun pagedDocLengthForTest(): Int = testPagedDocLength
 
+    // ---- feature #139 WI-7 — TXT/MD table-of-contents seams. [testCurrentTocIndex] / [testJumpToc]
+    // are published from the SAME SideEffect that feeds TxtReaderChrome, so a connected test reads what
+    // the Contents control/sheet reads rather than a parallel computation; [testTocEntries] is written
+    // at scan time TOO, because publishing an empty result changes no state and therefore triggers no
+    // recomposition (see [testTocScanned]). ----
+    @Volatile private var testTocEntries: List<TocEntry> = emptyList()
+    @Volatile private var testCurrentTocIndex: Int = -1
+    @Volatile private var testJumpToc: ((Int) -> Boolean)? = null
+    // Raised by the scan's publish callback, so "no TOC" is distinguishable from "the gate never
+    // opened" — without it a hidden-Contents assertion would pass for the WRONG reason. Set THERE and
+    // not in the SideEffect below, because publishing an empty result into an already-empty state is
+    // not a state CHANGE: no recomposition follows, so a SideEffect-driven flag would never rise for
+    // exactly the headings-free book the negative test is about.
+    @Volatile private var testTocScanned: Boolean = false
+
+    /** Whether the gated TOC scan has completed and published (however many entries). */
+    @androidx.annotation.VisibleForTesting
+    fun tocScanCompletedForTest(): Boolean = testTocScanned
+
+    /** The detected chapters currently passed to the chrome (empty → the Contents control is hidden). */
+    @androidx.annotation.VisibleForTesting
+    fun tocEntriesForTest(): List<TocEntry> = testTocEntries
+
+    /** The highlighted Contents row for the CURRENT reading position (`-1` only when there is no TOC). */
+    @androidx.annotation.VisibleForTesting
+    fun currentTocIndexForTest(): Int = testCurrentTocIndex
+
+    /** Perform the SAME row jump a Contents tap performs (the sheet dismisses only on `true`). */
+    @androidx.annotation.VisibleForTesting
+    fun jumpTocForTest(index: Int): Boolean = testJumpToc?.invoke(index) ?: false
+
+    /** feature #139 WI-7 — drive the SCROLL-mode read-aloud follow for a simulated spoken chunk through
+     *  the EXACT production decision ([followSpokenChunkInScroll]). The emulator has no TTS voice data,
+     *  so this is the scroll analog of #137's `simulatePagedTtsFollowForTest`: it proves what the live
+     *  effect does when it re-runs, which — because the effect is keyed on `firstVisibleItemIndex` — is
+     *  immediately after any jump that moves the list.
+     *
+     *  Runs on [androidx.compose.ui.platform.AndroidUiDispatcher.Main] because that is what the real
+     *  `LaunchedEffect` runs on: it carries a `MonotonicFrameClock`, without which `animateScrollToItem`
+     *  throws (and the production `runCatching` would silently swallow it, so the seam would look like
+     *  a working no-op). A caller's `lifecycleScope` (plain `Dispatchers.Main`) has no frame clock. */
+    @androidx.annotation.VisibleForTesting
+    suspend fun simulateScrollTtsFollowForTest(spokenChunk: Int) {
+        val list = testListState ?: return
+        withContext(androidx.compose.ui.platform.AndroidUiDispatcher.Main) {
+            followSpokenChunkInScroll(spokenChunk, testPagedBodyMounted?.value == true, testSelectionController, list)
+        }
+    }
+
     companion object {
         const val EXTRA_FINGERPRINT_KEY = "fingerprintKey"
 
@@ -1376,8 +1492,7 @@ class TxtReaderActivity : ComponentActivity() {
 
 /**
  * The TXT/MD reader host chrome — feature #132 WI-6. Renders the shared [ReaderChromeScaffold] (top bar +
- * the extended bottom chrome + the Notes review sheet) over the reading [body]. TXT/MD has no TOC, so
- * `tocEntries` is EMPTY (the [EmptyTocProvider] posture) → the scaffold hides the Contents control. The
+ * the extended bottom chrome + the Notes review sheet) over the reading [body]. The
  * top bar's Search/More/bookmark slots are omitted (null — #133/#134/#135; no dead controls). [bottomBar]
  * receives the scaffold's `(onOpenContents, onOpenNotes)` open callbacks and renders the host's bottom bar
  * — either the #121 TTS control bar (while read-aloud is active) or the #129 [ReaderBottomChrome] (Display
@@ -1391,6 +1506,12 @@ class TxtReaderActivity : ComponentActivity() {
  * the in-book search sheet when the host's search-open state is set; it is layered OVER the scaffold (the
  * sheet is a `ModalBottomSheet`, its own window), null when the sheet is closed. The host owns the
  * search-open state + the VM (one per reader session) so the scaffold stays a pure signal.
+ *
+ * feature #139 WI-7 — TXT/MD now has a TOC: [tocEntries] are the detected chapters ([TxtMdTocProvider]),
+ * [currentTocIndex] the row to highlight, [onJumpToc] the row jump (true → the sheet dismisses, false →
+ * it stays open with no invented error surface). All three are DEFAULTED to the pre-#139 posture (empty /
+ * 0 / always-false) so an omitting caller still hides the Contents control and compiles unchanged.
+ * Nothing about the Contents sheet itself changes — this host simply now has entries to give it.
  */
 @Composable
 internal fun TxtReaderChrome(
@@ -1403,6 +1524,12 @@ internal fun TxtReaderChrome(
     onShareAnnotations: () -> Unit,
     bottomBar: @Composable (Pair<(() -> Unit)?, (() -> Unit)?>) -> Unit,
     body: @Composable () -> Unit,
+    // feature #139 WI-7 — the auto-generated TXT/MD TOC. Defaulted so the two androidTest callers (and
+    // any future non-TOC caller) stay valid AND keep the pre-#139 posture: an EMPTY list is the
+    // scaffold's hide-the-Contents-control signal, so a caller that supplies none sees no Contents.
+    tocEntries: List<TocEntry> = emptyList(),
+    currentTocIndex: Int = 0,
+    onJumpToc: (Int) -> Boolean = { false },
     // feature #133 WI-10 — the in-book Search entry + sheet overlay (nullable/default so #132/#134/#135
     // callers stay valid). A null [onOpenSearch] omits the top-bar Search icon (Unsupported / no-dead-control).
     onOpenSearch: (() -> Unit)? = null,
@@ -1429,10 +1556,12 @@ internal fun TxtReaderChrome(
             title = title,
             chromeState = chromeState,
             onBack = onBack,
-            tocEntries = emptyList(),           // no TOC → the scaffold hides the Contents control
-            currentTocIndex = 0,
+            // feature #139 WI-7 — the host's detected TXT/MD chapters (empty until the gated scan
+            // publishes, and permanently empty for a book with no headings → Contents stays hidden).
+            tocEntries = tocEntries,
+            currentTocIndex = currentTocIndex,
             annotations = annotations,
-            onJumpToc = { false },              // unreachable: Contents is hidden with an empty TOC
+            onJumpToc = onJumpToc,
             onJumpToAnnotation = onJumpToAnnotation,
             onShareAnnotations = onShareAnnotations,
             // feature #133 WI-10 — the top-bar Search slot is now WIRED (the scaffold forwards it to
@@ -1502,6 +1631,103 @@ fun txtBookmarkPreviewProvider(document: TxtDocument): BookmarkPreviewProvider =
         if (text.isEmpty() || start >= text.length) return@BookmarkPreviewProvider null
         text.substring(start, (start + maxLen).coerceAtMost(text.length))
     }
+
+// ---- feature #139 WI-7 — TXT/MD table-of-contents host wiring ----
+
+/**
+ * feature #139 WI-7 — suspend until the reader is READY for the TOC scan to run (plan §4.5), so a
+ * whole-document heading scan never competes with first paint.
+ *
+ * Two stages, both built on signals that ALREADY exist in this host:
+ *  1. `withFrameNanos` — the hard guarantee in BOTH layouts that a frame has been produced. Needs
+ *     nothing from [TxtReaderBody] and no new API.
+ *  2. while the PAGED body is mounted, its first settled page. [pagedOffset] is what the body's
+ *     `onSaveSourceOffset` callback publishes; `-1` means "no page published yet".
+ *
+ * The stage-2 predicate is `!pagedBodyMounted || pagedOffset >= 0`, evaluated inside a `snapshotFlow`,
+ * which matters twice:
+ *  - **Both reads must be Compose state so the flow actually re-emits.** A gate over
+ *    `TxtPageNavigator.index` — a plain `var` — would suspend forever and leave Contents permanently
+ *    hidden in paged mode. Never reach for that; `TxtTocHostWiringTest` pins the working form.
+ *  - **It also releases when the body STOPS being paged.** A bilingual toggle or a layout change
+ *    mid-wait would otherwise strand the scan for the whole session (the effect is keyed on the
+ *    document, so it never restarts).
+ *
+ * Terminates on the first satisfying emission — this is a one-shot gate, not a subscription.
+ */
+internal suspend fun awaitTocScanGate(
+    pagedBodyMounted: State<Boolean>,
+    pagedOffset: State<Int>,
+) {
+    withFrameNanos { }
+    snapshotFlow { !pagedBodyMounted.value || pagedOffset.value >= 0 }.first { it }
+}
+
+/**
+ * feature #139 WI-7 — ONE table-of-contents scan for one document: wait for [awaitTocScanGate], then
+ * hand the provider's entries to [publish] exactly once. Called from `LaunchedEffect(s.document)`, so a
+ * document reload (or a rotation) re-scans while an ordinary recomposition does not.
+ *
+ * A scan failure degrades to NO table of contents (the Contents control stays hidden) rather than taking
+ * the reader down — a navigation affordance is never worth a crash. Cancellation is re-thrown so closing
+ * the reader mid-scan stops promptly and does not publish into a dead composition.
+ */
+internal suspend fun runTxtTocScan(
+    provider: TocProvider,
+    pagedBodyMounted: State<Boolean>,
+    pagedOffset: State<Int>,
+    publish: (List<TocEntry>) -> Unit,
+) {
+    awaitTocScanGate(pagedBodyMounted, pagedOffset)
+    val entries = try {
+        provider.toc()
+    } catch (cancellation: kotlinx.coroutines.CancellationException) {
+        throw cancellation
+    } catch (_: Exception) {
+        emptyList()
+    }
+    publish(entries)
+}
+
+/**
+ * feature #139 WI-7 — the comparable key per TOC row for [txtTocIndexFor]: each entry's source UTF-16
+ * offset, in list (document) order. A row without an offset (never produced by [TxtMdTocProvider], but
+ * the field is nullable on the shared contract) sorts as the start of the document. Pure/JVM-testable.
+ */
+internal fun txtTocEntryOffsets(entries: List<TocEntry>): List<Int> =
+    entries.map { it.canonicalLocator.charOffsetUTF16 ?: 0 }
+
+/**
+ * feature #139 WI-7 — the TXT/MD Contents jump target: the source UTF-16 offset row [index] navigates
+ * to, or null when the row does not exist or its offset is out of range for a document of [textLength]
+ * (→ the sheet stays open, rule 51 §nav-error-presentation — no invented error surface). Reuses
+ * [txtBookmarkScrollTarget] so a TOC row, a bookmark and a search hit at one offset resolve identically.
+ * Pure/JVM-testable.
+ */
+internal fun txtTocJumpTarget(entries: List<TocEntry>, index: Int, textLength: Int): Int? {
+    val entry = entries.getOrNull(index) ?: return null
+    return txtBookmarkScrollTarget(entry.canonicalLocator.charOffsetUTF16, textLength)
+}
+
+/**
+ * feature #137 WI-9 / #131 WI-8 — the SCROLL-mode read-aloud follow, extracted UNCHANGED from its
+ * `LaunchedEffect` (feature #139 WI-7) so a connected test can drive the same decision without a
+ * speaking TTS engine (the emulator has no voice data). Scrolls the spoken source chunk back into view
+ * when it is not visible; a no-op in paged mode (the pager-follow effect owns that) or with no spoken
+ * chunk. Visibility keys off the registered SOURCE `Text` bounds, not the lazy item index, because an
+ * in-item bilingual translation makes items taller than their source line.
+ */
+internal suspend fun followSpokenChunkInScroll(
+    spokenChunk: Int,
+    pagedBodyMounted: Boolean,
+    selectionController: TxtSelectionController?,
+    listState: LazyListState,
+) {
+    if (spokenChunk < 0 || pagedBodyMounted) return
+    val visible = selectionController?.isSourceChunkInViewport(spokenChunk)
+        ?: listState.layoutInfo.visibleItemsInfo.any { it.index == spokenChunk }
+    if (!visible) runCatching { listState.animateScrollToItem(spokenChunk) }
+}
 
 /** The pre-emission loading surface — a bare theme-colored full-screen fill while the Display settings +
  *  document load (the only pre-emission surface; the reader body is withheld until settings emit — Gate-4
