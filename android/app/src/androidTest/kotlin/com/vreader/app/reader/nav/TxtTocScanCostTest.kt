@@ -52,11 +52,16 @@ import java.util.regex.Pattern
  * prices PATHS and deliberately does not claim an exclusive construction-vs-reset split — see its
  * own documentation for exactly what it does and does not establish.
  *
- * **Assertions are EQUIVALENCE, never budgets.** Arms (a)/(b)/(c) must agree on the match count and
- * (a)/(b) element-for-element on `(title, offset)`; arm (h)'s three walks must return the identical
- * offset sequence, which is what makes their timings comparable at all. There is deliberately **no
- * latency assertion anywhere in this class** — a benchmark that gates on the number it was written
- * to discover is not evidence.
+ * **The MEASUREMENT arms assert EQUIVALENCE, never budgets.** Arms (a)/(b)/(c) must agree on the
+ * match count and (a)/(b) element-for-element on `(title, offset)`; arm (h)'s three walks must
+ * return the identical offset sequence, which is what makes their timings comparable at all. No
+ * measurement arm gates on a latency — a benchmark that gates on the number it was written to
+ * discover is not evidence.
+ *
+ * **The one exception is [extractionMeetsEngineBudget], added by WI-2** — and it is an exception
+ * precisely because it inverts that relationship. Its number was not discovered by the assertion;
+ * it was measured FIRST by arm (b) above and is being HELD afterwards. It is the RED for WI-2: red
+ * on the shipped engine, green on the one-`Matcher` walk. See [ENGINE_BUDGET_MS].
  *
  * **Confounder handling** (every arm's number is only worth its controls):
  *  - *JIT warm-up*: every timed arm is preceded by a warm-up that exercises the same shapes, so no
@@ -118,10 +123,12 @@ import java.util.regex.Pattern
  * after a plain `connectedDebugAndroidTest`.
  *
  * Run ONE class per connected invocation, and never drive the emulator while it runs (rule 52).
- * Method order is pinned so the log reads in a fixed sequence. Two methods each run one full
- * baseline extraction; on a 2.5 GB emulator that is where the process peaks (the `lowmemorykiller`
- * truncated #139 WI-8 runs at ~1.4 GB RSS). If a run is truncated, reboot the emulator or split the
- * class by `#method`.
+ * Method order is pinned so the log reads in a fixed sequence. THREE methods each run at least one
+ * full extraction through the production engine; on a 2.5 GB emulator that is where the process
+ * peaks (the `lowmemorykiller` truncated #139 WI-8 runs at ~1.4 GB RSS). That is why
+ * [extractionMeetsEngineBudget] stops retrying a pass that is wildly over budget instead of taking
+ * all [BUDGET_ATTEMPTS]. If a run is truncated, reboot the emulator or split the class by
+ * `#method`.
  */
 @RunWith(AndroidJUnit4::class)
 @FixMethodOrder(MethodSorters.NAME_ASCENDING)
@@ -172,6 +179,45 @@ class TxtTocScanCostTest {
 
         /** `TxtMdTocProvider.SCAN_LIMIT` — `MAX_TOC_ENTRIES + 1`, so arm (a) walks to end-of-text. */
         const val SCAN_LIMIT = 50_001
+
+        /**
+         * **WI-2's RED budget**, in milliseconds, for one full `extractHeadings` pass over the real
+         * book — and the one number in this class that is an ASSERTION rather than a report.
+         *
+         * Derived from WI-1's arm (b), which measured the identical walk driven by ONE reused
+         * `Matcher` and no-arg `find()` at **61–62 ms** (paired readings, before and after the
+         * baseline arm). 300 ms is ~5× that, which absorbs emulator load, the in-band
+         * `Pattern.compile` the engine pays and arm (b) did not, and the two cancellation checks
+         * a 1 859-match scan performs.
+         *
+         * **It is deliberately tight enough to reject a wrong fix, not just the shipped one.**
+         * Three implementations, all measured on this device in WI-1:
+         *
+         * | Implementation | Measured cost of one full scan |
+         * | --- | --- |
+         * | shipped `Regex.find()/next()` — a fresh `Matcher` per match | **6 525 ms** (21× over) |
+         * | ONE reused `Matcher` driven by `find(int)` | ≈ 1 859 × 1.7 ms ≈ **3 160 ms** (10× over) |
+         * | ONE reused `Matcher` driven by no-arg `find()` | **61–62 ms** (4.8× under) |
+         *
+         * The middle row is why the budget is 300 ms and not, say, 2 000 ms: arm (h) priced
+         * `find(int) − find()` at 1.7–2.1 ms per operation because `find(int)` RESETS, and reset is
+         * the length-proportional half. A fix that stops constructing `Matcher`s but keeps driving
+         * them with `find(int)` would look like a fix and still miss by an order of magnitude; this
+         * budget fails it.
+         */
+        const val ENGINE_BUDGET_MS = 300L
+
+        /**
+         * How many timed passes the budget test may take, reporting the MINIMUM.
+         *
+         * The minimum is the statistic most generous to the implementation, which is what makes a
+         * failure decisive rather than a claim about emulator load. Attempts stop early on the
+         * first pass within budget — and also on any pass more than [BUDGET_BLOWOUT_FACTOR] × over
+         * it, because a scan that far over is not a noise question and repeating it only risks the
+         * `lowmemorykiller` (the shipped walk grows process PSS by ~1.1 GB per pass).
+         */
+        const val BUDGET_ATTEMPTS = 3
+        const val BUDGET_BLOWOUT_FACTOR = 5
 
         /** Arm (h): how many matches (or resets) each of the five sub-arms performs. */
         const val WALK_MATCHES = 200
@@ -518,6 +564,68 @@ class TxtTocScanCostTest {
             )
         }
         report("EQUIVALENCE-DETAIL all ${shipped.value.headings.size} (title,offset) pairs identical")
+    }
+
+    // ---- 1b. WI-2's RED: the engine-level budget ---------------------------------------------------
+
+    /**
+     * **WI-2's RED.** One full `extractHeadings` pass over the real book must finish within
+     * [ENGINE_BUDGET_MS].
+     *
+     * This is the only assertion in this class that gates on a latency, and it is legitimate here
+     * for the reason the rest of the class is not: the number is not being discovered, it was
+     * MEASURED FIRST by WI-1 (arm (b), 61–62 ms) and is being held. It is RED on the shipped
+     * `Regex.find()/next()` engine (6 525 ms) and GREEN once the walk uses one reused `Matcher`
+     * driven by no-arg `find()` — see [ENGINE_BUDGET_MS] for why a `find(int)`-driven reuse, the
+     * plausible wrong fix, also fails it.
+     *
+     * It calls the PRODUCTION entry point, not a hand-written arm, so it measures what ships —
+     * including the in-band `Pattern.compile` and the cancellation checks. The result is checked
+     * against the book's known chapter count as well: a walk that got fast by finding fewer
+     * headings is not a fix, and the budget alone would not notice.
+     */
+    @Test
+    fun extractionMeetsEngineBudget() {
+        val text = requireRealBookText()
+        val rule = requireWinningRule(text)
+        val pattern = compileWinning(rule)
+        warmUpWalks(text, pattern, rule)
+
+        var bestMs = Long.MAX_VALUE
+        var last: ExtractResult? = null
+        for (attempt in 1..BUDGET_ATTEMPTS) {
+            gcSettle()
+            val t0 = SystemClock.elapsedRealtime()
+            val result = runBlocking { TxtTocRuleEngine.extractHeadings(text, rule, SCAN_LIMIT) }
+            val ms = SystemClock.elapsedRealtime() - t0
+            report(
+                "ARM red-engine-budget attempt=$attempt/$BUDGET_ATTEMPTS ms=$ms " +
+                    "budget_ms=$ENGINE_BUDGET_MS headings=${result.headings.size}",
+            )
+            bestMs = minOf(bestMs, ms)
+            last = result
+            if (ms <= ENGINE_BUDGET_MS) break
+            if (ms > ENGINE_BUDGET_MS * BUDGET_BLOWOUT_FACTOR) break
+        }
+
+        val extracted = requireNotNull(last) { "the budget loop must run at least once" }
+        report(
+            "ENGINE-BUDGET best_ms=$bestMs budget_ms=$ENGINE_BUDGET_MS " +
+                "headings=${extracted.headings.size} hit_limit=${extracted.hitLimit}",
+        )
+
+        assertEquals(
+            "a fast scan that finds fewer chapters is not a fix",
+            EXPECTED_HEADINGS, extracted.headings.size,
+        )
+        assertTrue("the production scan must not hit the scan limit on this book", !extracted.hitLimit)
+        assertTrue(
+            "extractHeadings took ${bestMs}ms (best of up to $BUDGET_ATTEMPTS passes) against a " +
+                "${ENGINE_BUDGET_MS}ms budget derived from WI-1 arm (b)'s measured 61-62ms. The scan " +
+                "must construct ONE Matcher and drive it with no-arg find(); a fresh Matcher per " +
+                "match costs ~6525ms and a reused Matcher driven by find(int) ~3160ms",
+            bestMs <= ENGINE_BUDGET_MS,
+        )
     }
 
     // ---- 2. target-semantic logging (arm f) --------------------------------------------------------

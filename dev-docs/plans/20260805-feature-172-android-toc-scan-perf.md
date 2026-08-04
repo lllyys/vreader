@@ -600,7 +600,12 @@ tests:
 gate:
   # BOTH commands are the WI-2 gate. The JVM command alone would NOT execute the declared RED,
   # which is a connected test — a gate that cannot run its own RED is not a gate (Gate-2 R1 HIGH).
-  - ANDROID_CMD="./gradlew :app:testDebugUnitTest --rerun-tasks --tests '*TxtToc*' --tests '*MdTocScanner*'" scripts/run-android-tests.sh
+  # CORRECTED (WI-2, 2026-08-05): '*TxtToc*' does NOT match TxtMdTocProviderTest — the class is
+  # TxtMdTocProvider*, not TxtToc*. As originally written this gate SILENTLY OMITTED one of the five
+  # suites it requires to pass unmodified. WI-2's lane ran the declared command verbatim AND this
+  # superset; use the superset from WI-3 onward. A gate that quietly skips a required suite is worse
+  # than a missing gate, because it reports green.
+  - ANDROID_CMD="./gradlew :app:testDebugUnitTest --rerun-tasks --tests '*TxtToc*' --tests '*MdTocScanner*' --tests '*TxtMdTocProvider*'" scripts/run-android-tests.sh
   - ANDROID_SERIAL=emulator-5554 ANDROID_CMD="./gradlew :app:connectedDebugAndroidTest --rerun-tasks -Pandroid.testInstrumentationRunnerArguments.class=com.vreader.app.reader.nav.TxtTocScanCostTest" scripts/run-android-tests.sh
 acceptance: >
   The connected RED (extractionMeetsEngineBudget) is RED on the pre-WI-2 engine and GREEN after —
