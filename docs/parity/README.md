@@ -65,8 +65,14 @@ foliate-js WebView, not an NDK port).
 
 **Phase 4 is the live queue.** A–F answered "does Android have this capability *at all*"; it did not
 answer "do the two apps do the same things". A 2026-08-04 code-level sweep against the iOS VERIFIED
-feature set found **31 remaining gaps**, filed as `docs/features.md` rows **#139–#169** and grouped
-into boxes **G1–G8**:
+feature set found **31 remaining gaps**, filed as `docs/features.md` rows **#139–#171** and grouped
+into boxes **G0–G8**:
+
+- **G0 Reachability** (#171) — **the gating item.** `MainActivity` hosts only Library + Search; no
+  Settings hub has ever existed on Android, so #114 (backup UI), #118 (AI chat + provider list),
+  #120 (OPDS UI) and #122 (stats dashboard) ship UI with **zero production call sites** — verified
+  2026-08-04 and demoted `VERIFIED`→`DONE`. Blocked on needs-design **#2018**. Detector:
+  `scripts/check-orphan-surfaces.sh`.
 
 - **G1 Contents/TOC** (#139–#141) — TXT/MD/AZW3 hide the Contents control entirely.
 - **G2 Text interaction** (#142–#143) — AZW3 has no selection/highlighting; the popover lacks

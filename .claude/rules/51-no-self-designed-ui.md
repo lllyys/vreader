@@ -43,6 +43,12 @@ When you reach a slice that would touch undesigned UI:
 4. **Continue parallel slices** that DO have design — see `.claude/rules/48-parallel-execution.md` for safe parallel execution.
 5. **User loop**: the user manually takes the `needs-design` issue through `claude.ai/design`, gets a handoff bundle, and commits it under `dev-docs/designs/...` in a separate PR. The slice can then resume.
 
+## Filing is immediate and unconditional (binding)
+
+Step 2 above is **not** deferrable. The moment a plan, WI, or slice puts a surface out of scope *because no committed design exists*, the `needs-design` issue is filed **in that same session**, and the deferring plan section / tracker row cites its number (`needs-design #<N>`). Conditional phrasings — "file a `needs-design` issue **if/when** a production entry is wanted", "revisit when we add Settings", "out of scope for now" with no issue number — do not discharge the obligation and are prohibited. A design blocker with no ticket is invisible: it does not appear in `gh issue list --label needs-design`, so nobody schedules it and no gate re-checks it.
+
+**Precedent (2026 Android port).** `dev-docs/plans/20260620-feature-114-android-backup-restore-ui.md:68` correctly identified the blocker — no committed Android Settings design — and wrote the obligation conditionally ("file a `needs-design` issue if/when a production entry is wanted"). Feature #122 deferred the same surface the same way. The issue was never filed: 48 `needs-design` issues exist in this repo's history, **zero** for a Settings hub. Four features (#114, #118, #120, #122) then shipped `VERIFIED` with UI a user cannot reach, because the only thing standing between "correctly identified blocker" and "tracked blocker" was a ticket nobody was obliged to file. Compare rule 47's Gate-5 "Production reachability" clause, which is the downstream half of this failure.
+
 ## What is NOT covered by this rule
 
 - **System chrome (status bar, home indicator, dynamic island)** — iOS / SwiftUI handles these by default; no design needed.
@@ -60,6 +66,7 @@ When you reach a slice that would touch undesigned UI:
 | "It's a small dialog, an Apple HIG default works fine" | HIG defaults look fine in isolation but clash with the specified design system over time. | File `needs-design`. |
 | Inventing UI for a bug-fix toast / status chip / error sheet | Bug fixes don't escape this rule — they can introduce UI debt the same way features do. | File `needs-design`. |
 | Inventing UI in a feature-workflow Gate 3 implementation because the WI list said "small change" | Gate-3 must reference the designed surface; if no design exists for a WI's UI, that WI itself was misclassified in Gate 1 — escalate. | Stop the WI, file `needs-design`, fix the Gate-1 plan. |
+| "File a `needs-design` issue **if/when** a production entry is wanted" (or any conditional deferral with no issue number) | A conditional obligation is never discharged — the blocker stays untracked and unschedulable. Precedent: #114/#122's Settings hub, which left four features unreachable for months. | File the issue NOW; cite `needs-design #<N>` in the plan section and the row. |
 
 ## Origin
 
