@@ -17,6 +17,7 @@ import org.junit.runner.RunWith
 import org.junit.runners.MethodSorters
 import java.io.File
 import java.security.MessageDigest
+import java.util.regex.Matcher
 import java.util.regex.Pattern
 
 /**
@@ -40,8 +41,8 @@ import java.util.regex.Pattern
  * | (c) | `matcher.find()` counting only — separates the match walk from title/list allocation |
  * | (d) | line-start enumeration alone — layer 2's floor, i.e. its best possible outcome |
  * | (e) | `detectBestRule` as shipped + per-rule match counts — tightens H1's predicted ratio to a number |
- * | (g) | N × `pattern.matcher(text)` with NO matching, at two text sizes — **the H1 falsifier** |
- * | (h) | the same K matches walked three ways — separates construction cost from `find(int)`'s `reset()` |
+ * | (g) | N × `pattern.matcher(text)` with NO matching, at THREE text sizes — **the H1 falsifier** |
+ * | (h) | K resets and K matches walked five ways — separates construction from `reset()` |
  * | (f) | target-semantic logging: bare `\d`/`\s` vs the repaired classes on the real engine |
  *
  * A flat arm (g) kills H1 and sends WI-2 back to planning. An arm (h) that attributes the cost to
@@ -57,16 +58,22 @@ import java.util.regex.Pattern
  * **Confounder handling** (every arm's number is only worth its controls):
  *  - *JIT warm-up*: every timed arm is preceded by a warm-up that exercises the same shapes, so no
  *    arm pays first-compile cost for the others.
- *  - *Ordering*: arm (b) is measured both BEFORE and AFTER arm (a), and arm (h)'s trio is run twice
- *    in opposite orders. An ordering effect therefore shows up as a discrepancy rather than hiding.
+ *  - *Ordering / repetition*: arm (b) is measured both before and after arm (a); arms (c)/(d)/(e)
+ *    are read twice; arm (g)'s three sizes and arm (h)'s five sub-arms each run twice in opposite
+ *    orders; arm (a) is read once in each of two methods. An ordering or drift effect therefore
+ *    shows up as a discrepancy between paired readings rather than hiding inside a single one.
+ *    **These are on-device measurements on a loaded emulator, not a JMH steady state** — treat a
+ *    figure whose paired readings disagree materially as exploratory, and say so.
  *  - *GC timing*: [gcSettle] runs before every timed region, and the "after" memory sample is taken
- *    WITHOUT a collection, so retained native growth is visible instead of being swept away.
+ *    WITHOUT a collection, so retained native growth is visible instead of being swept away. Arm
+ *    (g)'s inter-batch collections are outside its timed regions.
  *  - *Dead-code elimination* (plan §4.3, Gate-2 R2 HIGH): a constructed `Matcher` that is never used
  *    could be scalar-replaced by ART's JIT, reporting a spuriously flat cost and FALSELY KILLING
  *    H1 — the expensive wrong answer, since it would send a correct fix back to planning. Every
- *    construction in arm (g) therefore escapes into the `@Volatile` [constructionSink] *inside* the
- *    timed loop, and the loop+sink overhead is measured separately and reported so the net figure is
- *    honest. The sink performs no match operation, so the arm still isolates construction.
+ *    construction in arm (g) is therefore published to the `@Volatile` [matcherSink] *inside* the
+ *    timed loop (a real reference escape), the escape is asserted, and the loop+sink overhead is
+ *    measured separately. The sink performs no match operation, so the arm still isolates
+ *    construction.
  *
  * **Memory is a measured output, not a claim** (plan §4.5). Each arm records the Java-heap delta and
  * the process-PSS delta around a single pass. The plan commits three readings in advance: materially
@@ -111,11 +118,30 @@ class TxtTocScanCostTest {
     private val instrumentation get() = InstrumentationRegistry.getInstrumentation()
 
     /**
-     * The non-elidable sink for arm (g). `@Volatile` so ART cannot prove a constructed `Matcher`
-     * dead and scalar-replace it, which would report a flat construction cost and falsely kill H1.
+     * Arm (g)'s non-elidable sink: the constructed `Matcher` ITSELF is stored in a `@Volatile`
+     * field, which is a genuine reference escape — ART cannot scalar-replace an object published to
+     * a volatile field, and cannot elide constructor initialisation whose result another thread may
+     * legally read. An earlier revision accumulated only `System.identityHashCode(m)`; that forces
+     * identity but is NOT proof that the rest of the construction is observable (Gate-4 Medium), and
+     * a spuriously flat result here would FALSELY KILL H1 — the one expensive wrong answer.
+     *
+     * Holding the last `Matcher` alive retains at most one input attachment, which is negligible
+     * next to the batch the loop has just allocated, and the field is cleared between batches.
      */
     @Volatile
-    private var constructionSink: Int = 0
+    private var matcherSink: Matcher? = null
+
+    /** The same escape for the overhead baseline, so the two loops have identical sink shapes. */
+    @Volatile
+    private var objectSink: Any? = null
+
+    /**
+     * How many times a sink was written. Deliberately a PLAIN counter: its final value is correct
+     * however the JIT schedules it, and it answers "was the loop actually executed" without the
+     * false-negative an `Int` accumulator has (a sum of hashes can legitimately be zero — Gate-4
+     * Low). It is not part of the escape; [matcherSink] is.
+     */
+    private var sinkWrites: Long = 0
 
     private companion object {
         const val TAG = "WI172-COST"
@@ -135,10 +161,10 @@ class TxtTocScanCostTest {
         /** `TxtMdTocProvider.SCAN_LIMIT` — `MAX_TOC_ENTRIES + 1`, so arm (a) walks to end-of-text. */
         const val SCAN_LIMIT = 50_001
 
-        /** Arm (h): how many matches each of the three walks performs. */
+        /** Arm (h): how many matches (or resets) each of the five sub-arms performs. */
         const val WALK_MATCHES = 200
 
-        /** Arm (h)'s warm-up walk length — enough to JIT the three shapes, small enough to be free. */
+        /** Arm (h)'s warm-up walk length — enough to JIT the five shapes, small enough to be free. */
         const val WARMUP_MATCHES = 20
 
         /** Arms (a)/(b)/(c) warm-up prefix: big enough to JIT the walks, small enough to be free. */
@@ -151,24 +177,52 @@ class TxtTocScanCostTest {
         const val PROBE_CONSTRUCTIONS = 32
 
         /**
-         * Arm (g) sizing. A genuinely O(1) construction costs well under 1 µs; an O(n) construction
-         * over 7 M chars costs milliseconds. Three orders of magnitude separate them, so 5 µs is a
-         * safe classifier — and it exists purely to bound MEMORY: under H1 each construction pins a
-         * ~14 MB native buffer released only on a Java collection, so a 300 000-iteration loop would
-         * generate terabytes of native traffic and be lowmemorykiller-ed before reporting anything.
-         * The classification is logged; the verdict is read from the per-construction cost, which is
-         * valid whichever branch was taken.
+         * Arm (g) sizing — a TIME budget, not a cost cliff.
+         *
+         * Each text size is measured for roughly the same wall-clock duration, so all sizes see a
+         * comparable JIT tier, GC frequency and allocator regime (Gate-4 Medium: "asymmetric
+         * execution regimes are not a sound basis for a decisive slope ratio"). The iteration count
+         * is derived from a probe as `TARGET_TIMED_NS / probe_ns_per` and clamped; a noisy probe
+         * therefore shifts only HOW MANY iterations are averaged, never the per-iteration figure
+         * itself. An earlier revision classified each size as "expensive"/"cheap" against a 5 µs
+         * threshold; the probe's own noise floor sits near that threshold for a sub-microsecond
+         * operation, so the branch was decided by noise and the cheap sizes were left
+         * noise-dominated at 200 iterations.
          */
-        const val EXPENSIVE_NS = 5_000.0
-        const val EXPENSIVE_CONSTRUCTIONS = 200
-        const val CHEAP_CONSTRUCTIONS = 300_000
-        const val TIME_BUDGET_MS = 3_000L
+        const val TARGET_TIMED_NS = 1_200_000_000.0
+        const val MIN_CONSTRUCTIONS = 200
+        const val MAX_CONSTRUCTIONS = 200_000
+
+        /** Hard wall-clock stop per size per round, INCLUDING the untimed inter-batch settles. */
+        const val TIME_BUDGET_MS = 6_000L
+
+        /**
+         * Memory guard. Batching is not a timing device: the collection between batches is outside
+         * every timed region and the reported total is the sum of the timed regions. Its only job is
+         * to cap live native input attachments — under H1 each construction pins `2 × chars` bytes
+         * until a Java collection runs, and an unbroken loop over the 14 MB book reaches multiple
+         * gigabytes, above where the `lowmemorykiller` has already taken this app once. A batch that
+         * attaches less than [SETTLE_ATTACH_BYTES] needs no settle at all, which is what lets a small
+         * input be averaged over many iterations in one clean timed region.
+         */
+        const val BATCH_ATTACH_BYTES = 256L * 1024 * 1024
+        const val SETTLE_ATTACH_BYTES = 64L * 1024 * 1024
+        const val BATCH_SETTLE_MS = 100L
 
         /** How often the timed construction loop checks its wall-clock budget (a power-of-two mask). */
         const val BUDGET_CHECK_MASK = 0x3F
 
-        /** Arm (g)'s second text size. Short enough that O(n) work over it is unmeasurable. */
+        /**
+         * Arm (g)'s text sizes. THREE points, not two: two sizes give a ratio, three give a
+         * LINEARITY test — the O(n) model predicts the middle point from the outer two, and the O(1)
+         * model predicts all three are equal. Both models are therefore falsifiable by the same data
+         * (Gate-4 High: a bare ratio can neither establish flatness nor quantify scaling).
+         */
         const val SHORT_TEXT_CHARS = 64
+        const val MID_TEXT_CHARS = 512 * 1024
+
+        /** How many `Pattern.compile` calls are timed to price arm (a)'s in-band compilation. */
+        const val COMPILE_SAMPLES = 20
 
         // Java's non-ASCII regex line terminators, built from their CODE POINTS rather than written
         // literally: U+0085 NEL, U+2028 LINE SEPARATOR and U+2029 PARAGRAPH SEPARATOR are invisible
@@ -292,7 +346,13 @@ class TxtTocScanCostTest {
         return Arm(ms, value, after.heapKb - before.heapKb, after.pssKb - before.pssKb)
     }
 
-    /** Emit to logcat AND to internal storage, which the connected task does not wipe. */
+    /**
+     * Emit to logcat (the primary channel) and, best-effort, to internal storage.
+     *
+     * The file is SECONDARY and does not survive a plain `connectedAndroidTest`, which uninstalls
+     * the app at run end and deletes internal storage with it — see the class documentation. Read
+     * the numbers with `adb logcat -d -s WI172-COST:I` after the run.
+     */
     private fun report(line: String) {
         Log.i(TAG, line)
         runCatching {
@@ -479,22 +539,30 @@ class TxtTocScanCostTest {
     // ---- 3. arm (h): construction vs reset ---------------------------------------------------------
 
     /**
-     * Arm (h) — the same K matches walked three ways over the same text, so the scanning work is
-     * identical and only the per-match ceremony differs:
+     * Arm (h) — five sub-arms over the same text and the same K positions, so the scanning work is
+     * identical wherever there is any, and only the per-match ceremony differs:
      *
+     *  - **h0a** one `Matcher`, K × `reset(text)` — re-attaching the input, NO matching at all.
+     *  - **h0b** one `Matcher`, K × `reset()` — the bookkeeping reset that does not re-attach input.
      *  - **h1** one `Matcher`, K × no-arg `find()` — the pure walk.
-     *  - **h2** one `Matcher`, K × `find(resume_i)` — the walk plus K `reset()`s, no construction.
-     *  - **h3** K fresh `Matcher`s, each `find(resume_i)` — the walk plus K `reset()`s plus K
-     *    constructions. This is exactly what Kotlin's `MatchResult.next()` does.
+     *  - **h2** one `Matcher`, K × `find(resume_i)` — the walk plus whatever `find(int)` resets.
+     *  - **h3** K fresh `Matcher`s, each `find(resume_i)` — h2 plus K constructions. This is exactly
+     *    the shape Kotlin's `MatchResult.next()` produces.
+     *
+     * **Why h0a/h0b exist** (Gate-4 High): differences alone cannot decompose this. `Pattern.matcher`
+     * itself performs a reset, and `find(int)` performs another, so an expensive reset shows up in
+     * BOTH `h2 − h1` and `h3 − h2`, and neither difference is "construction net of reset". h0a and
+     * h0b measure the reset DIRECTLY with no matching at all, which anchors the arithmetic instead
+     * of inferring it: the report states `reset(text)`, `reset()`, `find(int) − find()`,
+     * `construction including its own reset`, and the residual `construction net of one input
+     * re-attach`, each labelled for what it actually is.
      *
      * `resume_i` is the position `next()` itself would resume from (the previous match's end, +1
-     * after an empty match), so all three scan the same gaps rather than one of them starting
-     * conveniently on top of its match. Therefore `h2 − h1` is K resets and `h3 − h2` is K
-     * constructions — a direct split that arms (a)/(b) alone conflate, and a second, independent
-     * estimate of the construction cost that arm (g) measures a different way.
+     * after an empty match), so h1/h2/h3 scan the same gaps rather than one of them starting
+     * conveniently on top of its match.
      *
-     * The trio runs twice in OPPOSITE orders; an ordering or JIT effect shows up as a discrepancy
-     * between the rounds instead of masquerading as a result.
+     * Every sub-arm runs twice in OPPOSITE orders; an ordering or JIT effect shows up as a
+     * discrepancy between the rounds instead of masquerading as a result.
      */
     @Test
     fun reportsConstructionVsResetSplit() {
@@ -503,21 +571,28 @@ class TxtTocScanCostTest {
         val pattern = compileWinning(rule)
         val resume = resumePositions(pattern, text, WALK_MATCHES)
 
-        // Warm-up trio on a smaller K — untimed.
+        // Warm-up on a smaller K — untimed.
         val warmResume = resumePositions(pattern, text, WARMUP_MATCHES)
+        resetLoop(pattern, text, WARMUP_MATCHES, reattachInput = true)
+        resetLoop(pattern, text, WARMUP_MATCHES, reattachInput = false)
         walkNoArg(pattern, text, WARMUP_MATCHES)
         walkReusedFindFrom(pattern, text, warmResume)
         walkFreshFindFrom(pattern, text, warmResume)
         gcSettle()
 
+        val r1h0a = timeNs("h0a-round1-reset-with-input") { resetLoop(pattern, text, WALK_MATCHES, true) }
+        val r1h0b = timeNs("h0b-round1-reset-no-input") { resetLoop(pattern, text, WALK_MATCHES, false) }
         val r1h1 = timeWalk("h1-round1-reused-noarg-find") { walkNoArg(pattern, text, WALK_MATCHES) }
         val r1h2 = timeWalk("h2-round1-reused-find-from") { walkReusedFindFrom(pattern, text, resume) }
         val r1h3 = timeWalk("h3-round1-fresh-find-from") { walkFreshFindFrom(pattern, text, resume) }
         val r2h3 = timeWalk("h3-round2-fresh-find-from") { walkFreshFindFrom(pattern, text, resume) }
         val r2h2 = timeWalk("h2-round2-reused-find-from") { walkReusedFindFrom(pattern, text, resume) }
         val r2h1 = timeWalk("h1-round2-reused-noarg-find") { walkNoArg(pattern, text, WALK_MATCHES) }
+        val r2h0b = timeNs("h0b-round2-reset-no-input") { resetLoop(pattern, text, WALK_MATCHES, false) }
+        val r2h0a = timeNs("h0a-round2-reset-with-input") { resetLoop(pattern, text, WALK_MATCHES, true) }
 
-        // The equivalence that makes the timings comparable: all six walks found the same matches.
+        // The equivalence that makes the timings comparable: every matching sub-arm found the same
+        // matches. h0a/h0b match nothing, so they are checked differently — see below.
         assertEquals("arm (h) must walk the requested number of matches", WALK_MATCHES, r1h1.second.size)
         listOf(
             "h2-round1" to r1h2, "h3-round1" to r1h3,
@@ -525,22 +600,77 @@ class TxtTocScanCostTest {
         ).forEach { (name, walk) ->
             assertTrue(
                 "$name must have found the SAME $WALK_MATCHES match offsets as h1-round1 — otherwise " +
-                    "the three walks are not doing the same work and their times are not comparable",
+                    "the sub-arms are not doing the same work and their times are not comparable",
                 walk.second.contentEquals(r1h1.second),
             )
         }
+        // h0a/h0b's own check: a reset loop that had been optimised away, or that left the matcher
+        // unusable, would make its timing meaningless. Both must leave a matcher that still finds
+        // the SAME first match the walking sub-arms found.
+        assertEquals(
+            "a matcher reset with reset(text) must still find the first match at the same offset",
+            r1h1.second.first(), firstMatchAfterResets(pattern, text, reattachInput = true),
+        )
+        assertEquals(
+            "a matcher reset with reset() must still find the first match at the same offset",
+            r1h1.second.first(), firstMatchAfterResets(pattern, text, reattachInput = false),
+        )
 
-        val resetNs1 = (r1h2.first - r1h1.first).toDouble() / WALK_MATCHES
-        val constructNs1 = (r1h3.first - r1h2.first).toDouble() / WALK_MATCHES
-        val resetNs2 = (r2h2.first - r2h1.first).toDouble() / WALK_MATCHES
-        val constructNs2 = (r2h3.first - r2h2.first).toDouble() / WALK_MATCHES
+        val k = WALK_MATCHES.toDouble()
+        val resetWithInput1 = r1h0a / k
+        val resetWithInput2 = r2h0a / k
+        val resetNoInput1 = r1h0b / k
+        val resetNoInput2 = r2h0b / k
+        val findIntExtra1 = (r1h2.first - r1h1.first) / k
+        val findIntExtra2 = (r2h2.first - r2h1.first) / k
+        val constructionInclReset1 = (r1h3.first - r1h2.first) / k
+        val constructionInclReset2 = (r2h3.first - r2h2.first) / k
         report(
             "ARM-H k=$WALK_MATCHES text_chars=${text.length} " +
-                "round1_ns h1=${r1h1.first} h2=${r1h2.first} h3=${r1h3.first} " +
-                "round2_ns h1=${r2h1.first} h2=${r2h2.first} h3=${r2h3.first} " +
-                "reset_ns_per_op=${"%.1f".format(resetNs1)}/${"%.1f".format(resetNs2)} " +
-                "construction_ns_per_op=${"%.1f".format(constructNs1)}/${"%.1f".format(constructNs2)}",
+                "round1_ns h0a=$r1h0a h0b=$r1h0b h1=${r1h1.first} h2=${r1h2.first} h3=${r1h3.first} " +
+                "round2_ns h0a=$r2h0a h0b=$r2h0b h1=${r2h1.first} h2=${r2h2.first} h3=${r2h3.first} " +
+                "reset_with_input_ns_per_op=${fmt(resetWithInput1)}/${fmt(resetWithInput2)} " +
+                "reset_no_input_ns_per_op=${fmt(resetNoInput1)}/${fmt(resetNoInput2)} " +
+                "find_int_minus_find_ns_per_op=${fmt(findIntExtra1)}/${fmt(findIntExtra2)} " +
+                "construction_incl_own_reset_ns_per_op=" +
+                "${fmt(constructionInclReset1)}/${fmt(constructionInclReset2)} " +
+                "construction_net_of_input_reset_ns_per_op=" +
+                "${fmt(constructionInclReset1 - resetWithInput1)}/${fmt(constructionInclReset2 - resetWithInput2)}",
         )
+    }
+
+    /** Two-decimal formatting, used everywhere a derived per-op figure is reported. */
+    private fun fmt(v: Double) = "%.1f".format(v)
+
+    /**
+     * h0a / h0b — K resets with NO matching. The `Matcher` is published to the volatile sink each
+     * iteration so the loop cannot be elided; `reset` returns `this`, so the sink also proves the
+     * call happened rather than a hoisted constant being stored.
+     */
+    private fun resetLoop(pattern: Pattern, text: String, k: Int, reattachInput: Boolean) {
+        val m = pattern.matcher(text)
+        for (i in 0 until k) {
+            matcherSink = if (reattachInput) m.reset(text) else m.reset()
+            sinkWrites++
+        }
+    }
+
+    /** The offset the first match lands at after a reset loop — h0a/h0b's own usability check. */
+    private fun firstMatchAfterResets(pattern: Pattern, text: String, reattachInput: Boolean): Int {
+        val m = pattern.matcher(text)
+        repeat(WARMUP_MATCHES) { if (reattachInput) m.reset(text) else m.reset() }
+        check(m.find()) { "a reset matcher must still be able to find" }
+        return m.start()
+    }
+
+    /** Time a block that returns nothing measurable but must not be elided. */
+    private fun timeNs(label: String, block: () -> Unit): Long {
+        gcSettle()
+        val t0 = System.nanoTime()
+        block()
+        val ns = System.nanoTime() - t0
+        report("ARM $label ns=$ns")
+        return ns
     }
 
     /** Timed walk returning `(elapsedNs, the match offsets it found)`. */
@@ -604,8 +734,17 @@ class TxtTocScanCostTest {
      * needs. Nothing here is asserted against a latency; the assertions are the same equivalence
      * checks that make the numbers mean something.
      *
-     * Arm (b) is measured BOTH before and after arm (a). If the two readings agree, the ordering is
-     * not carrying the result; if they do not, that is itself the finding and it is in the log.
+     * Arm (b) is measured BOTH before and after arm (a), and arms (c)/(d)/(e) are each read twice.
+     * If the paired readings agree, the ordering is not carrying the result; if they do not, that is
+     * itself the finding and it is in the log. Arm (a)'s own second reading is the one
+     * [armsAgreeOnHeadings] takes earlier in the same class run.
+     *
+     * **A stated asymmetry between arms (a) and (b)** (Gate-4 Medium): the shipped call compiles its
+     * `Regex` INSIDE the timed region and performs coroutine cancellation checks, while `walkReused`
+     * receives a precompiled `Pattern` and omits them. Rather than hide that, the compile cost is
+     * measured separately and reported (`compile_ns_per_call`), so a reader can correct for it — it
+     * matters little against a multi-second baseline but would matter a great deal if the two arms
+     * ever collapse to the same order of magnitude.
      */
     @Test
     fun reportsCostAttribution() {
@@ -619,9 +758,21 @@ class TxtTocScanCostTest {
             runBlocking { TxtTocRuleEngine.extractHeadings(text, rule, SCAN_LIMIT) }
         }
         val reusedSecond = arm("b2-reused-matcher-after-baseline") { walkReused(text, pattern, SCAN_LIMIT) }
-        val findOnly = arm("c-find-only") { countReused(text, pattern) }
-        val lineStarts = arm("d-line-start-enumeration") { countLineStarts(text) }
-        val detection = arm("e-detectBestRule-shipped") { runBlocking { TxtTocRuleEngine.detectBestRule(text) } }
+        val findOnly = arm("c1-find-only") { countReused(text, pattern) }
+        val findOnly2 = arm("c2-find-only") { countReused(text, pattern) }
+        val lineStarts = arm("d1-line-start-enumeration") { countLineStarts(text) }
+        val lineStarts2 = arm("d2-line-start-enumeration") { countLineStarts(text) }
+        val detection = arm("e1-detectBestRule-shipped") { runBlocking { TxtTocRuleEngine.detectBestRule(text) } }
+        val detection2 = arm("e2-detectBestRule-shipped") { runBlocking { TxtTocRuleEngine.detectBestRule(text) } }
+
+        // Price arm (a)'s in-band pattern compilation, which arm (b) does not pay.
+        repeat(COMPILE_SAMPLES) { objectSink = Pattern.compile(rule.pattern, Pattern.MULTILINE) }
+        val compileStart = System.nanoTime()
+        repeat(COMPILE_SAMPLES) {
+            objectSink = Pattern.compile(rule.pattern, Pattern.MULTILINE)
+            sinkWrites++
+        }
+        val compileNsPerCall = (System.nanoTime() - compileStart).toDouble() / COMPILE_SAMPLES
 
         // Arm (e)'s second half: what every enabled rule finds in the sample. Under H1 the number of
         // Matchers detection constructs is (enabled rules + total matches), which is what turns the
@@ -648,17 +799,22 @@ class TxtTocScanCostTest {
         report(
             "COST-SUMMARY chars_utf16=${text.length} headings=${shipped.value.headings.size} " +
                 "a_shipped_ms=${shipped.ms} b1_reused_ms=${reusedFirst.ms} b2_reused_ms=${reusedSecond.ms} " +
-                "c_find_only_ms=${findOnly.ms} d_line_starts_ms=${lineStarts.ms} " +
-                "e_detect_ms=${detection.ms} line_starts=${lineStarts.value} " +
+                "c_find_only_ms=${findOnly.ms}/${findOnly2.ms} " +
+                "d_line_starts_ms=${lineStarts.ms}/${lineStarts2.ms} " +
+                "e_detect_ms=${detection.ms}/${detection2.ms} line_starts=${lineStarts.value} " +
+                "compile_ns_per_call=${fmt(compileNsPerCall)} " +
                 "sample_chars=${sample.length} detection_total_matches=$totalDetectionMatches " +
                 "per_rule[$perRule ]",
         )
         report(
             "COST-MEMORY heap_delta_kb a=${shipped.heapDeltaKb} b1=${reusedFirst.heapDeltaKb} " +
-                "b2=${reusedSecond.heapDeltaKb} c=${findOnly.heapDeltaKb} d=${lineStarts.heapDeltaKb} " +
-                "e=${detection.heapDeltaKb} | pss_delta_kb a=${shipped.pssDeltaKb} " +
-                "b1=${reusedFirst.pssDeltaKb} b2=${reusedSecond.pssDeltaKb} c=${findOnly.pssDeltaKb} " +
-                "d=${lineStarts.pssDeltaKb} e=${detection.pssDeltaKb}",
+                "b2=${reusedSecond.heapDeltaKb} c=${findOnly.heapDeltaKb}/${findOnly2.heapDeltaKb} " +
+                "d=${lineStarts.heapDeltaKb}/${lineStarts2.heapDeltaKb} " +
+                "e=${detection.heapDeltaKb}/${detection2.heapDeltaKb} | pss_delta_kb " +
+                "a=${shipped.pssDeltaKb} b1=${reusedFirst.pssDeltaKb} b2=${reusedSecond.pssDeltaKb} " +
+                "c=${findOnly.pssDeltaKb}/${findOnly2.pssDeltaKb} " +
+                "d=${lineStarts.pssDeltaKb}/${lineStarts2.pssDeltaKb} " +
+                "e=${detection.pssDeltaKb}/${detection2.pssDeltaKb}",
         )
 
         assertEquals(
@@ -674,6 +830,12 @@ class TxtTocScanCostTest {
             reusedFirst.value.headings.size, reusedSecond.value.headings.size,
         )
         assertEquals("arm (c) must see the same matches", reusedFirst.value.rawMatches, findOnly.value)
+        assertEquals("arm (c)'s two readings must agree", findOnly.value, findOnly2.value)
+        assertEquals("arm (d)'s two readings must agree", lineStarts.value, lineStarts2.value)
+        assertEquals(
+            "arm (e)'s two readings must pick the same rule",
+            requireNotNull(detection.value).id, requireNotNull(detection2.value).id,
+        )
         assertEquals(
             "the per-rule instrumentation must agree with the shipped detector's winner",
             requireNotNull(detection.value).id, bestRuleId,
@@ -689,113 +851,213 @@ class TxtTocScanCostTest {
 
     /**
      * Arm (g) — **the falsifier.** Construct `pattern.matcher(input)` N times and perform NO match,
-     * over the 7 M-char book and over a 64-char string. If construction is O(1) the per-construction
-     * cost is the same at both sizes and H1 is DEAD; if it is O(n) the long-text cost scales with the
-     * text and H1 stands. The **ratio of the two per-construction costs** is what is read, not either
-     * absolute number.
+     * at THREE input sizes: the 7 M-char book, a 512 K-char prefix, and a 64-char prefix.
      *
-     * Every construction escapes into the `@Volatile` [constructionSink] inside the timed loop, so
-     * ART cannot prove it dead — a scalar-replaced `Matcher` would report a flat cost and falsely
-     * kill H1, which is the one wrong answer that would cost a correct fix. The loop-plus-sink
-     * overhead is measured in the same shape and reported alongside, so the net per-construction
-     * figure is not inflated by the machinery that makes the arm valid. That overhead is a constant
-     * added to BOTH text sizes, so it biases the ratio toward 1 — i.e. toward killing H1, the
-     * conservative direction for a hypothesis this plan wants falsified rather than flattered.
+     * **What is read, and why three sizes.** Two sizes give only a ratio, which can neither
+     * establish flatness nor quantify scaling once measurement noise is in play (Gate-4 High). Three
+     * give a falsifiable MODEL on both sides: the O(n) model predicts the middle point from the
+     * outer two by linear interpolation, and the O(1) model predicts all three are equal. The report
+     * carries the raw per-construction cost at each size, the raw long/short ratio, the fitted
+     * per-character marginal cost, and the mid-point's predicted-vs-observed error — so the verdict
+     * rests on RAW paired measurements rather than on a subtraction. The overhead-corrected figures
+     * are logged too, but they are secondary precisely because a subtraction is least trustworthy in
+     * the flat case, which is the case that would kill H1.
      *
-     * Asserted: only that the arm did work and that the sink was written. A latency assertion here
-     * would be a benchmark gating on the number it exists to discover.
+     * **Ordering.** All three sizes are measured twice, the second round in reverse order, so JIT
+     * tier, allocator state and thermal drift show up as a discrepancy between rounds rather than as
+     * a result. **Escape.** Each constructed `Matcher` is published to the `@Volatile` [matcherSink]
+     * inside the timed loop — a real reference escape, not merely an identity hash — so ART cannot
+     * scalar-replace it and report a spuriously flat cost. **Memory.** The timed work is broken into
+     * batches with an untimed collection between them, capping live input attachments well below the
+     * level at which the `lowmemorykiller` has already taken this app once.
+     *
+     * Asserted: only that the arm did work and that the sink was genuinely written. A latency
+     * assertion here would be a benchmark gating on the number it exists to discover.
      */
     @Test
     fun reportsMatcherConstructionCost() {
         val text = requireRealBookText()
         val rule = requireWinningRule(text)
         val pattern = compileWinning(rule)
-        val shortText = text.substring(0, SHORT_TEXT_CHARS)
+        val sizes = listOf(
+            "long" to text,
+            "mid" to safePrefix(text, MID_TEXT_CHARS),
+            "short" to safePrefix(text, SHORT_TEXT_CHARS),
+        )
+        val writesBefore = sinkWrites
 
         val overheadNs = measureSinkOverhead()
-        val long = measureConstructionCost("long", pattern, text, overheadNs)
-        val short = measureConstructionCost("short", pattern, shortText, overheadNs)
+        val round1 = sizes.associate { (name, input) ->
+            name to measureConstructionCost("$name-round1", pattern, input)
+        }
+        val round2 = sizes.reversed().associate { (name, input) ->
+            name to measureConstructionCost("$name-round2", pattern, input)
+        }
 
-        val ratio = if (short.netNsPer > 0) long.netNsPer / short.netNsPer else Double.NaN
-        report(
-            "ARM-G sink_overhead_ns_per_iter=${"%.1f".format(overheadNs)} " +
-                "long_chars=${text.length} long_n=${long.count} long_total_ns=${long.totalNs} " +
-                "long_raw_ns_per=${"%.1f".format(long.rawNsPer)} long_net_ns_per=${"%.1f".format(long.netNsPer)} " +
-                "long_classified=${long.classification} " +
-                "short_chars=${shortText.length} short_n=${short.count} short_total_ns=${short.totalNs} " +
-                "short_raw_ns_per=${"%.1f".format(short.rawNsPer)} short_net_ns_per=${"%.1f".format(short.netNsPer)} " +
-                "short_classified=${short.classification} " +
-                "long_over_short_ratio=${"%.2f".format(ratio)} sink=$constructionSink",
-        )
+        listOf("round1" to round1, "round2" to round2).forEach { (round, r) ->
+            val long = requireNotNull(r["long"])
+            val mid = requireNotNull(r["mid"])
+            val short = requireNotNull(r["short"])
+            // The O(n) model, fitted from the OUTER two points only, then tested on the middle one.
+            val marginalNsPerChar =
+                (long.rawNsPer - short.rawNsPer) / (long.textChars - short.textChars).toDouble()
+            val predictedMid = short.rawNsPer + marginalNsPerChar * (mid.textChars - short.textChars)
+            val midErrorPct =
+                if (mid.rawNsPer > 0) 100.0 * (predictedMid - mid.rawNsPer) / mid.rawNsPer else Double.NaN
+            report(
+                "ARM-G $round sink_overhead_ns_per_iter=${fmt(overheadNs)} " +
+                    listOf(long, mid, short).joinToString(" ") { c ->
+                        "${c.label}[chars=${c.textChars} n=${c.count} batches=${c.batches} " +
+                            "total_ns=${c.totalNs} raw_ns_per=${fmt(c.rawNsPer)} " +
+                            "net_ns_per=${fmt(c.netNsPer(overheadNs))} settled=${c.settled}]"
+                    } +
+                    " raw_long_over_short=${"%.2f".format(long.rawNsPer / short.rawNsPer)}" +
+                    " net_long_over_short=${"%.2f".format(long.netNsPer(overheadNs) / short.netNsPer(overheadNs))}" +
+                    " fitted_marginal_ns_per_char=${"%.4f".format(marginalNsPerChar)}" +
+                    " mid_predicted_ns=${fmt(predictedMid)} mid_observed_ns=${fmt(mid.rawNsPer)}" +
+                    " mid_prediction_error_pct=${"%.1f".format(midErrorPct)}",
+            )
+        }
 
-        assertTrue("arm (g) must have constructed Matchers over the long text", long.count > 0)
-        assertTrue("arm (g) must have constructed Matchers over the short text", short.count > 0)
-        assertTrue("arm (g)'s timed regions must be measurable (>0 ns)", long.totalNs > 0 && short.totalNs > 0)
+        val measured = round1.values + round2.values
+        measured.forEach { c ->
+            assertTrue("arm (g) sub-measurement ${c.label} must have constructed Matchers", c.count > 0)
+            assertTrue("arm (g) sub-measurement ${c.label} must be measurable (>0 ns)", c.totalNs > 0)
+            assertTrue(
+                "arm (g) sub-measurement ${c.label} must have published a constructed Matcher to the " +
+                    "volatile sink — a loop that could be optimised away is not evidence",
+                c.escaped,
+            )
+        }
+        // The loop's execution is PROVEN by a counter that cannot false-negative, unlike an Int hash
+        // accumulator that can legitimately sum to zero (Gate-4 Low).
+        val expectedWrites = measured.sumOf { it.count.toLong() }
         assertTrue(
-            "the non-elidable sink must have been written — an unwritten sink means the arm could " +
-                "have been optimised away and its result would not be evidence",
-            constructionSink != 0,
+            "the sink must have been written at least once per timed construction " +
+                "(expected >= $expectedWrites, saw ${sinkWrites - writesBefore})",
+            sinkWrites - writesBefore >= expectedWrites,
         )
+    }
+
+    /** A prefix of [text] that never splits a surrogate pair (the [sampleOf] rule, generalised). */
+    private fun safePrefix(text: String, chars: Int): String {
+        if (text.length <= chars) return text
+        var end = chars
+        if (text[end - 1].isHighSurrogate() && text[end].isLowSurrogate()) end--
+        return text.substring(0, end)
     }
 
     private class ConstructionCost(
+        val label: String,
+        val textChars: Int,
         val count: Int,
+        val batches: Int,
         val totalNs: Long,
-        val classification: String,
-        overheadNsPerIter: Double,
+        /** Did this size need an inter-batch collection (i.e. was it attaching real memory)? */
+        val settled: Boolean,
+        /** Was the volatile sink non-null at the end of a timed batch, before it was cleared? */
+        val escaped: Boolean,
     ) {
         val rawNsPer = totalNs.toDouble() / count
-        val netNsPer = (rawNsPer - overheadNsPerIter).coerceAtLeast(0.0)
+        fun netNsPer(overheadNsPerIter: Double) = (rawNsPer - overheadNsPerIter).coerceAtLeast(0.0)
     }
 
     /**
-     * The floor for arm (g): the same loop shape and the same volatile-sink write, with a trivial
-     * allocation in place of the `Matcher`. Reported so the construction figure can be read net of
-     * the machinery that makes it non-elidable. It is a FLOOR, not an exact subtraction — a fresh
-     * `Object`'s identity hash is cheaper to install than a larger object's — so both the raw and
-     * the net per-construction figures are logged and the raw one is the conservative reading.
+     * The floor for arm (g): the same loop shape and the same volatile reference-sink write, with a
+     * trivial allocation in place of the `Matcher`.
+     *
+     * It is a FLOOR, not an exact subtraction — a bare `Object`'s allocation is cheaper than a
+     * `Matcher`'s — which is exactly why the arm's verdict is read from the RAW per-construction
+     * costs and this figure is reported only as a secondary correction (Gate-4 High).
      */
     private fun measureSinkOverhead(): Double {
-        repeat(WARMUP_CONSTRUCTIONS) { constructionSink += System.identityHashCode(Any()) }
+        repeat(WARMUP_CONSTRUCTIONS) {
+            objectSink = Any()
+            sinkWrites++
+        }
         gcSettle()
-        val n = CHEAP_CONSTRUCTIONS
+        val n = MAX_CONSTRUCTIONS
         val t0 = System.nanoTime()
-        repeat(n) { constructionSink += System.identityHashCode(Any()) }
+        repeat(n) {
+            objectSink = Any()
+            sinkWrites++
+        }
         return (System.nanoTime() - t0).toDouble() / n
     }
 
-    private fun measureConstructionCost(
-        label: String,
-        pattern: Pattern,
-        input: String,
-        overheadNsPerIter: Double,
-    ): ConstructionCost {
-        repeat(WARMUP_CONSTRUCTIONS) { constructionSink += System.identityHashCode(pattern.matcher(input)) }
+    /**
+     * N × `pattern.matcher(input)` with no matching, timed in batches.
+     *
+     * Batching exists ONLY to bound live native input attachments: the collection between batches is
+     * OUTSIDE every timed region, and the reported total is the sum of the timed regions, so the
+     * measurement is unaffected by it. The probe that chooses the iteration count is likewise a
+     * memory-sizing device, never an input to the reported number.
+     */
+    private fun measureConstructionCost(label: String, pattern: Pattern, input: String): ConstructionCost {
+        repeat(WARMUP_CONSTRUCTIONS) {
+            matcherSink = pattern.matcher(input)
+            sinkWrites++
+        }
         gcSettle()
 
-        // Sizing probe — memory safety only, never the reported number (see EXPENSIVE_NS).
+        // Sizing probe — it chooses HOW MANY iterations to average, never the reported per-iteration
+        // number (see TARGET_TIMED_NS). A noisy probe costs precision, not correctness.
         val probeStart = System.nanoTime()
-        repeat(PROBE_CONSTRUCTIONS) { constructionSink += System.identityHashCode(pattern.matcher(input)) }
+        repeat(PROBE_CONSTRUCTIONS) {
+            matcherSink = pattern.matcher(input)
+            sinkWrites++
+        }
         val probeNsPer = (System.nanoTime() - probeStart).toDouble() / PROBE_CONSTRUCTIONS
-        val expensive = probeNsPer > EXPENSIVE_NS
-        report("ARM-G-PROBE $label probe_ns_per=${"%.1f".format(probeNsPer)} expensive=$expensive")
+        val cap = (TARGET_TIMED_NS / probeNsPer)
+            .toLong()
+            .coerceIn(MIN_CONSTRUCTIONS.toLong(), MAX_CONSTRUCTIONS.toLong())
+            .toInt()
+        val attachBytes = 2L * maxOf(1, input.length)
+        val batchSize = (BATCH_ATTACH_BYTES / attachBytes).coerceIn(1L, cap.toLong()).toInt()
+        val settleBetweenBatches = attachBytes * batchSize >= SETTLE_ATTACH_BYTES
+        report(
+            "ARM-G-PROBE $label probe_ns_per=${fmt(probeNsPer)} planned_n=$cap batch=$batchSize " +
+                "settle_between_batches=$settleBetweenBatches",
+        )
         gcSettle()
 
-        val cap = if (expensive) EXPENSIVE_CONSTRUCTIONS else CHEAP_CONSTRUCTIONS
         val deadline = SystemClock.elapsedRealtime() + TIME_BUDGET_MS
         var count = 0
-        val t0 = System.nanoTime()
+        var batches = 0
+        var totalNs = 0L
+        var escaped = false
         while (count < cap) {
-            constructionSink += System.identityHashCode(pattern.matcher(input))
-            count++
-            if ((count and BUDGET_CHECK_MASK) == 0 && SystemClock.elapsedRealtime() > deadline) break
+            val n = minOf(batchSize, cap - count)
+            val t0 = System.nanoTime()
+            var i = 0
+            while (i < n) {
+                matcherSink = pattern.matcher(input)
+                sinkWrites++
+                i++
+                if ((i and BUDGET_CHECK_MASK) == 0 && SystemClock.elapsedRealtime() > deadline) break
+            }
+            totalNs += System.nanoTime() - t0
+            count += i
+            batches++
+            // Read the escape BEFORE clearing it: this is the observation that proves a constructed
+            // Matcher really was published to the volatile field rather than optimised away.
+            escaped = escaped || matcherSink != null
+            if (settleBetweenBatches) {
+                // UNTIMED: release this batch's attachments before the next one allocates its own.
+                matcherSink = null
+                System.gc()
+                Thread.sleep(BATCH_SETTLE_MS)
+            }
+            if (SystemClock.elapsedRealtime() > deadline) break
         }
-        val totalNs = System.nanoTime() - t0
         return ConstructionCost(
+            label = label,
+            textChars = input.length,
             count = count,
+            batches = batches,
             totalNs = totalNs,
-            classification = if (expensive) "expensive" else "cheap",
-            overheadNsPerIter = overheadNsPerIter,
+            settled = settleBetweenBatches,
+            escaped = escaped,
         )
     }
 }
