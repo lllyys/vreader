@@ -38,6 +38,17 @@ class TxtTocRulesTest {
          */
         val IDEO: String = Char(0x3000).toString() // IDEOGRAPHIC SPACE
         val NBSP: String = Char(0x00A0).toString() // NO-BREAK SPACE
+
+        /** iOS's literal leading-indent class, `^[ U+3000 \t]{0,4}` (TXTTocRuleEngine.swift). */
+        val IOS_INDENT: String = "^[ " + IDEO + "\\t]{0,4}"
+
+        /**
+         * The rules that use `\d` / `\s` **in iOS**, read off the Swift source — NOT derived from
+         * the Kotlin under test. Deriving both sides from the implementation would let one wrong
+         * removal plus one wrong addition cancel out; these are the independent expectation.
+         */
+        val IOS_DIGIT_RULE_IDS = setOf(1, 2, 3, 4, 7, 9, 10, 11, 12, 13, 14, 22, 23)
+        val IOS_WHITESPACE_RULE_IDS = setOf(1, 2, 3, 6, 7, 9, 10, 11, 12, 15, 16, 17, 21, 23)
     }
 
     private val rules: List<TxtTocRule> get() = TxtTocRules.defaults
@@ -45,13 +56,24 @@ class TxtTocRulesTest {
     private fun compiled(rule: TxtTocRule) = Regex(rule.pattern, RegexOption.MULTILINE)
 
     /** The pattern with the leading indent class stripped — i.e. its non-indent body. */
-    private fun body(rule: TxtTocRule) = rule.pattern.removePrefix("^${TxtTocRules.WS}{0,4}")
+    private fun body(rule: TxtTocRule) = rule.pattern.removePrefix(TxtTocRules.INDENT)
 
     /** Rules that reference the widened digit class (the D1 population), derived from the data. */
     private fun digitRules() = rules.filter { it.pattern.contains(TxtTocRules.DIGIT_CHARS) }
 
     /** Rules with a whitespace position beyond the leading indent (the D1b population). */
     private fun whitespaceRules() = rules.filter { body(it).contains(TxtTocRules.WS_CHARS) }
+
+    /**
+     * Undo the two permitted substitutions, turning a shipped pattern back into the iOS text it
+     * was ported from. Bracketed forms are undone first so both an in-class occurrence
+     * (`[0-9…〇零…]` → `[\d〇零…]`) and a standalone one (`[0-9…]{1,4}` → `\d{1,4}`) round-trip.
+     */
+    private fun roundTripToIos(pattern: String) = pattern
+        .replace(TxtTocRules.WS, "\\s")
+        .replace(TxtTocRules.WS_CHARS, "\\s")
+        .replace(TxtTocRules.DIGIT, "\\d")
+        .replace(TxtTocRules.DIGIT_CHARS, "\\d")
 
     /** Narrow a pattern back to stock-Java semantics — the negative control. */
     private fun narrowedWhitespace(pattern: String) =
@@ -96,6 +118,113 @@ class TxtTocRulesTest {
         assertEquals("no duplicated pattern survived the port", 25, rules.map { it.pattern }.toSet().size)
     }
 
+    /**
+     * The iOS table, transcribed INDEPENDENTLY from `TXTTocRuleEngine.swift:142-350` — id to
+     * (name, pattern body after the leading indent, example). This is the golden source: the
+     * shipped rule must round-trip back to exactly this text once the two permitted
+     * substitutions are undone. Transcribing rather than deriving is the point — a pattern and
+     * its example can otherwise drift together and still satisfy "matches its own example".
+     */
+    private val iosRules: Map<Int, Triple<String, String, String>> = mapOf(
+        1 to Triple(
+            "中文章节（通用）",
+            "(?:序章|楔子|正文(?!完|结)|终章|后记|尾声|番外|第\\s{0,4}" +
+                "[\\d〇零一二两三四五六七八九十百千万壹贰叁肆伍陆柒捌玖拾佰仟]+?\\s{0,4}" +
+                "(?:章|节(?!课)|卷|集(?![合和])|部(?![分赛游])|篇(?!张))).{0,30}$",
+            "第一章 标题",
+        ),
+        2 to Triple(
+            "中文数字章节",
+            "[第（\\(]?\\s{0,4}[\\d〇零一二两三四五六七八九十百千万壹贰叁肆伍陆柒捌玖拾佰仟]+?" +
+                "\\s{0,4}[章节卷集部篇回话]\\s?.{0,30}$",
+            "第123章 标题",
+        ),
+        3 to Triple(
+            "英文Chapter/Section/Part",
+            "(?:[Cc]hapter|[Ss]ection|[Pp]art|[Ee]pisode)\\s{0,4}\\d{1,4}.{0,30}$",
+            "Chapter 1 Title",
+        ),
+        4 to Triple("数字+标点标题", "\\d{1,5}[：:,.， 、_—\\-].{1,30}$", "1、这个标题"),
+        5 to Triple("特殊符号·章节", "[【\\[☆★●◆◇○◎□■△▲※卐].{1,30}$", "【第一章 标题】"),
+        6 to Triple("正文+标题", "正文\\s.{0,20}$", "正文 第一章"),
+        7 to Triple(
+            "中文卷/篇/部/集",
+            "(?:卷|篇|部|集)\\s{0,4}[\\d〇零一二两三四五六七八九十百千万壹贰叁肆伍陆柒捌玖拾佰仟]+.{0,30}$",
+            "卷五 开源盛世",
+        ),
+        8 to Triple("星号标题", "[☆★].{1,30}$", "☆、第一个故事"),
+        9 to Triple("Volume + Number", "[Vv]ol(?:ume)?\\s{0,4}\\d{1,4}.{0,30}$", "Volume 1 Title"),
+        10 to Triple("Book + Number", "[Bb]ook\\s{0,4}\\d{1,4}.{0,30}$", "Book 1 Title"),
+        11 to Triple("Act + Number", "[Aa]ct\\s{0,4}\\d{1,4}.{0,30}$", "Act 1 Title"),
+        12 to Triple("Scene + Number", "[Ss]cene\\s{0,4}\\d{1,4}.{0,30}$", "Scene 1 Title"),
+        13 to Triple("数字序号（圆括号）", "[\\(（]\\d{1,5}[\\)）].{1,30}$", "(1) 标题"),
+        14 to Triple("数字序号（点号）", "\\d{1,5}\\..{1,30}$", "1.标题"),
+        15 to Triple(
+            "罗马数字章节",
+            "(?:I{1,3}|IV|VI{0,3}|IX|XI{0,3}|XIV|XVI{0,3}|XIX|XXI{0,3})[.、：:\\s].{0,30}$",
+            "III. 标题",
+        ),
+        16 to Triple("天干地支", "[甲乙丙丁戊己庚辛壬癸][.、：:\\s].{0,30}$", "甲、标题"),
+        17 to Triple("全角数字章节", "[０-９]{1,5}[.、：:\\s].{0,30}$", "０１、标题"),
+        18 to Triple("圆圈数字", "[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳].{0,30}$", "① 标题"),
+        19 to Triple(
+            "括号+中文数字",
+            "[（\\(][零一二三四五六七八九十百千万壹贰叁肆伍陆柒捌玖拾佰仟]+[）\\)].{0,30}$",
+            "(一) 标题",
+        ),
+        20 to Triple(
+            "Prologue/Epilogue/Interlude",
+            "(?:[Pp]rologue|[Ee]pilogue|[Ii]nterlude|[Pp]reface|[Ff]oreword|[Aa]fterword|" +
+                "[Ii]ntroduction|[Cc]onclusion).{0,30}$",
+            "Prologue",
+        ),
+        21 to Triple("中文括号标题", "〔.{1,20}〕\\s{0,4}$", "〔一〕"),
+        22 to Triple(
+            "日文章节",
+            "第[\\d〇零一二三四五六七八九十百千万]+?(?:章|節|巻|話|編).{0,30}$",
+            "第一章 始まり",
+        ),
+        23 to Triple(
+            "中文回/话",
+            "第\\s{0,4}[\\d〇零一二两三四五六七八九十百千万壹贰叁肆伍陆柒捌玖拾佰仟]+?\\s{0,4}[回话].{0,30}$",
+            "第一回 标题",
+        ),
+        24 to Triple("短线分隔章节", "[—\\-]{3,}.{0,30}$", "--- 章节标题"),
+        25 to Triple("等号分隔章节", "[=]{3,}.{0,30}$", "=== 章节标题"),
+    )
+
+    @Test
+    fun everyRule_roundTripsToTheIosPatternExactly() {
+        assertEquals("the golden table covers all 25 iOS rules", 25, iosRules.size)
+        rules.forEach { rule ->
+            val (name, iosBody, example) = iosRules.getValue(rule.id)
+            assertEquals("rule ${rule.id} name", name, rule.name)
+            assertEquals("rule ${rule.id} example", example, rule.example)
+            assertEquals(
+                "rule ${rule.id} must differ from iOS ONLY by the D1/D1b substitutions",
+                IOS_INDENT + iosBody, roundTripToIos(rule.pattern),
+            )
+        }
+    }
+
+    @Test
+    fun everyRule_keepsTheLiteralIosIndentClass() {
+        // The indent is the one whitespace position iOS did NOT write as \s, so widening it
+        // would be a NEW divergence, not a repair — and one that shifts heading offsets onto the
+        // preceding blank line. Pinned so the plan's §3.5 wording cannot reintroduce it.
+        assertEquals("INDENT is iOS's literal class", IOS_INDENT, TxtTocRules.INDENT)
+        rules.forEach {
+            assertTrue(
+                "rule ${it.id} must start with the literal indent class, not a widened one",
+                it.pattern.startsWith(IOS_INDENT),
+            )
+            assertFalse(
+                "rule ${it.id} must not widen the indent to WS",
+                it.pattern.startsWith("^${TxtTocRules.WS}"),
+            )
+        }
+    }
+
     @Test
     fun everyRule_compiles_underMultiline() {
         rules.forEach { assertNotNull("rule ${it.id} compiles", compiled(it)) }
@@ -132,10 +261,13 @@ class TxtTocRulesTest {
         )
         val population = digitRules()
         assertEquals(
-            "the D1 sample table must cover EVERY rule using the digit class (incl. disabled 11/12/22)",
-            population.map { it.id }.toSet(), samples.keys,
+            "the shipped rules must widen \\d in EXACTLY the rules iOS wrote it in",
+            IOS_DIGIT_RULE_IDS, population.map { it.id }.toSet(),
         )
-        assertEquals("13 of the 25 rules use \\d on iOS", 13, population.size)
+        assertEquals(
+            "the D1 sample table must cover EVERY such rule (incl. disabled 11/12/22)",
+            IOS_DIGIT_RULE_IDS, samples.keys,
+        )
 
         population.forEach { rule ->
             val sample = samples.getValue(rule.id)
@@ -186,10 +318,13 @@ class TxtTocRulesTest {
     private fun assertWhitespaceSamples(samples: Map<Int, String>, label: String) {
         val population = whitespaceRules()
         assertEquals(
-            "the D1b sample table must cover EVERY rule with a \\s position (incl. disabled 11/12/15/16/17/21)",
-            population.map { it.id }.toSet(), samples.keys,
+            "the shipped rules must widen \\s in EXACTLY the rules iOS wrote it in",
+            IOS_WHITESPACE_RULE_IDS, population.map { it.id }.toSet(),
         )
-        assertEquals("14 of the 25 rules use \\s on iOS", 14, population.size)
+        assertEquals(
+            "the D1b sample table must cover EVERY such rule (incl. disabled 11/12/15/16/17/21)",
+            IOS_WHITESPACE_RULE_IDS, samples.keys,
+        )
 
         population.forEach { rule ->
             val sample = samples.getValue(rule.id)
@@ -242,10 +377,32 @@ class TxtTocRulesTest {
         }
     }
 
-    /** The flag letters of every inline flag group `(?idmsuxU…)` in a pattern; empty when none. */
+    /**
+     * The flag letters of every inline flag group in a pattern; empty when none.
+     *
+     * A deliberately simple textual scan of the conventional Java forms — `(?i)`, `(?i:…)`,
+     * `(?i-m)`, `(?idmsux)` — not a regex parser. That is sufficient here because these patterns
+     * are a fixed, reviewed data table, and [noRule_containsAnyForbiddenFlagToken] backstops it
+     * with a blunt token check that cannot be out-parsed.
+     */
     private fun inlineFlags(pattern: String): String =
         Regex("""\(\?(?![:=!<>])([a-zA-Z-]*)[:)]""").findAll(pattern)
             .joinToString("") { it.groupValues[1] }
+
+    @Test
+    fun noRule_containsAnyForbiddenFlagToken() {
+        // Backstop for inlineFlags(): whatever the exact syntax, a flag group must begin with
+        // "(?" followed by a flag letter. No rule may contain that sequence at all.
+        val forbidden = listOf("(?i", "(?s", "(?m", "(?u", "(?U", "(?x", "(?d", "(?-")
+        rules.forEach { rule ->
+            forbidden.forEach { token ->
+                assertFalse(
+                    "rule ${rule.id} must not contain the inline-flag token '$token'",
+                    rule.pattern.contains(token),
+                )
+            }
+        }
+    }
 
     @Test
     fun noRule_containsBareBackslashD_orBackslashS() {
@@ -288,18 +445,27 @@ class TxtTocRulesTest {
     }
 
     @Test
-    fun leadingWs_widenedPerPlan_consumesAPrecedingBlankLineTerminator() {
-        // DOCUMENTED CONSEQUENCE of plan §3.5's "the leading [space, U+3000, tab]{0,4} indent
-        // class is normalized to WS{0,4}": WS is a superset that includes line terminators, so at
-        // a BLANK line the indent can consume that line's own terminator and the match starts one
-        // line early. Titles are unaffected (they are trimmed), but the reported source offset is
-        // the blank line's start. Pinned here so WI-2's offset tests inherit a known value rather
-        // than a surprise.
+    fun headingAfterBlankLines_matchesAtTheHeadingLine_notTheBlankLine() {
+        // The regression behind the reverted indent widening (Gate-4 HIGH). Blank lines before a
+        // chapter heading are ubiquitous in real books; a widened indent would consume the blank
+        // line's own terminator and start the match there, so every such heading's source offset
+        // — WI-2's navigation locator — would land one line early.
         val rule1 = rules.first { it.id == 1 }
-        val match = compiled(rule1).find("\n第一章 标题")
-        assertNotNull(match)
-        assertEquals("match starts at the blank line, not the heading line", 0, match!!.range.first)
-        assertEquals("the title is unaffected once trimmed", "第一章 标题", match.value.trim())
+        listOf("\n", "\n\n", "\r\n\r\n").forEach { blanks ->
+            val match = compiled(rule1).find(blanks + "第一章 标题")
+            assertNotNull("rule 1 still matches after blank lines", match)
+            assertEquals(
+                "the match must start AT the heading, not at the preceding blank line",
+                blanks.length, match!!.range.first,
+            )
+            assertEquals("第一章 标题", match.value)
+        }
+        // …and a genuine in-line indent is still consumed, exactly as iOS does it.
+        // Braced: a CJK letter is a valid Kotlin identifier character, so `$IDEO第一章` would
+        // parse as the identifier `IDEO第一章`.
+        val indented = compiled(rule1).find("\n$IDEO${IDEO}第一章 标题")
+        assertNotNull(indented)
+        assertEquals("the U+3000 indent is part of the match, as on iOS", 1, indented!!.range.first)
     }
 
     @Test

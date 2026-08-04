@@ -17,10 +17,14 @@
 //   `[Cc]hapter`-style spellings avoid. No pattern carries an inline flag either — `(?U)` in
 //   particular is banned: it would fix \d and \s but ALSO redefine \w, \b and POSIX classes.
 //
-// Known limitation: [WS] is a superset of iOS's literal `[space, U+3000, tab]` indent class and
-// includes line terminators, so at a BLANK line the leading indent can consume that line's own
-// terminator and a match can start one line early. Titles are unaffected (they are trimmed);
-// the source offset shifts to the blank line's start. Pinned by TxtTocRulesTest.
+// - The leading indent class stays iOS's LITERAL `[space, U+3000, tab]` (see [INDENT]). The
+//   plan's §3.5 asked for it to be normalized to [WS] too; that was implemented, audited, and
+//   reverted, because [WS] contains LINE TERMINATORS while iOS's indent class does not. At a
+//   blank line the widened indent consumed that line's own terminator, so a match started one
+//   line early and WI-2 would have turned a systematically-off-by-one-line offset into a
+//   navigation locator. iOS never wrote `\s` in the indent, so there is no ICU divergence to
+//   repair here — and the plan's own Appendix A.5 non-regression measurement kept this class
+//   literal, so it never covered the normalization it asked for.
 //
 // @coordinates-with: TxtTocRule.kt, TxtTocRuleEngine.kt
 package com.vreader.app.reader.nav
@@ -71,8 +75,20 @@ object TxtTocRules {
     /** Rule 19 (parenthesised) — no 〇, no 两. */
     private const val CJK_NUM_PAREN = "零一二三四五六七八九十百千万壹贰叁肆伍陆柒捌玖拾佰仟"
 
-    /** The bounded leading-indent prefix every rule shares. */
-    private const val INDENT = "^$WS{0,4}"
+    /**
+     * The bounded leading-indent prefix every rule shares — iOS's LITERAL `[space, U+3000, tab]`
+     * class, deliberately NOT widened to [WS].
+     *
+     * iOS wrote this class out by hand rather than as `\s`, so there is no ICU-vs-Java
+     * divergence to repair. Widening it would be a *new* divergence with a real cost: [WS]
+     * matches line terminators, so at a blank line the indent swallows that line's own
+     * terminator and the match — hence the heading's source offset, hence WI-2's navigation
+     * locator — starts one line early.
+     *
+     * U+3000 is built from its code point rather than written literally: an invisible character
+     * in a regex is exactly what Gate-2 rounds 3 and 4 caught being silently normalized.
+     */
+    internal val INDENT = "^[ " + Char(0x3000) + "\\t]{0,4}"
 
     // ------------------------------------------------------------------ the rules
 
