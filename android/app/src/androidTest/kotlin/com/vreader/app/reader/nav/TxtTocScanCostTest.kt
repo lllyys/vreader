@@ -45,9 +45,12 @@ import java.util.regex.Pattern
  * | (h) | K resets and K matches walked five ways — prices the reset, construction and walk paths |
  * | (f) | target-semantic logging: bare `\d`/`\s` vs the repaired classes on the real engine |
  *
- * A flat arm (g) kills H1 and sends WI-2 back to planning. An arm (h) that attributes the cost to
- * `reset()` rather than to construction changes what WI-2 should fix. Both outcomes are named in
- * the plan in advance so neither can be explained away afterwards.
+ * A flat arm (g) kills H1 and sends WI-2 back to planning — that outcome is named in the plan in
+ * advance so it cannot be explained away afterwards. Arm (h) then prices the paths a fix could
+ * remove: if the cost survives removing construction alone (i.e. it sits in the reset that
+ * `find(int)` performs anyway), a fix that only stops constructing would not close the gap. Arm (h)
+ * prices PATHS and deliberately does not claim an exclusive construction-vs-reset split — see its
+ * own documentation for exactly what it does and does not establish.
  *
  * **Assertions are EQUIVALENCE, never budgets.** Arms (a)/(b)/(c) must agree on the match count and
  * (a)/(b) element-for-element on `(title, offset)`; arm (h)'s three walks must return the identical
@@ -64,9 +67,11 @@ import java.util.regex.Pattern
  *    shows up as a discrepancy between paired readings rather than hiding inside a single one.
  *    **These are on-device measurements on a loaded emulator, not a JMH steady state** — treat a
  *    figure whose paired readings disagree materially as exploratory, and say so.
- *  - *GC timing*: [gcSettle] runs before every timed region, and the "after" memory sample is taken
+ *  - *GC timing*: [gcSettle] runs before every timed ARM, and the "after" memory sample is taken
  *    WITHOUT a collection, so retained native growth is visible instead of being swept away. Arm
- *    (g)'s inter-batch collections are outside its timed regions.
+ *    (g)'s inter-batch collections are outside its timed regions. Two small in-method diagnostics —
+ *    the `Pattern.compile` price and the per-rule sample counts — are NOT separately settled; they
+ *    are logged as diagnostics and no conclusion rests on them.
  *  - *Dead-code elimination* (plan §4.3, Gate-2 R2 HIGH): a constructed `Matcher` that is never used
  *    could be scalar-replaced by ART's JIT, reporting a spuriously flat cost and FALSELY KILLING
  *    H1 — the expensive wrong answer, since it would send a correct fix back to planning. Every
@@ -225,10 +230,13 @@ class TxtTocScanCostTest {
         const val BUDGET_CHECK_MASK = 0x3F
 
         /**
-         * Arm (g)'s text sizes. THREE points, not two: two sizes give a ratio, three give a
-         * LINEARITY test — the O(n) model predicts the middle point from the outer two, and the O(1)
-         * model predicts all three are equal. Both models are therefore falsifiable by the same data
-         * (Gate-4 High: a bare ratio can neither establish flatness nor quantify scaling).
+         * Arm (g)'s text sizes. THREE points, not two: two sizes give only a ratio, three let each
+         * model be checked against a HELD-OUT point — the length-proportional model is fitted from
+         * the outer two and must then predict the middle one, while the constant-cost model predicts
+         * all three are equal (Gate-4 R1 High: a bare ratio can neither establish flatness nor
+         * quantify scaling). With no variance estimate and no pre-registered threshold this
+         * discriminates "roughly constant" from "roughly proportional" over the sampled range; it is
+         * not a falsification of asymptotic complexity. See the arm's own KDoc.
          */
         const val SHORT_TEXT_CHARS = 64
         const val MID_TEXT_CHARS = 512 * 1024
@@ -581,10 +589,11 @@ class TxtTocScanCostTest {
      *    experiment's resolution", never as a measurement.
      *
      * An exclusive percentage split between construction and reset is therefore NOT established here
-     * and must not be quoted from this arm. What IS established: both reset forms are expensive, and
-     * both the fresh-matcher path and the `find(int)` path are millisecond-scale on this input while
-     * the no-arg `find()` walk is two orders of magnitude cheaper — which is what a fix has to act
-     * on.
+     * and must not be quoted from this arm. What IS established, and what a fix has to act on: both
+     * reset forms are expensive, and both the fresh-matcher path and the `find(int)` path are
+     * millisecond-scale on this input, while a full h1 walk step (reused matcher, no-arg `find()`)
+     * costs roughly 3 % of a full h3 step — i.e. the per-match saving is a factor of tens, read
+     * from the h1-vs-h3 totals rather than from any component difference.
      *
      * `resume_i` is the position `next()` itself would resume from (the previous match's end, +1
      * after an empty match), so h1/h2/h3 scan the same gaps rather than one of them starting
