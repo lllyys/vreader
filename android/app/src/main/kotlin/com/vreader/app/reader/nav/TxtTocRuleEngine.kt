@@ -25,9 +25,17 @@
 //   (`android.util.Log` throws "not mocked" in a plain unit test). A rule that fails to compile is
 //   skipped, mirroring iOS's `try?` — degrading to "no Contents" beats crashing a working reader,
 //   and TxtTocRulesTest already pins that all 25 shipped rules compile.
-// - Both entry points are cancellation-cooperative (`ensureActive()` at entry, then every
-//   [CANCELLATION_CHECK_INTERVAL] matches and between detection rules), so closing the reader
-//   mid-scan stops promptly instead of burning a background thread on a 14 MB book.
+// - Both entry points are cancellation-cooperative, with a PRECISELY BOUNDED granularity: a check
+//   at entry, one before each detection rule, and one every [CANCELLATION_CHECK_INTERVAL] matches.
+//   A single `find()` / `next()` is a non-suspending `java.util.regex` call that cannot observe
+//   cancellation, so the worst case after a cancel is one uninterrupted walk of the gap to the
+//   next match — bounded by a full pass over the text (measured at ~100 ms for the real 14 MB CJK
+//   book, plan §5 / Appendix A.1), off the main thread. Splitting the scan into line-bounded
+//   regions to tighten that was REJECTED, not overlooked: `TxtTocRules.WS` widens whitespace to
+//   ICU's `\s`, which contains line terminators, so a rule genuinely can match ACROSS a newline
+//   (probed: rule 1 matches "第\n一\n章 标题" at offset 0 — and iOS's ICU `\s` behaves the same).
+//   Region-splitting would therefore silently drop real matches, trading a bounded ~100 ms
+//   background latency for a correctness divergence.
 //
 // @coordinates-with: TxtTocRules.kt, DetectedHeading.kt, TxtMdTocProvider.kt
 package com.vreader.app.reader.nav
@@ -52,8 +60,12 @@ object TxtTocRuleEngine {
     const val MIN_MATCHES: Int = 2
 
     /**
-     * Matches examined between cancellation checks. Small enough that a cancelled scan of a 14 MB
-     * book stops in well under a frame; large enough that the check is not the inner loop's cost.
+     * Matches EXAMINED between cancellation checks (not headings emitted — a document of dropped
+     * blank titles stays interruptible too).
+     *
+     * This bounds the check frequency in match-space only. The residual latency is the gap between
+     * two matches, which one non-suspending regex call walks in a single step; see the file header
+     * for why that is accepted rather than chunked away.
      */
     const val CANCELLATION_CHECK_INTERVAL: Int = 1024
 
@@ -140,9 +152,13 @@ object TxtTocRuleEngine {
      *
      * Swift's `String.Index(utf16Offset:in:)` rounds to a Character boundary; a bare Kotlin
      * `substring` would leave a lone high surrogate at the end, which is not a character in either
-     * engine's sense and would only ever confuse a `.{0,30}` count.
+     * engine's sense and would only ever confuse a `.{0,30}` count. A lone surrogate ALREADY in
+     * the text (malformed input) is preserved as-is — only a genuine pair is stepped back over.
+     *
+     * `internal` so the boundary cases can be asserted directly; they are not observable through
+     * [detectBestRule], whose result is the same either way for every realistic rule.
      */
-    private fun sampleOf(text: String): String {
+    internal fun sampleOf(text: String): String {
         if (text.length <= SAMPLE_SIZE_UTF16) return text
         var end = SAMPLE_SIZE_UTF16
         if (text[end - 1].isHighSurrogate() && text[end].isLowSurrogate()) end--

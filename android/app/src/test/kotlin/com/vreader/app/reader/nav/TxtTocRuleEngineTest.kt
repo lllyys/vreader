@@ -187,6 +187,54 @@ class TxtTocRuleEngineTest {
         )
     }
 
+    // ------------------------------------------------------------------ the sampling window edge
+
+    @Test
+    fun sampleOf_shorterThanTheWindow_returnsTheTextUntouched() {
+        val text = "第一章 甲\n"
+        assertSame(text, TxtTocRuleEngine.sampleOf(text))
+    }
+
+    @Test
+    fun sampleOf_exactlyTheWindow_returnsTheTextUntouched() {
+        // The `<=` boundary: one code unit longer and the truncation branch runs instead.
+        val text = "x".repeat(TxtTocRuleEngine.SAMPLE_SIZE_UTF16)
+        assertEquals(TxtTocRuleEngine.SAMPLE_SIZE_UTF16, TxtTocRuleEngine.sampleOf(text).length)
+        assertSame(text, TxtTocRuleEngine.sampleOf(text))
+    }
+
+    @Test
+    fun sampleOf_surrogatePairStraddlingTheBoundary_stepsBackOverIt() {
+        // High surrogate at SAMPLE - 1, low surrogate at SAMPLE: a bare substring would leave a
+        // lone high surrogate as the sample's last code unit.
+        val text = "x".repeat(TxtTocRuleEngine.SAMPLE_SIZE_UTF16 - 1) + "😀" + "x".repeat(10)
+        val sample = TxtTocRuleEngine.sampleOf(text)
+
+        assertEquals(TxtTocRuleEngine.SAMPLE_SIZE_UTF16 - 1, sample.length)
+        assertFalse("the sample must not end on a lone high surrogate", sample.last().isHighSurrogate())
+        assertEquals("x", sample.takeLast(1))
+    }
+
+    @Test
+    fun sampleOf_surrogatePairEndingExactlyAtTheBoundary_isKeptWhole() {
+        // Low surrogate at SAMPLE - 1: the pair is fully inside the window, so no back-off.
+        val text = "x".repeat(TxtTocRuleEngine.SAMPLE_SIZE_UTF16 - 2) + "😀" + "x".repeat(10)
+        val sample = TxtTocRuleEngine.sampleOf(text)
+
+        assertEquals(TxtTocRuleEngine.SAMPLE_SIZE_UTF16, sample.length)
+        assertTrue("the whole pair survives", sample.endsWith("😀"))
+    }
+
+    @Test
+    fun sampleOf_loneSurrogateAtTheBoundary_isPreserved_notSteppedOver() {
+        // Malformed input: an unpaired high surrogate is a code point of its own. Stepping back
+        // over it would drop a real code unit for no reason, so the back-off must require a PAIR.
+        val loneHigh = Char(0xD83D).toString()
+        val text = "x".repeat(TxtTocRuleEngine.SAMPLE_SIZE_UTF16 - 1) + loneHigh + "x".repeat(10)
+
+        assertEquals(TxtTocRuleEngine.SAMPLE_SIZE_UTF16, TxtTocRuleEngine.sampleOf(text).length)
+    }
+
     @Test
     fun detectBestRule_returnsTheRuleInstanceFromTheSuppliedList() {
         val supplied = defaults.map { it.copy(name = it.name + " (tagged)") }
@@ -491,6 +539,25 @@ class TxtTocRuleEngineTest {
         assertTrue("must not backtrack catastrophically (took ${elapsedMs}ms)", elapsedMs < 10_000)
     }
 
+    @Test
+    fun extractHeadings_largeNoMatchDocument_terminatesWithinTheBoundedWindow() {
+        // The worst-case UNINTERRUPTIBLE window, made an asserted number rather than a claim:
+        // `find()` is one non-suspending java.util.regex call, so a document with no match at all
+        // is walked in a single uncancellable step. 14 MB is the real CJK book's size; the plan
+        // measures a full pass at ~100 ms (§5 / Appendix A.1). The ceiling below is deliberately
+        // loose — this pins the ORDER of magnitude (bounded, linear), not a benchmark.
+        val text = "没有任何章节标记的正文段落。".repeat(1_000_000) // ~14M UTF-16 units
+        val startedNs = System.nanoTime()
+        val result = run { TxtTocRuleEngine.extractHeadings(text, rule(1), noCap) }
+        val elapsedMs = (System.nanoTime() - startedNs) / 1_000_000
+
+        assertEquals(emptyList<DetectedHeading>(), result.headings)
+        assertTrue(
+            "a full no-match pass must stay bounded and linear (took ${elapsedMs}ms over ${text.length} units)",
+            elapsedMs < 10_000,
+        )
+    }
+
     // ------------------------------------------------------------------ cancellation
 
     @Test
@@ -522,13 +589,30 @@ class TxtTocRuleEngineTest {
     }
 
     @Test
-    fun detectBestRule_isCancellationCooperative() {
+    fun detectBestRule_isCancellationCooperative_betweenRules() {
         val text = (1..50_000).joinToString("\n") { "第${it}章 标题" }
         val job = CancelAfter(activeChecks = 1)
         val outcome = runWithJob(job) { TxtTocRuleEngine.detectBestRule(text, defaults) }
 
         assertTrue("cancellation must propagate out of detection", outcome.isFailure)
         assertTrue(outcome.exceptionOrNull() is CancellationException)
+    }
+
+    @Test
+    fun detectBestRule_isCancellationCooperative_whileCountingOneRulesMatches() {
+        // The between-rules test above would still pass if match COUNTING never checked at all:
+        // with one enabled rule, the checks are entry (0) and the rule boundary (1), and counting
+        // is where all the time actually goes. Cancelling only after those two forces the third
+        // check to come from INSIDE countMatches — so this fails if that check is removed.
+        val single = listOf(rule(2))
+        val matchesPerRule = TxtTocRuleEngine.CANCELLATION_CHECK_INTERVAL * 4
+        val text = (1..matchesPerRule).joinToString("\n") { "第${it}章 标题" }
+        val job = CancelAfter(activeChecks = 2)
+        val outcome = runWithJob(job) { TxtTocRuleEngine.detectBestRule(text, single) }
+
+        assertTrue("cancellation must propagate out of match counting", outcome.isFailure)
+        assertTrue(outcome.exceptionOrNull() is CancellationException)
+        assertTrue("the third check must come from inside countMatches", job.checks > 2)
     }
 
     @Test
@@ -543,6 +627,21 @@ class TxtTocRuleEngineTest {
     }
 
     // ------------------------------------------------------------------ detect → extract, joined
+
+    @Test
+    fun extractHeadings_aRuleCanMatchAcrossALineTerminator_soTheScanIsNotLineSplittable() {
+        // Load-bearing for the engine header's REJECTION of line-region chunking (Gate-4 round 1
+        // proposed it to tighten cancellation latency). TxtTocRules.WS widens whitespace to ICU's
+        // `\s`, which CONTAINS line terminators — so a heading split across lines still matches,
+        // exactly as it does on iOS's ICU. Any future "scan line by line" optimization would
+        // silently drop this match; this test is what makes that a failure instead of a shrug.
+        val text = "第\n一\n章 标题\n"
+        val headings = run { TxtTocRuleEngine.extractHeadings(text, rule(1), noCap) }.headings
+
+        assertEquals(1, headings.size)
+        assertEquals(0, headings[0].sourceOffsetUtf16)
+        assertTrue("the match spans terminators", headings[0].title.contains("\n"))
+    }
 
     @Test
     fun detectThenExtract_onARealisticCjkDocument_findsEveryChapterAtItsLineStart() {
