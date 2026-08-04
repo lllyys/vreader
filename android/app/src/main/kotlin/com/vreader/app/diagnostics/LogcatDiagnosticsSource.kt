@@ -33,29 +33,25 @@ import kotlin.coroutines.cancellation.CancellationException
  *   diagnostic line in the output means Unavailable**; parsing even one of our own rows is
  *   positive proof the reader worked, and zero rows with no diagnostic is a genuinely quiet
  *   buffer.
- * - **The timeout is a watchdog that KILLS the child and closes the stream**, not a
- *   cancellation of a blocking read: `InputStream.read` ignores coroutine cancellation. The
- *   child is destroyed FIRST and the stream closed second, because killing the writer closes
- *   the pipe's far end and unblocks the reader even if our own `close()` were to stall — two
- *   independent ways out instead of one. The watchdog is a short-lived DAEMON THREAD rather
- *   than a coroutine child on purpose: as a structured child, a blocking cleanup call would
- *   stall `withContext` indefinitely, which is exactly the wedge a diagnostics path must
- *   never cause.
- * - **Cleanup has exactly ONE owner.** An [AtomicReference] state machine arbitrates
- *   `READING -> COMPLETED` (reader won) versus `READING -> TIMED_OUT` (watchdog won), so a
- *   read that finishes just as the watchdog fires is classified deterministically and is
- *   never both cleaned up twice and discarded.
- * - **The child is reaped on every exit path**, including an unexpected throw (outer
- *   `finally`). Cleanup is `destroy()` -> bounded wait -> `destroyForcibly()` -> bounded
- *   wait; an unconfirmed exit yields `null`, and **`null` is never treated as success on any
- *   path, truncated or not**. [CLEANUP_BUDGET_MS] bounds the cleanup WAITS; `close(2)` and
- *   `kill(2)` on a pipe fd are taken as non-blocking, and if a platform ever made them block
- *   it is the daemon watchdog — not the caller — that absorbs it.
+ * - **The timeout is a watchdog that KILLS the child, then closes the stream** — not a
+ *   cancellation of a blocking read, which `InputStream.read` ignores. Killing the writer
+ *   closes the pipe's far end, so the reader is freed even if our own `close()` stalled: two
+ *   independent ways out. The watchdog is a short-lived DAEMON THREAD, not a coroutine child;
+ *   as a structured child, a blocking cleanup call would stall `withContext` forever, exactly
+ *   the wedge a diagnostics path must never cause.
+ * - **Cleanup has exactly ONE owner**, arbitrated by an [AtomicReference]:
+ *   `READING -> COMPLETED` (reader won) vs `READING -> TIMED_OUT` (watchdog won). A read that
+ *   finishes just as the watchdog fires is therefore classified deterministically, never both
+ *   torn down and discarded. Before the watchdog starts, the stream has no owner but us.
+ * - **Reaping is attempted on every exit path** including an unexpected throw (outer
+ *   `finally`): `destroy()` -> bounded wait -> `destroyForcibly()` -> bounded wait. An
+ *   unconfirmed exit yields `null`, and **`null` is never success on any path, truncated or
+ *   not**. [CLEANUP_BUDGET_MS] bounds the WAITS; `close(2)`/`kill(2)` on a pipe fd are taken
+ *   as non-blocking, and a child that survives forced termination is reported, not waited on.
  * - **`redirectErrorStream(true)` + a single reader.** Two pipes with one drain deadlocks as
- *   soon as the undrained one fills; folding stderr into stdout removes the second pipe.
+ *   soon as the undrained one fills.
  * - **`sinceMillis` is applied in Kotlin, not via logcat's `-t <time>`**, whose time format
- *   is format-sensitive and would make correctness depend on argv parsing we cannot test
- *   off-device.
+ *   would make correctness depend on argv parsing we cannot test off-device.
  *
  * `recentEntries` never throws to signal a source failure. `CancellationException` is the one
  * exception that still propagates, as it must — cancelling the caller is not a source failure.
@@ -77,6 +73,8 @@ class LogcatDiagnosticsSource(
         withContext(ioDispatcher) {
             val process = try {
                 exec(command(maxLines))
+            } catch (cancellation: CancellationException) {
+                throw cancellation
             } catch (t: Throwable) {
                 return@withContext SourceResult.Unavailable(
                     "logcat could not be started: ${t.javaClass.simpleName}: ${t.message}"
@@ -107,10 +105,31 @@ class LogcatDiagnosticsSource(
     ): SourceResult {
         val stream = try {
             process.inputStream
+        } catch (cancellation: CancellationException) {
+            throw cancellation
         } catch (t: Throwable) {
             return SourceResult.Unavailable("logcat stdout unavailable: ${t.javaClass.simpleName}")
         }
 
+        // Until the watchdog is running there is no state machine to own the stream, so any
+        // failure during setup leaves the fd to us. Without this the stream leaks on a throw
+        // from Thread.start().
+        var ownedByStateMachine = false
+        try {
+            return collectFrom(process, stream, reaped, sinceMillis, limit) { ownedByStateMachine = true }
+        } finally {
+            if (!ownedByStateMachine) closeQuietly(stream)
+        }
+    }
+
+    private inline fun collectFrom(
+        process: Process,
+        stream: InputStream,
+        reaped: AtomicBoolean,
+        sinceMillis: Long?,
+        limit: Int,
+        onOwnershipTransferred: () -> Unit,
+    ): SourceResult {
         val state = AtomicReference(ReadState.READING)
         val finished = CountDownLatch(1)
         val watchdog = Thread({
@@ -123,6 +142,8 @@ class LogcatDiagnosticsSource(
                 }
             }
         }, WATCHDOG_THREAD_NAME).apply { isDaemon = true; start() }
+        // From here the CAS state machine owns the stream's close.
+        onOwnershipTransferred()
 
         var readFailure: Throwable? = null
         val drained = try {

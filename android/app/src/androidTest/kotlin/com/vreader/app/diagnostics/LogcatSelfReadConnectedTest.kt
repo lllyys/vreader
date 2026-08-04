@@ -23,6 +23,7 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import kotlin.coroutines.cancellation.CancellationException
 
 /**
  * Feature #164 WI-1 — **THE FEASIBILITY GATE**, plus the OS-boundary behavior of
@@ -360,6 +361,38 @@ class LogcatSelfReadConnectedTest {
     }
 
     @Test
+    fun cancellationPropagatesRatherThanBecomingUnavailable() = runBlocking {
+        // "Never throws" means never throws a SOURCE FAILURE. Cancelling the caller is not a
+        // source failure, and swallowing it into Unavailable would hide a cancelled scope.
+        val fromExec = LogcatDiagnosticsSource(
+            ownUid = 10_209,
+            exec = { throw CancellationException("cancelled during exec") },
+        )
+        var thrown: Throwable? = null
+        try {
+            fromExec.recentEntries(limit = 10)
+        } catch (t: Throwable) {
+            thrown = t
+        }
+        assertTrue("cancellation from exec must propagate, got $thrown", thrown is CancellationException)
+
+        val fromStream = LogcatDiagnosticsSource(
+            ownUid = 10_209,
+            exec = { CancellingStreamProcess() },
+        )
+        thrown = null
+        try {
+            fromStream.recentEntries(limit = 10)
+        } catch (t: Throwable) {
+            thrown = t
+        }
+        assertTrue(
+            "cancellation from getInputStream must propagate, got $thrown",
+            thrown is CancellationException,
+        )
+    }
+
+    @Test
     fun anUnexpectedFailureStillReapsTheChild() = runBlocking {
         // The outer finally is the belt-and-braces guarantee: even a throw from inside the
         // read path may not leave a logcat child behind.
@@ -641,6 +674,18 @@ class LogcatSelfReadConnectedTest {
             // Never returns — a close() that cannot rescue the reader.
             CountDownLatch(1).await(30, TimeUnit.SECONDS)
         }
+    }
+
+    /** Cancels at stream acquisition — the second of the two swallow-cancellation sites. */
+    private class CancellingStreamProcess : Process() {
+        override fun getOutputStream(): OutputStream = ByteArrayOutputStream()
+        override fun getInputStream(): InputStream = throw CancellationException("cancelled")
+        override fun getErrorStream(): InputStream = ByteArrayInputStream(ByteArray(0))
+        override fun waitFor(): Int = 0
+        override fun waitFor(timeout: Long, unit: TimeUnit): Boolean = true
+        override fun exitValue(): Int = 0
+        override fun destroy() = Unit
+        override fun isAlive(): Boolean = false
     }
 
     /** Fails the read outright — the "unexpected failure" path the outer finally must survive. */
