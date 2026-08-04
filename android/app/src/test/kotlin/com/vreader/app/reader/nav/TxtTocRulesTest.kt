@@ -65,15 +65,36 @@ class TxtTocRulesTest {
     private fun whitespaceRules() = rules.filter { body(it).contains(TxtTocRules.WS_CHARS) }
 
     /**
-     * Undo the two permitted substitutions, turning a shipped pattern back into the iOS text it
-     * was ported from. Bracketed forms are undone first so both an in-class occurrence
-     * (`[0-9…〇零…]` → `[\d〇零…]`) and a standalone one (`[0-9…]{1,4}` → `\d{1,4}`) round-trip.
+     * Apply the two permitted substitutions to an iOS pattern, producing the EXACT pattern
+     * Android must ship. Forward and context-aware, deliberately not a reverse normalization:
+     * undoing the substitutions is not injective (bracketed `[0-9０-９]` and bare `0-9０-９` both
+     * reverse to `\d`), so a pattern that spliced a class where only its contents belong — e.g.
+     * `\s\p{Z}\x{0085}{0,4}` outside a class, which is a literal sequence and not whitespace at
+     * all — would reverse cleanly and pass while behaving nothing like iOS.
+     *
+     * `\d` / `\s` INSIDE a character class expand to the class CONTENTS; outside, to the whole
+     * bracketed class. Escapes are skipped, so `\[` and `\-` do not affect class tracking.
      */
-    private fun roundTripToIos(pattern: String) = pattern
-        .replace(TxtTocRules.WS, "\\s")
-        .replace(TxtTocRules.WS_CHARS, "\\s")
-        .replace(TxtTocRules.DIGIT, "\\d")
-        .replace(TxtTocRules.DIGIT_CHARS, "\\d")
+    private fun expandIosPattern(iosPattern: String): String = buildString {
+        var i = 0
+        var inClass = false
+        while (i < iosPattern.length) {
+            val c = iosPattern[i]
+            when {
+                c == '\\' && i + 1 < iosPattern.length -> {
+                    when (val escaped = iosPattern[i + 1]) {
+                        'd' -> append(if (inClass) TxtTocRules.DIGIT_CHARS else TxtTocRules.DIGIT)
+                        's' -> append(if (inClass) TxtTocRules.WS_CHARS else TxtTocRules.WS)
+                        else -> append(c).append(escaped)
+                    }
+                    i += 2
+                }
+                c == '[' && !inClass -> { inClass = true; append(c); i++ }
+                c == ']' && inClass -> { inClass = false; append(c); i++ }
+                else -> { append(c); i++ }
+            }
+        }
+    }
 
     /** Narrow a pattern back to stock-Java semantics — the negative control. */
     private fun narrowedWhitespace(pattern: String) =
@@ -194,17 +215,30 @@ class TxtTocRulesTest {
     )
 
     @Test
-    fun everyRule_roundTripsToTheIosPatternExactly() {
+    fun everyRule_isTheIosPatternWithOnlyTheD1AndD1bSubstitutions() {
         assertEquals("the golden table covers all 25 iOS rules", 25, iosRules.size)
         rules.forEach { rule ->
             val (name, iosBody, example) = iosRules.getValue(rule.id)
             assertEquals("rule ${rule.id} name", name, rule.name)
             assertEquals("rule ${rule.id} example", example, rule.example)
             assertEquals(
-                "rule ${rule.id} must differ from iOS ONLY by the D1/D1b substitutions",
-                IOS_INDENT + iosBody, roundTripToIos(rule.pattern),
+                "rule ${rule.id} must be iOS's pattern with ONLY the D1/D1b substitutions applied",
+                IOS_INDENT + expandIosPattern(iosBody), rule.pattern,
             )
         }
+    }
+
+    @Test
+    fun expandIosPattern_isContextAware() {
+        // Guards the guard: the fidelity test is only as good as this expansion, so pin the two
+        // contexts and the escape handling it has to get right.
+        assertEquals("[.、：:${TxtTocRules.WS_CHARS}]", expandIosPattern("[.、：:\\s]"))
+        assertEquals("${TxtTocRules.WS}{0,4}", expandIosPattern("\\s{0,4}"))
+        assertEquals("[${TxtTocRules.DIGIT_CHARS}〇]", expandIosPattern("[\\d〇]"))
+        assertEquals("${TxtTocRules.DIGIT}{1,4}", expandIosPattern("\\d{1,4}"))
+        // An escaped bracket must not open or close a class.
+        assertEquals("[\\[x]${TxtTocRules.WS}", expandIosPattern("[\\[x]\\s"))
+        assertEquals("[a\\-b]${TxtTocRules.DIGIT}", expandIosPattern("[a\\-b]\\d"))
     }
 
     @Test
