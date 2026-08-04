@@ -142,12 +142,14 @@ import java.util.concurrent.atomic.AtomicReference
  * order in the evidence file, and so a memory-heavy method's position in the run is reproducible
  * rather than an accident of JVM reflection order.
  *
- * **This class does not fit in one process on a 2.5 GB emulator — run it in two halves.** The app
- * process grows by several hundred MB of NATIVE memory per full-document scan and does not give it
- * back (the Java heap stays around 20 MB throughout), so after roughly three whole-book scans the
- * `lowmemorykiller` takes the app and the run is truncated mid-class. That accumulation is itself a
- * finding reported with this work item, NOT a harness defect to paper over; until it is understood,
- * split the run:
+ * **This class may not fit in one process on a 2.5 GB emulator.** Repeated whole-document scans
+ * CORRELATE with substantial non-Java process growth — the Java heap stays around 20 MB throughout,
+ * while RSS climbed to 1.4–1.9 GB and the `lowmemorykiller` took the app mid-class on several runs,
+ * truncating them. The per-pass magnitude, what retains it, and whether it is the scan or something
+ * downstream of it are all UNISOLATED: these are whole-process readings and this suite cannot
+ * separate them. Reported with this work item as a signal to investigate, not as a measured cost.
+ * (The authoritative run completed all six methods after an emulator reboot.) If a run is truncated,
+ * reboot the emulator, or split it:
  *
  * ```
  * -Pandroid.testInstrumentationRunnerArguments.class=\
@@ -679,14 +681,16 @@ class TxtTocAcceptanceTest {
         // designed from where the time goes (detection over the 512 KB sample vs extraction over all
         // 7 M chars), not from a single opaque total.
         //
-        // Only DETECTION is re-run: it reads a 512 KB sample, so it costs ~130 ms and negligible
-        // memory. A second EXTRACTION pass is deliberately NOT run — each whole-document pass grows
-        // the process by several hundred MB of native memory that is never returned, and a version of
-        // this method that ran three passes was lowmemorykiller-ed at ~1.48 GB before it could report
-        // anything. Extraction is therefore INFERRED as (gated total − detection), which is exact up
-        // to the provider's dispatcher hop and its 1 859 `TocEntry` mappings. Direct measurements of
-        // the extraction pass from earlier runs — 7 630 / 7 840 / 6 604 ms — are recorded in the
-        // evidence file and agree with the inference.
+        // Only DETECTION is re-run: it reads a 512 KB sample, so it costs ~90 ms and negligible
+        // memory. A second EXTRACTION pass is deliberately NOT run — whole-document passes correlate
+        // with large non-Java process growth, and a version of this method that ran three of them was
+        // lowmemorykiller-ed at ~1.48 GB before it could report anything. Extraction is therefore an
+        // APPROXIMATE RESIDUAL, (gated total − detection): detection is re-measured afterwards in a
+        // different warm state, and the residual also carries the provider's dispatcher hop and its
+        // 1 859 `TocEntry` mappings. Direct measurements of the extraction pass from earlier runs —
+        // 7 630 / 7 840 / 6 604 ms — are recorded in the evidence file and agree with the residual,
+        // which is what makes it usable as a diagnostic. No gate depends on it: both gate-1 tests
+        // time and assert the complete `provider.toc()` call directly.
         val d0 = SystemClock.elapsedRealtime()
         val rule = runBlocking { TxtTocRuleEngine.detectBestRule(text) }
         val warmDetectMs = SystemClock.elapsedRealtime() - d0
@@ -1053,9 +1057,11 @@ class TxtTocAcceptanceTest {
      * nested markdown document (`test-books/books/` contains no `.md` file at all, so this format has
      * no real *book*; a real repo document beats a hand-written fixture).
      *
-     * The expectation is an INDEPENDENT in-test oracle ([atxHeadingOracle]) rather than a hardcoded
-     * list, so the test proves agreement between two implementations of the CommonMark ATX rules and
-     * survives the document being edited. Nesting is then asserted where a user perceives it — the
+     * The expectation comes from a SECOND IMPLEMENTATION of the product's own ATX rules
+     * ([atxHeadingOracle]) rather than a hardcoded list, so the test proves the two agree on this
+     * large real document — not CommonMark conformance, which the product deliberately diverges from
+     * (see the oracle's note) — and it survives the document being edited. Nesting is then asserted
+     * where a user perceives it — the
      * laid-out indentation of the row title — not merely as a `depth` field.
      */
     @Test
@@ -1078,7 +1084,7 @@ class TxtTocAcceptanceTest {
             val entries = reader.read { it.tocEntriesForTest() }
 
             assertEquals(
-                "the scanned MD headings match the independent ATX oracle (depth, title)",
+                "the scanned MD headings match the second-implementation ATX oracle (depth, title)",
                 expected, entries.map { it.depth to it.title },
             )
             assertMdEntriesAnchoredIn(text, entries)
