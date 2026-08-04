@@ -244,6 +244,14 @@ class LogcatDiagnosticsSource(
 
     private fun awaitExit(process: Process): Int? = try {
         if (process.waitFor(REAP_BUDGET_MS, TimeUnit.MILLISECONDS)) process.exitValue() else null
+    } catch (cancellation: CancellationException) {
+        // Cooperative cancellation must PROPAGATE, never be folded into a failure result.
+        // `waitFor` is interruptible, so a cancelled collect() can land here; the broad catch
+        // below would otherwise turn it into `null` -> `Unavailable`, i.e. the caller would be
+        // told "logcat is unavailable on this device" when in fact it had simply been cancelled.
+        // That is the same defect Gate-4 round 3 fixed at the exec() and inputStream sites; this
+        // is the third site, found by the confirming round.
+        throw cancellation
     } catch (t: Throwable) {
         null
     }

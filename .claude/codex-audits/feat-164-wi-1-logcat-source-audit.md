@@ -1,10 +1,44 @@
 ---
 branch: feat/164-wi-1-logcat-source
 threadId: 019fce4f-07ef-7c50-a3db-b3224a882387
-rounds: 3
-final_verdict: block-recommended
+rounds: 4
+final_verdict: ship-as-is
 date: 2026-08-05
 ---
+
+## Round 4 — confirming round (orchestrator-run, 2026-08-05)
+
+The lane correctly escalated rather than upgrading round 3's verdict itself: its two round-3 fixes
+(the fd-ownership High and the `CancellationException` Medium) **post-dated** that verdict, and a lane
+may not certify its own fix to an independent auditor's finding (rule 48). Unlike two earlier
+escalations this session, those were **real code changes**, not documentation — so this was confirmed
+by audit rather than accepted by argument.
+
+Round 4 was run by the **orchestrator** via `scripts/run-codex.sh` (Codex gpt-5.5/high, read-only),
+scoped strictly to the two fixes in `dc45c75d` plus a regression check on rounds 1–2.
+
+**Confirmed complete:**
+
+- **fd ownership is correct on every path.** "Before transfer the caller closes, after transfer the
+  CAS winner closes, and timeout/read-failure/cancellation paths do not double-close."
+- **Rounds 1–2 hold.** A denied `logcat` exiting 0 is still classified `Unavailable`, distinct from
+  `Available(emptyList())`; `readBounded` still does not close the stream on the caller's thread.
+
+**One finding — and it is the same defect at a third site:**
+
+| Sev | Finding | Disposition |
+|---|---|---|
+| Medium | `awaitExit` still caught `Throwable`, so a `CancellationException` from `waitFor`/`exitValue` became `null` → `Unavailable` instead of propagating | **FIXED** by the orchestrator |
+
+The lane fixed the `exec()` and `inputStream` sites named in round 3 and **missed the third**. The
+user-visible consequence would have been a caller told *"logcat is unavailable on this device"* when
+the call had merely been cancelled — a false negative on the feature's central capability check.
+Fixed with an explicit rethrow ahead of the broad catch, with a comment naming it as the third site.
+
+**Gates re-run after the fix**: JVM **48/48**, connected **21/21**, gate `verdict=PASS ownUid=10253
+uidToken=10253 rendering=numeric polls=1`.
+
+Zero open Critical/High/Medium.
 
 # Gate-4 audit — feature #164 WI-1 (diagnostics logcat source + feasibility gate)
 
