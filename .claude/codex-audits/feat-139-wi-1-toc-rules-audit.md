@@ -1,5 +1,5 @@
 ---
-branch: worktree-agent-a88fda8d3ce3433c2
+branch: feat/139-wi-1-toc-rules
 threadId: 019fcb40-8348-76d2-999e-2be4c26eeeda
 rounds: 3
 final_verdict: follow-up-recommended

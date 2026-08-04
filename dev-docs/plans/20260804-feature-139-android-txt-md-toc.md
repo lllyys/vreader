@@ -241,7 +241,25 @@ equivalence is now true rather than approximate.
 MULTILINE, so they cannot actually occur *within* a line the rules are matching. Including them
 costs nothing and makes the class provably equivalent to ICU's rather than "equivalent for the
 characters we expect" — which is the kind of assumption that produced the `\d` bug in the first
-place. The leading `[ 　\t]{0,4}` indent class is normalized to `$WS{0,4}` for the same reason.
+place.
+
+> **CORRECTION (WI-1 implementation + its Gate-4 audit, 2026-08-04) — the leading indent class is
+> NOT normalized.** v4 of this plan directed that the leading `[ 　\t]{0,4}` indent class also be
+> normalized to `$WS{0,4}`. That instruction was **wrong and is withdrawn.** `$WS` contains line
+> terminators; the indent class sits at the *start* of the match, so at a blank line the indent
+> consumes that line's own terminator and the match begins **one line early**. WI-2 converts match
+> starts into navigation locators, so every heading preceded by a blank line — ubiquitous in real
+> books — would have carried an off-by-one-line offset. Gate-4 round 1 rated this **High**.
+>
+> There is no divergence to repair here in the first place: **iOS never wrote `\s` in the indent**,
+> it wrote a literal `[space, U+3000, tab]` class, so ICU and Java already agree. The
+> "widening is non-regressive" evidence below was measured on *interior* positions and never
+> covered the indent normalization it was cited for.
+>
+> **Shipped**: iOS's literal indent class, pinned by `everyRule_keepsTheLiteralIosIndentClass` and
+> `headingAfterBlankLines_matchesAtTheHeadingLine_notTheBlankLine`. §3.6's D1b row is superseded
+> accordingly. Widening still applies to interior whitespace positions, where the ICU/Java
+> divergence is real.
 
 **Verified non-regressive on real data**: re-running rule 1 over the 14 MB book with the widened
 class yields **1 859 matches — identical to the narrow class** (the widened class is a strict
@@ -1549,8 +1567,14 @@ public class HeadScan {
 }
 ```
 
-Measured: `line starts = 254109`, **`headings = 1859`, `scan ms = 13 / 11 / 6`** — the same 1 859
-A.1 finds, from a completely different algorithm.
+Measured: `line starts = 254109`, **`headings = 1860`, `scan ms = 13 / 11 / 6`** — cross-validating
+A.1's 1 859 from a completely different algorithm.
+
+> **CORRECTION (WI-1, 2026-08-04)**: this appendix previously claimed `headings = 1859`. Re-running
+> the committed probe reproduces **1860**. The one extra hit is the loose match that A.5's own probe
+> already isolates (`loose: 1860 / strict: 1859`), so the cross-validation holds in substance — but
+> the number was wrong and is corrected here. No effect on shipped code: `HeadScan` is the *rejected*
+> alternative algorithm, kept only as independent evidence.
 
 ### A.3 `DigitTest.java` — the D1 probe + the R4 ReDoS bound
 
