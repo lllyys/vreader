@@ -222,9 +222,9 @@ Cause D).
 | Reader / WebView bridges | unit-test the message parser / JS-escaping / locator math | not the WKWebView/Android-WebView interaction itself |
 
 ```bash
-# Until #106's app shell exists, the only real Android target is the spike
-# harness; once it lands, point the runner at the app's Gradle task:
-scripts/run-android-tests.sh                                  # spike-harness smoke
+# The app shell (#106) shipped, so the real target is the `:app` module —
+# point the runner at its Gradle task:
+scripts/run-android-tests.sh                                  # legacy spike-harness smoke
 ANDROID_CMD="./gradlew :app:testDebugUnitTest" scripts/run-android-tests.sh
 ANDROID_CMD="./gradlew :app:test --tests '*MapperTest'" scripts/run-android-tests.sh
 ```

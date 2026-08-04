@@ -60,8 +60,9 @@ and **substitute the lane in every gate** (the gates are written iOS-first):
 - **Version bump**: stays iOS (`project.yml`) for `shared`/spike PRs until #106;
   Android `android/version.properties` + `android/vX.Y.Z` tags begin with #106
   (rule 40).
-- **`shared`-only and pre-#106 spike work → iOS lane.** An `android-app` feature
-  whose Gate-5 needs the app shell is **blocked on #106**.
+- **`shared`-only work → iOS lane** (rule 40). **`android-app` features are
+  first-class**: the old "blocked on #106's app shell" guard is removed
+  (2026-08-04) — #106 is `VERIFIED` and the guard was suppressing Android work.
 
 ## Pre-flight Checks
 

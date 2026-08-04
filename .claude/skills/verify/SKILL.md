@@ -58,10 +58,12 @@ changed paths classify `android-app`/`android-spike` via
   a deterministic in-process sweep and pulls metrics, no UI automation.
 - Evidence file `device_or_simulator` records the AVD (e.g. "Pixel 7 API 35
   emulator"), `os_version` the Android API level.
-- **Until #106's app shell exists, the only Android target is the `spikes/`
-  harness** — so an Android-*app* feature's Gate-5 is itself blocked on #106.
-  Mark such a candidate harness-blocked (see Known harness gaps) rather than
-  forcing it. Pre-#106 Android work is tooling/spike (no device-verify).
+- **`android-app` targets are FIRST-CLASS (2026-08-04).** The old "blocked on
+  #106's app shell" guard is removed — #106 reached `VERIFIED` long ago and the
+  stale guard had been marking every Android candidate harness-blocked, which is
+  part of why four Android features shipped `VERIFIED` with unreachable UI. Do
+  NOT mark an `android-app` candidate harness-blocked on those grounds; verify it
+  on the emulator via `scripts/run-android-verify.sh`.
 
 The rest of this skill (real-books-first, evidence schema, terminal actions) is
 platform-neutral; only the harness + commands differ.
