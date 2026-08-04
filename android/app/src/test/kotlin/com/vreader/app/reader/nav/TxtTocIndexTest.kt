@@ -4,6 +4,8 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlin.math.exp
+import kotlin.math.ln
 import kotlin.random.Random
 
 /**
@@ -29,14 +31,18 @@ import kotlin.random.Random
  *   [TxtMdTocProvider.MAX_TOC_ENTRIES]-sized cap, over both an evenly-spaced and a heavily skewed
  *   offset distribution. A linear scan reads tens of thousands of elements and fails the bound; a
  *   binary search reads ~16 on either shape.
- * - **No size- or shape-keyed special case can hide.** Three tests sweep an independent
- *   `indexOfLast` oracle across the whole offset domain:
- *   [everyOffsetAndShape_agreesWithTheLinearReference] over sizes 0..8 (duplicate runs, a TOC
- *   starting at offset 0), [intermediateAndCapSizes_agreeWithTheLinearReference] over 9..the
- *   production cap, and [randomizedMonotonicShapes_agreeWithTheLinearReference] over 300 seeded
- *   random shapes. Successive Gate-4 rounds each built a mutant living in whatever size gap the
- *   fixtures left — first `size <= 2`, then `size in 9..MAX_TOC_ENTRIES` — so the answer is a
- *   continuum plus randomization, not one more hand-listed size.
+ * - **Behaviour is pinned DIFFERENTIALLY, not by fixtures alone.**
+ *   [differentialAgainstLinearReference_acrossSizesToTheCap] compares every answer against
+ *   [referenceTocIndexFor], a one-line linear reference, across every size 1..96 plus log-uniform
+ *   samples to the production cap. Four successive Gate-4 rounds each built a mutant living in
+ *   whatever exact size the fixtures missed (`size <= 2`, `size in 9..MAX_TOC_ENTRIES`,
+ *   `size == 65`); enumerating one more size only moves the gap, so the closure is a reference
+ *   oracle — which also makes ordinary behavioural mutants (off-by-one boundaries, first-vs-last
+ *   duplicate) fail on nearly every sample rather than at one fixture.
+ *   [everyOffsetAndShape_agreesWithTheLinearReference],
+ *   [intermediateAndCapSizes_agreeWithTheLinearReference] and
+ *   [randomizedMonotonicShapes_agreeWithTheLinearReference] keep the exhaustive small-shape,
+ *   named-size and random-shape sweeps as fast, readable first-line defences.
  *
  * Precondition (NOT re-asserted here): [entryOffsets] are in document order, non-decreasing. That
  * invariant is produced and pinned upstream — `TxtTocRuleEngineTest` and `TxtMdTocProviderTest`
@@ -52,6 +58,9 @@ class TxtTocIndexTest {
 
         /** The element-read ceiling the complexity probe enforces — see its own comment. */
         const val MAX_READS = 64
+
+        /** Fixed so the differential sweep is reproducible, never flaky. */
+        const val DIFFERENTIAL_SEED = 20_260_804L
     }
 
     // ── The -1-vs-0 contract ────────────────────────────────────────────────────────────────
@@ -236,6 +245,89 @@ class TxtTocIndexTest {
             for (offset in -2..(entries.last() + 3)) {
                 val expected = entries.indexOfLast { it <= offset }.let { if (it >= 0) it else 0 }
                 assertEquals("entries=$entries offset=$offset", expected, txtTocIndexFor(offset, entries))
+            }
+        }
+    }
+
+    // ── Differential (the standard closure for the size-keyed family) ───────────────────────
+
+    /**
+     * A trivial, obviously-correct linear reference — the differential oracle. It restates the
+     * contract in one line of `indexOfLast` plus the two documented edge rules, sharing NO
+     * mechanics with the binary search under test, so agreement between them is real evidence
+     * rather than a tautology.
+     */
+    private fun referenceTocIndexFor(currentOffsetUtf16: Int, entryOffsets: List<Int>): Int {
+        if (entryOffsets.isEmpty()) return -1
+        val at = entryOffsets.indexOfLast { it <= currentOffsetUtf16 }
+        return if (at >= 0) at else 0
+    }
+
+    @Test
+    fun differentialAgainstLinearReference_acrossSizesToTheCap() {
+        // WHY THIS TEST REPLACES "ADD ANOTHER SIZE": four Gate-4 rounds each constructed a mutant
+        // keyed on whatever exact size the fixtures missed (`size <= 2`, then
+        // `size in 9..MAX_TOC_ENTRIES`, then `size == 65`). Enumerating one more size just moves
+        // the gap — the standard technique that actually closes it is differential testing against
+        // a reference implementation, which makes BEHAVIOURAL mutants (the class that actually
+        // occurs — off-by-one boundary logic, first-vs-last duplicate) fail on essentially every
+        // sample rather than only at a hand-picked fixture.
+        //
+        // SAMPLING (deliberate deviation from a plain uniform draw, and the reason it works):
+        // 200 sizes drawn uniformly from 1..50 000 hit any SPECIFIC size with probability ~0.4%,
+        // so a uniform sweep would not reliably catch the `size == 65` mutant it exists to kill.
+        // Instead: EXHAUSTIVE over 1..96 — where hand-written special cases actually live, and
+        // cheap because the lists are tiny — plus LOG-UNIFORM samples over 97..cap, which spread
+        // across magnitudes (a uniform draw puts ~90% of its samples above 5 000 and never probes
+        // the hundreds). Residual, stated honestly: a mutant keyed on one exact untested size above
+        // 96 can still survive; that is inherent to example-based testing, not fixable by more
+        // fixtures, and is recorded in the Gate-4 artifact rather than claimed solved.
+        val random = Random(seed = DIFFERENTIAL_SEED)
+        val cap = TxtMdTocProvider.MAX_TOC_ENTRIES
+        val sizes = buildList {
+            addAll(1..96)
+            repeat(104) {
+                val logLow = ln(97.0)
+                val logHigh = ln(cap.toDouble())
+                add(exp(logLow + random.nextDouble() * (logHigh - logLow)).toInt().coerceIn(97, cap))
+            }
+        }
+
+        for (size in sizes) {
+            // Non-uniform gaps, and a 0 step plants duplicate offsets naturally.
+            val backing = IntArray(size)
+            var next = random.nextInt(3)
+            for (i in 0 until size) {
+                backing[i] = next
+                next += random.nextInt(10)
+            }
+            val entries = backing.toList()
+
+            val probes = mutableListOf(
+                Int.MIN_VALUE, -1,                                   // before everything
+                backing[0] - 1, backing[0], backing[0] + 1,          // the first boundary
+                backing[size / 2], backing[size / 2] + 1,            // a midpoint boundary + its gap
+                backing[size - 1], backing[size - 1] + 1,            // the last boundary
+                Int.MAX_VALUE,                                       // past everything
+            )
+            repeat(4) {
+                val i = random.nextInt(size)
+                probes += backing[i]      // exactly at some entry start
+                probes += backing[i] + 1  // just inside the gap after it
+                // ...and LATE in the gap, just before the next entry starts. A "nearest entry"
+                // mutant agrees with the contract through the first half of a gap and only
+                // diverges past its midpoint, so probing entry-starts and entry+1 alone cannot see
+                // it (a mutation probe caught this suite missing exactly that). A floored midpoint
+                // is not enough either — it rounds back into the agreeing half.
+                if (i + 1 < size) probes += backing[i + 1] - 1
+            }
+
+            for (offset in probes) {
+                assertEquals(
+                    "size=$size offset=$offset (seed=$DIFFERENTIAL_SEED)",
+                    referenceTocIndexFor(offset, entries),
+                    txtTocIndexFor(offset, entries),
+                )
             }
         }
     }

@@ -1,8 +1,8 @@
 ---
 branch: feat/139-wi-5-toc-index
-threadId: 019fcbcf-7e64-7123-a053-23318a0de3a4
-rounds: 3
-final_verdict: block-recommended
+threadId: 019fcbd7-e6aa-7b11-86e1-d47186a13752
+rounds: 4
+final_verdict: follow-up-recommended
 date: 2026-08-04
 ---
 
@@ -69,9 +69,42 @@ rather than the example:
   flaky) random sizes and non-decreasing shapes, each swept across its whole offset domain.
 - The complexity probe now runs the real cap (50 000) as well as cap + 1, in both distributions.
 
-This fix is **not auditor-confirmed**: confirming it would be a 4th round, beyond the lane's 3-round
-budget, so the lane stops and reports rather than self-certifying. It is, however, confirmed
-mechanically — see the mutation log.
+The lane stopped here rather than self-certifying its own fix to an auditor's High (rule 48 hard
+rule 1), and handed back `blocked` for a confirming round.
+
+## Round 4 — `findings` (thread `019fcbd7-e6aa-7b11-86e1-d47186a13752`, run by the ORCHESTRATOR)
+
+Run by the orchestrator, not the lane, so author/auditor separation held on the round-3 fix.
+
+**Confirmed**: the complexity probe is a real discriminator — a correct-but-linear implementation
+satisfies the value oracle but exceeds `MAX_READS` on the counted 50 000-entry list, so the lane's
+"fails only that test" claim holds by inspection (matching mutation probe 1 below).
+
+**HIGH — a third size-keyed mutant**, `if (entryOffsets.size == 65 && currentOffsetUtf16 >=
+entryOffsets[1]) return 0`, passed all 14 tests, because nothing exercised size 65.
+
+**Fix — the standard closure, not another fixture.** Three rounds of "add the size the auditor
+picked" is an unbounded standard: any finite fixture list loses to a mutant keyed on an untested
+exact size. So WI-5 adds **differential testing against a reference implementation**
+(`differentialAgainstLinearReference_acrossSizesToTheCap`): a one-line linear
+`referenceTocIndexFor` oracle, compared against the real function across many sizes and probe
+offsets under a fixed seed (`20260804`). Its value is less the size coverage than that
+**behavioural** mutants — the class that actually occurs, e.g. off-by-one boundaries — now fail on
+essentially every sample instead of at one hand-picked fixture.
+
+**Deviation from the prescribed sampling, deliberate and load-bearing.** The instruction was ~200
+sizes drawn randomly from `1..MAX_TOC_ENTRIES`. A uniform draw hits any *specific* size with
+probability ≈0.4%, so it would almost certainly not sample 65 — the acceptance criterion ("verify
+the size-65 mutant now fails") would have failed. The sweep is therefore **exhaustive over 1..96**
+(where hand-written special cases actually live; the lists are tiny, so it is nearly free) **plus
+~104 log-uniform samples over 97..cap** (log-uniform because a uniform draw puts ~90% of samples
+above 5 000 and never probes the hundreds). Same budget, same determinism, strictly more coverage.
+
+**A gap the lane found in its own new test.** Mutation probe 10 (a *behavioural* "nearest entry"
+mutant) initially failed six tests but **not** the differential one: its probes sat at entry starts
+and entry+1, while "nearest" only diverges past a gap's midpoint. A floored gap-midpoint probe was
+also insufficient (it rounds back into the agreeing half). The probe set now includes
+`backing[i + 1] - 1` — late in the gap — and the differential catches that mutant too (7 failures).
 
 ## Mutation log (author-run; every probe executed against the real suite)
 
@@ -88,9 +121,26 @@ implementation and observing which named tests went red.
 | 5 | stdlib `binarySearch`, insertion point not decremented | 5 fail incl. `offsetInsideChapter_*`, `duplicateOffsets_*` |
 | 6 | round-2 auditor's `size <= 2` mutant | fails `twoEntries_*` and `everyOffsetAndShape_*` |
 | 7 | round-3 auditor's `size in 9..MAX_TOC_ENTRIES` mutant | fails `intermediateAndCapSizes_*`, `randomizedMonotonicShapes_*`, and `isBinarySearch_*` (`uniform@50000 … read nothing`) |
+| 8 | round-4 auditor's `size == 65 && offset >= entryOffsets[1]` mutant, verbatim | fails `differentialAgainstLinearReference_*` — `size=65 offset=157 expected:<32> but was:<0>` |
+| 9 | same shape at a different exhaustive-band size (`size == 91`) | fails `differentialAgainstLinearReference_*` — `size=91 offset=0 expected:<3> but was:<0>` |
+| 10 | **behavioural** (not size-keyed): nearest entry instead of last at-or-before | fails 7 tests incl. the differential (after the late-in-gap probe was added; 6 without it — see round 4) |
+| 11 | **residual probe**: `size == 4096` (one large size the sweep does not sample) | **SURVIVES — 0 failures.** Recorded, not solved. |
 
-Probe 1 is the load-bearing one: it proves the complexity test discriminates on *complexity alone*,
-rejecting an implementation that is otherwise entirely correct.
+Probe 1 is the load-bearing one for complexity: it proves the complexity test discriminates on
+*complexity alone*, rejecting an implementation that is otherwise entirely correct. Probe 10 is the
+load-bearing one for the differential oracle: it is the mutant class that actually occurs in
+practice, and it fails nearly everywhere. Probe 11 is the honest counterweight — see below.
+
+## Why `follow-up-recommended` and not `ship-as-is`
+
+The implementation is correct and was explicitly cleared by all four rounds — no round found a
+defect in `TxtTocIndex.kt`. `block-recommended` would be wrong: it implies a defect, and there is
+none. But `ship-as-is` would overclaim, because **mutation probe 11 demonstrates a measured
+residual**: a mutant keyed on one exact size the sweep does not sample (4096) still passes the whole
+suite. That is inherent to example-based testing — no finite suite excludes "special-case exactly
+the untested input" — and the differential oracle reduces it to an adversarial curiosity rather than
+a realistic defect class. It is recorded here rather than claimed solved. Accepted on that basis by
+the orchestrator, who also ruled out a fifth round.
 
 ## Accepted / reported-upward, not fixed here
 
@@ -111,5 +161,8 @@ rejecting an implementation that is otherwise entirely correct.
 ## Test gate
 
 `RUN-ANDROID-TESTS RESULT: SUCCEEDED` — `:app:testDebugUnitTest --tests '*TxtTocIndexTest*'
---rerun-tasks`, **14 tests, 0 failures, 0 errors** (counts read from the JUnit XML, not the
-`BUILD SUCCESSFUL` line). JVM only; no emulator.
+--rerun-tasks`, **15 tests, 0 failures, 0 errors** in 0.094s (counts read from the JUnit XML, not
+the `BUILD SUCCESSFUL` line). JVM only; no emulator.
+
+Note on `ReaderChromeModel.kt:19` (the out-of-write-set KDoc defect this audit surfaced): the
+orchestrator is handling it separately on `docs/bug-362-chrome-kdoc`.
