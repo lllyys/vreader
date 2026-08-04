@@ -555,6 +555,25 @@ class MdTocScannerTest {
     }
 
     @Test
+    fun scan_isCancellationCooperative_insideALongClassifierRun() {
+        // Gate-4 r3 MEDIUM: the terminator scan was checked but the CLASSIFIERS were not, so a
+        // line that is one enormous marker run could still defer a cancel. Query accounting for
+        // this fixture: 1 at scan's entry, then 4 while the terminator scan crosses the 32 768-unit
+        // line (one per 8 192 units) = 5. Letting exactly those 5 pass means the SIXTH query — the
+        // first one raised inside the setext underline run — is the one that cancels.
+        val units = MdTocScanner.CANCELLATION_CHECK_UNITS
+        val text = "Title\n" + "=".repeat(units * 4)
+
+        val outcome = scanWithJob(CancelAfter(5), text, limit = NO_CAP)
+
+        assertTrue(outcome.exceptionOrNull() is CancellationException)
+
+        // ...and with nothing cancelling, the same fixture is an ordinary setext heading, so the
+        // assertion above is about cancellation and not about a malformed document.
+        assertEquals(listOf("Title|0@0"), scan(text).rendered())
+    }
+
+    @Test
     fun scan_setextHeadingAlsoCountsAgainstLimit() {
         val text = "One\n===\nTwo\n---\nThree\n===\n"
 

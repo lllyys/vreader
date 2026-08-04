@@ -34,8 +34,10 @@
 // - No Android imports and no logging: pure CPU work that must stay JVM-unit-testable
 //   (`android.util.Log` throws "not mocked" in a plain unit test). It does not hop threads —
 //   `TxtMdTocProvider` (WI-4) owns the `withContext(dispatcher)` hop, so never call this on the
-//   main thread. Cancellation is observed every [CANCELLATION_CHECK_INTERVAL] lines AND every
-//   [CANCELLATION_CHECK_UNITS] code units inside one line, so one enormous line cannot defer it.
+//   main thread. Cancellation is observed every [CANCELLATION_CHECK_INTERVAL] lines and, inside a
+//   line, every [CANCELLATION_CHECK_UNITS] code units — EVERY traversal that can run a line's
+//   length (the terminator scan, both trims, the fence/hash/underline runs) goes through the one
+//   checked `walkForward`/`walkBackward` pair, so one enormous line cannot defer a cancel either.
 //
 // @coordinates-with: DetectedHeading.kt, TxtTocRuleEngine.kt, TxtMdTocProvider.kt
 package com.vreader.app.reader.nav
@@ -167,22 +169,53 @@ object MdTocScanner {
     // ------------------------------------------------------------------ line walking
 
     /**
-     * The offset just past line-[start]'s own text: its terminator, or the end of the document.
-     * The only walk here whose length is the DOCUMENT's rather than a marker's — hence the
-     * intra-line cancellation check (a terminator-free document is one single line).
+     * The first index at or after [from] (and before [to]) whose char fails [predicate], or [to].
+     *
+     * THE shared walk: every traversal in this file that can run the length of a line goes through
+     * it, so the cancellation check lives in exactly one place and no single enormous line — a
+     * terminator-free document is one line — can defer a cancel past
+     * [CANCELLATION_CHECK_UNITS] code units.
      */
-    private suspend fun contentEnd(text: String, start: Int): Int {
-        var end = start
+    private suspend fun walkForward(
+        text: String,
+        from: Int,
+        to: Int,
+        predicate: (Char) -> Boolean,
+    ): Int {
+        var i = from
         var sinceCheck = 0
-        while (end < text.length && text[end] != '\n' && text[end] != '\r') {
+        while (i < to && predicate(text[i])) {
             if (++sinceCheck >= CANCELLATION_CHECK_UNITS) {
                 sinceCheck = 0
                 coroutineContext.ensureActive()
             }
-            end++
+            i++
         }
-        return end
+        return i
     }
+
+    /** [walkForward]'s mirror: the first index walking back from [to] whose char fails. */
+    private suspend fun walkBackward(
+        text: String,
+        from: Int,
+        to: Int,
+        predicate: (Char) -> Boolean,
+    ): Int {
+        var i = to
+        var sinceCheck = 0
+        while (i > from && predicate(text[i - 1])) {
+            if (++sinceCheck >= CANCELLATION_CHECK_UNITS) {
+                sinceCheck = 0
+                coroutineContext.ensureActive()
+            }
+            i--
+        }
+        return i
+    }
+
+    /** The offset just past line-[start]'s own text: its terminator, or the end of the document. */
+    private suspend fun contentEnd(text: String, start: Int): Int =
+        walkForward(text, start, text.length) { it != '\n' && it != '\r' }
 
     /**
      * The start of the line after the one whose content ends at [contentEnd], or `-1` when that
@@ -197,17 +230,11 @@ object MdTocScanner {
         return contentEnd + if (crlf) 2 else 1
     }
 
-    private fun trimmedStart(text: String, from: Int, to: Int): Int {
-        var start = from
-        while (start < to && isInlineSpace(text[start])) start++
-        return start
-    }
+    private suspend fun trimmedStart(text: String, from: Int, to: Int): Int =
+        walkForward(text, from, to) { isInlineSpace(it) }
 
-    private fun trimmedEnd(text: String, from: Int, to: Int): Int {
-        var end = to
-        while (end > from && isInlineSpace(text[end - 1])) end--
-        return end
-    }
+    private suspend fun trimmedEnd(text: String, from: Int, to: Int): Int =
+        walkBackward(text, from, to) { isInlineSpace(it) }
 
     /** Swift `CharacterSet.whitespaces` = Unicode Zs plus CHARACTER TABULATION. */
     private fun isInlineSpace(c: Char): Boolean =
@@ -261,21 +288,15 @@ object MdTocScanner {
      * parity (`TOCBuilder.parseFenceLine`): run of at least 3, and a backtick fence's info string
      * may not itself contain a backtick — `` ```kotlin` `` is not a fence.
      */
-    private fun fenceRunLength(text: String, from: Int, to: Int): Int {
+    private suspend fun fenceRunLength(text: String, from: Int, to: Int): Int {
         if (from >= to) return 0
         val first = text[from]
         if (first != '`' && first != '~') return 0
-        var i = from
-        while (i < to && text[i] == first) i++
-        val count = i - from
+        val afterRun = walkForward(text, from, to) { it == first }
+        val count = afterRun - from
         if (count < 3) return 0
-        if (first == '`') {
-            var j = i
-            while (j < to) {
-                if (text[j] == '`') return 0
-                j++
-            }
-        }
+        // A backtick anywhere in the info string disqualifies the line.
+        if (first == '`' && walkForward(text, afterRun, to) { it != '`' } < to) return 0
         return count
     }
 
@@ -285,20 +306,17 @@ object MdTocScanner {
      * trailing closing-hash run dropped only when what is left is non-empty (so `### ###` keeps
      * `###` as its title); an empty title is not a heading.
      */
-    private fun parseAtxHeading(text: String, from: Int, to: Int): Pair<Int, String>? {
+    private suspend fun parseAtxHeading(text: String, from: Int, to: Int): Pair<Int, String>? {
         if (from >= to || text[from] != '#') return null
-        var i = from
-        while (i < to && text[i] == '#') i++
-        val hashes = i - from
+        val afterHashes = walkForward(text, from, to) { it == '#' }
+        val hashes = afterHashes - from
         if (hashes > 6) return null
-        if (i >= to || text[i] != ' ') return null
+        if (afterHashes >= to || text[afterHashes] != ' ') return null
 
-        val start = trimmedStart(text, i, to)
+        val start = trimmedStart(text, afterHashes, to)
         var end = trimmedEnd(text, start, to)
         if (end > start && text[end - 1] == '#') {
-            var stripped = end
-            while (stripped > start && text[stripped - 1] == '#') stripped--
-            stripped = trimmedEnd(text, start, stripped)
+            val stripped = trimmedEnd(text, start, walkBackward(text, start, end) { it == '#' })
             if (stripped > start) end = stripped
         }
         if (start >= end) return null
@@ -310,15 +328,11 @@ object MdTocScanner {
      * must be ONE contiguous run of a single marker char (length >= 1 — a lone `-` is a valid
      * underline per CommonMark); interior whitespace disqualifies it, so `- - -` stays a break.
      */
-    private fun setextDepth(text: String, from: Int, to: Int): Int? {
+    private suspend fun setextDepth(text: String, from: Int, to: Int): Int? {
         if (from >= to) return null
         val first = text[from]
         if (first != '=' && first != '-') return null
-        var i = from
-        while (i < to) {
-            if (text[i] != first) return null
-            i++
-        }
+        if (walkForward(text, from, to) { it == first } < to) return null
         return if (first == '=') 0 else 1
     }
 }
