@@ -187,15 +187,17 @@ dispatches that isn't READY).
 
 ## G1. Reader navigation — Contents (TOC) on every format
 
-- [~] **#139 TXT/MD auto-generated TOC** — iOS: #23 + #12. **All 8 implementation WIs merged
-      2026-08-04/05 (`android/v0.20.15`→`v0.20.22`); Contents is now REACHABLE on TXT/MD** — a
-      254,109-line CJK book is navigable for the first time, driven end-to-end through the
-      production path (app launch → Library → tap book → reader → Contents → tap chapter).
-      **Row is `DONE`, NOT `VERIFIED` — blocked on #172.** Gate-5b on the real 14MB CJK book found
-      the scan takes **8,300–11,449 ms** against a stated **1,500 ms** budget (§5 gate 1), because
-      the plan's no-persistence decision rested on a *desktop-JVM* 46–102 ms measurement — ~100×
-      off on-device. The blocking PRIMARY gate passes (open-to-first-page 47 ms quiet / 7 ms
-      concurrent vs <2,000 ms), so #138's windowed pagination is intact and nothing regressed.
+- [x] **#139 TXT/MD auto-generated TOC** — iOS: #23 + #12. **VERIFIED 2026-08-05**
+      (`android/v0.20.24`, commit `af186bc0`; evidence `dev-docs/verification/feature-139-20260805.md`,
+      `result: pass`). Contents is reachable on TXT/MD — a 254,109-line CJK book opens a 1,859-chapter
+      Contents sheet in **74 ms**, verified end-to-end through the production path (app launch →
+      Library → tap book → reader → Contents → tap chapter), every file on that path in `src/main`.
+      MD gives 37 nested entries at depths 0–3.
+      *Blocked for a day and correctly so*: WI-8's first Gate-5b run FAILED §5 gate 1 at
+      **8,300–11,449 ms** against the stated 1,500 ms, because the plan's no-persistence decision
+      rested on a *desktop-JVM* 46–102 ms measurement — ~100× off on-device, after 8 WIs had merged
+      on top of it. Fixed by **#172** (VERIFIED same day): a ~10-line one-`Matcher` change,
+      6,525 ms → 61 ms. The gate that caught it was then re-run **unmodified**.
 - [ ] **#140 AZW3 Contents (TOC)** — foliate exposes a real TOC; Android hides it. iOS: #38.
 - [ ] **#141 Filterable TOC** — designed filter field (`toc-filter-artboards.jsx`). iOS: #94.
       `Deps:[feat:#139, feat:#140]`.
