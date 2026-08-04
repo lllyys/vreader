@@ -235,6 +235,44 @@ class TxtTocConnectedTest {
         }
     }
 
+    @Test
+    fun pagedMode_scanCompletes_evenForABookWithNoChapters() {
+        // Gate-4 R1: the paged readiness gate must TERMINATE through the real
+        // TxtPagedBody → onSaveSourceOffset → pagedOffset chain, not only against synthetic state in
+        // the JVM test. A headings-free book is the case where nothing downstream would ever notice a
+        // stranded gate (the control is hidden either way), so it is asserted on the scan itself.
+        setLayoutAndConfirm(ReaderLayout.Paged)
+        val key = importAsset("resume-sample.txt")
+        withReader(key) { scenario ->
+            scenario.awaitPageIndex()
+            scenario.awaitScan()
+            assertTrue("the paged body is mounted", scenario.read { it.pagedBodyMountedForTest() } == true)
+            assertEquals("no headings detected", 0, scenario.read { it.tocEntriesForTest().size })
+            assertEquals("the Contents control stays hidden", 0, nodeCount("chrome-contents"))
+        }
+    }
+
+    @Test
+    fun layoutToggleMidSession_keepsContentsAvailable() {
+        // The scan is keyed on the DOCUMENT, so a layout toggle must not re-scan — and must not lose
+        // the TOC either. Scroll → Paged mid-session, with the entries already published.
+        val key = importContent("toc-toggle.txt", chapteredTxt())
+        withReader(key) { scenario ->
+            scenario.awaitScan()
+            compose.waitUntil(20_000) { nodeCount("chrome-contents") > 0 }
+            val before = scenario.read { it.tocEntriesForTest() }
+            assertEquals(3, before.size)
+
+            setLayoutAndConfirm(ReaderLayout.Paged)
+            compose.waitUntil(20_000) { scenario.read { it.pagedBodyMountedForTest() } == true }
+            scenario.awaitPageIndex()
+
+            assertEquals("the TOC survives the layout toggle unchanged", before, scenario.read { it.tocEntriesForTest() })
+            compose.waitUntil(20_000) { nodeCount("chrome-contents") > 0 }
+            assertTrue("Contents is still reachable in the other layout", nodeCount("chrome-contents") > 0)
+        }
+    }
+
     // ---- jumps -----------------------------------------------------------------------------------
 
     @Test

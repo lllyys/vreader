@@ -439,8 +439,10 @@ class TxtReaderActivity : ComponentActivity() {
                             com.vreader.app.reader.details.BookDetailsMapper.map(s.book, collectionNames, pageCount = null)
                         }
 
-                        // feature #135 WI-7 — the bookmark wiring. TXT/MD has no TOC (null tocIndex → the WI-4
-                        // projection degrades chapter/page to null) but DOES supply a preview provider (a bounded
+                        // feature #135 WI-7 — the bookmark wiring. Bookmark ROWS still pass a null tocIndex (the
+                        // WI-4 projection degrades chapter/page to null) — labelling them from #139's detected
+                        // chapters is deliberately out of scope (#139 §6.3, follow-up F3) — but the host DOES
+                        // supply a preview provider (a bounded
                         // snippet around the stored char offset — the host owns the decoded text). The current
                         // position is the top-visible chunk's char offset → a plain canonical Locator.
                         val previewProvider = remember(s.document) { txtBookmarkPreviewProvider(s.document) }
@@ -818,7 +820,8 @@ class TxtReaderActivity : ComponentActivity() {
                                     },
                                     onOpenDisplay = { showDisplaySheet = true },
                                     // #132 WI-6: the scaffold hands the Contents/Notes open callbacks in.
-                                    // TXT/MD has no TOC → openContents is null (Contents control hidden);
+                                    // feature #139 WI-7 — openContents is null ONLY while the detected-entry
+                                    // list is empty (a book with no headings, or before the scan publishes);
                                     // openNotes opens the review sheet.
                                     onOpenContents = openContents,
                                     onOpenNotes = openNotes,
@@ -1654,14 +1657,33 @@ fun txtBookmarkPreviewProvider(document: TxtDocument): BookmarkPreviewProvider =
  *    document, so it never restarts).
  *
  * Terminates on the first satisfying emission — this is a one-shot gate, not a subscription.
+ *
+ * **Stage 2 is BOUNDED by [pagedReadyTimeoutMs], and that bound is load-bearing** (Gate-4 R1 High —
+ * the fourth "mechanism that can never fire" in this feature's history). Not every mounted paged body
+ * ever publishes a settled page: on a degenerate content box or an empty document `TxtPagedBody`
+ * renders `TxtScrollFallback` instead of a pager, so `onSaveSourceOffset` is never called and
+ * `pagedOffset` stays `-1` for the whole session — an unbounded wait would hide Contents forever with
+ * no crash and no log. Only stage 1 is a hard guarantee; stage 2 is an OPTIMIZATION (keep the scan off
+ * the first-paint path), so timing it out and scanning anyway is the correct degrade: the scan is
+ * off-main either way, and a navigation affordance must never depend on a signal that may not come.
  */
 internal suspend fun awaitTocScanGate(
     pagedBodyMounted: State<Boolean>,
     pagedOffset: State<Int>,
+    pagedReadyTimeoutMs: Long = PAGED_READY_TIMEOUT_MS,
 ) {
     withFrameNanos { }
-    snapshotFlow { !pagedBodyMounted.value || pagedOffset.value >= 0 }.first { it }
+    kotlinx.coroutines.withTimeoutOrNull(pagedReadyTimeoutMs) {
+        snapshotFlow { !pagedBodyMounted.value || pagedOffset.value >= 0 }.first { it }
+    }
 }
+
+/**
+ * How long the TOC scan waits for the paged body's first settled page before scanning anyway. Sized
+ * far above the real signal (#138 publishes its first window in ~8 ms) and far below anything a user
+ * would notice as a missing control.
+ */
+internal const val PAGED_READY_TIMEOUT_MS: Long = 3_000L
 
 /**
  * feature #139 WI-7 — ONE table-of-contents scan for one document: wait for [awaitTocScanGate], then
@@ -1676,9 +1698,10 @@ internal suspend fun runTxtTocScan(
     provider: TocProvider,
     pagedBodyMounted: State<Boolean>,
     pagedOffset: State<Int>,
+    pagedReadyTimeoutMs: Long = PAGED_READY_TIMEOUT_MS,
     publish: (List<TocEntry>) -> Unit,
 ) {
-    awaitTocScanGate(pagedBodyMounted, pagedOffset)
+    awaitTocScanGate(pagedBodyMounted, pagedOffset, pagedReadyTimeoutMs)
     val entries = try {
         provider.toc()
     } catch (cancellation: kotlinx.coroutines.CancellationException) {

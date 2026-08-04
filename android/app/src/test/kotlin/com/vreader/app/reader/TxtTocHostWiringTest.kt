@@ -207,6 +207,32 @@ class TxtTocHostWiringTest {
         assertTrue("a flip to scroll releases the gate", awaitTrue { published.get() != null })
     }
 
+    @Test fun pagedMode_gateNeverStrands_whenNoSettledPageEverArrives() {
+        // Gate-4 R1 HIGH, the FOURTH never-fires instance: a mounted paged body does NOT always publish
+        // a settled page. On a degenerate content box or an empty document `TxtPagedBody` renders
+        // `TxtScrollFallback` instead of a pager, so `onSaveSourceOffset` — and therefore `pagedOffset`
+        // — never fires for the whole session. An unbounded stage-2 wait would hide Contents forever,
+        // silently. The bound is what makes that impossible, so it is pinned here.
+        val pagedBodyMounted = mutableStateOf(true)
+        val pagedOffset = mutableStateOf(-1)             // and nothing ever publishes one
+        val provider = CountingProvider(providerFor(chapteredText))
+        val published = publishState()
+
+        scope.launch {
+            runTxtTocScan(provider, pagedBodyMounted, pagedOffset, pagedReadyTimeoutMs = 250L) { published.set(it) }
+        }
+        produceFrame()
+
+        assertTrue("the scan runs anyway once the paged wait times out", awaitTrue { published.get() != null })
+        assertEquals(3, published.get()!!.size)
+    }
+
+    @Test fun pagedReadyTimeoutIsBounded() {
+        // The production default must be a real, finite bound — a 0 would defeat the settled-page wait
+        // entirely, and an enormous one would re-create the stranding it exists to prevent.
+        assertTrue("the paged-ready wait is bounded and non-trivial", PAGED_READY_TIMEOUT_MS in 100L..10_000L)
+    }
+
     @Test fun scanIsKeyedOnDocument_notOnEveryRecomposition() {
         val pagedBodyMounted = mutableStateOf(true)
         val pagedOffset = mutableStateOf(-1)
