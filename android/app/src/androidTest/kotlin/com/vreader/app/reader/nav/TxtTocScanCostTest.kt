@@ -41,8 +41,8 @@ import java.util.regex.Pattern
  * | (c) | `matcher.find()` counting only — separates the match walk from title/list allocation |
  * | (d) | line-start enumeration alone — layer 2's floor, i.e. its best possible outcome |
  * | (e) | `detectBestRule` as shipped + per-rule match counts — tightens H1's predicted ratio to a number |
- * | (g) | N × `pattern.matcher(text)` with NO matching, at THREE text sizes — **the H1 falsifier** |
- * | (h) | K resets and K matches walked five ways — separates construction from `reset()` |
+ * | (g) | N × `pattern.matcher(text)` with NO matching, at THREE text sizes — **H1's decisive arm** |
+ * | (h) | K resets and K matches walked five ways — prices the reset, construction and walk paths |
  * | (f) | target-semantic logging: bare `\d`/`\s` vs the repaired classes on the real engine |
  *
  * A flat arm (g) kills H1 and sends WI-2 back to planning. An arm (h) that attributes the cost to
@@ -77,8 +77,15 @@ import java.util.regex.Pattern
  *
  * **Memory is a measured output, not a claim** (plan §4.5). Each arm records the Java-heap delta and
  * the process-PSS delta around a single pass. The plan commits three readings in advance: materially
- * lower growth in the reused-`Matcher` arm means the same root cause; comparable growth means it is
- * not the scan; too noisy means say exactly that and record the noise floor.
+ * lower growth in the reused-`Matcher` arm, comparable growth, or too noisy to tell.
+ *
+ * **What a PSS delta can and cannot support** (Gate-4 R2 Medium). `totalPss` is WHOLE-PROCESS state
+ * sampled without a post-pass collection, so a large delta on one arm and a small one on another
+ * shows that the growth travels with that code path and disappears when the path changes — an
+ * association, and a decision-grade one. It cannot distinguish a native input attachment from any
+ * other transient the same walk provokes, so it does not by itself prove that the growth and the
+ * latency are the SAME defect. State it as "same path, removed by the same rewrite"; do not upgrade
+ * it to causal identity on this evidence alone.
  *
  * **Fixture — real book first, and the fallback is FAILURE, not synthesis.** Identity is pinned by
  * SHA-256 over the pushed bytes plus the decoded character count, so a same-sized stand-in cannot
@@ -173,21 +180,26 @@ class TxtTocScanCostTest {
         /** Arm (g) — untimed constructions that JIT the path before anything is measured. */
         const val WARMUP_CONSTRUCTIONS = 32
 
-        /** Arm (g) — a short timed probe used ONLY to size the real loop (see [EXPENSIVE_NS]). */
+        /** Arm (g) — a short timed probe used ONLY to size the real loop (see [TARGET_TIMED_NS]). */
         const val PROBE_CONSTRUCTIONS = 32
 
         /**
          * Arm (g) sizing — a TIME budget, not a cost cliff.
          *
-         * Each text size is measured for roughly the same wall-clock duration, so all sizes see a
-         * comparable JIT tier, GC frequency and allocator regime (Gate-4 Medium: "asymmetric
-         * execution regimes are not a sound basis for a decisive slope ratio"). The iteration count
-         * is derived from a probe as `TARGET_TIMED_NS / probe_ns_per` and clamped; a noisy probe
-         * therefore shifts only HOW MANY iterations are averaged, never the per-iteration figure
-         * itself. An earlier revision classified each size as "expensive"/"cheap" against a 5 µs
-         * threshold; the probe's own noise floor sits near that threshold for a sub-microsecond
-         * operation, so the branch was decided by noise and the cheap sizes were left
-         * noise-dominated at 200 iterations.
+         * Each text size is measured for roughly the same wall-clock duration, so no size is left
+         * averaged over a handful of noise-dominated iterations. The iteration count is derived from
+         * a probe as `TARGET_TIMED_NS / probe_ns_per` and clamped, so a noisy probe shifts only HOW
+         * MANY iterations are averaged, never the per-iteration figure itself. An earlier revision
+         * classified each size "expensive"/"cheap" against a 5 µs threshold; the probe's own noise
+         * floor sits near that threshold for a sub-microsecond operation, so the branch was decided
+         * by noise and the small sizes stayed noise-dominated at 200 iterations.
+         *
+         * **What equal DURATION does not buy** (Gate-4 R2 Medium): it does not equalise the
+         * execution regimes. A small input reaches its iteration count in one unbroken batch while
+         * the book runs dozens of batches separated by collections; JIT hotness follows invocation
+         * count, not elapsed time. Equal duration makes each size's average well-conditioned; the
+         * reversed second round is what exposes drift. Neither makes the fitted per-character
+         * coefficient a high-precision constant — read it as an order-of-magnitude slope.
          */
         const val TARGET_TIMED_NS = 1_200_000_000.0
         const val MIN_CONSTRUCTIONS = 200
@@ -549,13 +561,30 @@ class TxtTocScanCostTest {
      *  - **h3** K fresh `Matcher`s, each `find(resume_i)` — h2 plus K constructions. This is exactly
      *    the shape Kotlin's `MatchResult.next()` produces.
      *
-     * **Why h0a/h0b exist** (Gate-4 High): differences alone cannot decompose this. `Pattern.matcher`
-     * itself performs a reset, and `find(int)` performs another, so an expensive reset shows up in
-     * BOTH `h2 − h1` and `h3 − h2`, and neither difference is "construction net of reset". h0a and
-     * h0b measure the reset DIRECTLY with no matching at all, which anchors the arithmetic instead
-     * of inferring it: the report states `reset(text)`, `reset()`, `find(int) − find()`,
-     * `construction including its own reset`, and the residual `construction net of one input
-     * re-attach`, each labelled for what it actually is.
+     * **Why h0a/h0b exist** (Gate-4 R1 High): differences alone cannot decompose this.
+     * `Pattern.matcher` itself performs a reset and `find(int)` performs another, so an expensive
+     * reset shows up in BOTH `h2 − h1` and `h3 − h2`. h0a and h0b measure the reset DIRECTLY with no
+     * matching at all, which anchors the arithmetic instead of inferring it.
+     *
+     * **What the numbers are, stated precisely** (Gate-4 R2 High — the previous wording claimed more
+     * than this design can deliver). h0a and h0b are DIRECT measurements of the two reset forms.
+     * Everything else is a PATH cost, not an exclusive component cost:
+     *
+     *  - `find_int_minus_find` is what the `find(int)` path costs over the `find()` path. AOSP's
+     *    `find(int)` has its own entry sequence, so this is "the find(int) path", which h0b's direct
+     *    reading merely corroborates — it is not by itself proof that the excess IS the reset method.
+     *  - `construction_incl_own_reset` is what the fresh-matcher path costs over the reused one.
+     *  - `construction_net_of_input_reset` is a RESIDUAL of two separately-settled whole walks. If it
+     *    comes out negative, that does not mean construction has negative cost: it means the two
+     *    costs are not additive at this resolution, i.e. construction is at most about one reset and
+     *    the allocation itself is lost in the noise. Read a negative value as "below the
+     *    experiment's resolution", never as a measurement.
+     *
+     * An exclusive percentage split between construction and reset is therefore NOT established here
+     * and must not be quoted from this arm. What IS established: both reset forms are expensive, and
+     * both the fresh-matcher path and the `find(int)` path are millisecond-scale on this input while
+     * the no-arg `find()` walk is two orders of magnitude cheaper — which is what a fix has to act
+     * on.
      *
      * `resume_i` is the position `next()` itself would resume from (the previous match's end, +1
      * after an empty match), so h1/h2/h3 scan the same gaps rather than one of them starting
@@ -847,21 +876,31 @@ class TxtTocScanCostTest {
         assertTrue("detection must have found matches to count", totalDetectionMatches > 0)
     }
 
-    // ---- 5. arm (g): the H1 falsifier --------------------------------------------------------------
+    // ---- 5. arm (g): the length-proportionality test ------------------------------------------------
 
     /**
-     * Arm (g) — **the falsifier.** Construct `pattern.matcher(input)` N times and perform NO match,
-     * at THREE input sizes: the 7 M-char book, a 512 K-char prefix, and a 64-char prefix.
+     * Arm (g) — **the decisive arm for H1.** Construct `pattern.matcher(input)` N times and perform
+     * NO match, at THREE input sizes: the 7 M-char book, a 512 K-char prefix, and a 64-char prefix.
      *
      * **What is read, and why three sizes.** Two sizes give only a ratio, which can neither
-     * establish flatness nor quantify scaling once measurement noise is in play (Gate-4 High). Three
-     * give a falsifiable MODEL on both sides: the O(n) model predicts the middle point from the
-     * outer two by linear interpolation, and the O(1) model predicts all three are equal. The report
-     * carries the raw per-construction cost at each size, the raw long/short ratio, the fitted
-     * per-character marginal cost, and the mid-point's predicted-vs-observed error — so the verdict
-     * rests on RAW paired measurements rather than on a subtraction. The overhead-corrected figures
-     * are logged too, but they are secondary precisely because a subtraction is least trustworthy in
-     * the flat case, which is the case that would kill H1.
+     * establish flatness nor quantify scaling once measurement noise is in play (Gate-4 R1 High).
+     * Three let each model be tested against a HELD-OUT point: the length-proportional model is
+     * fitted from the outer two and must then predict the middle one, while the constant-cost model
+     * predicts all three are equal. The report carries the raw per-construction cost at each size,
+     * the raw long/short ratio, the fitted per-character marginal cost, and the mid-point's
+     * predicted-vs-observed error — so the reading rests on RAW paired measurements rather than on a
+     * subtraction. The overhead-corrected figures are logged too, but they are secondary precisely
+     * because a subtraction is least trustworthy in the flat case, which is the case that would kill
+     * H1.
+     *
+     * **What this arm does and does not establish** (Gate-4 R2 Medium). It samples three sizes on
+     * one device with one pattern; it has no variance estimate and no pre-registered acceptance
+     * threshold for "equal" or "linear". A length-proportional implementation could still miss the
+     * held-out point through fixed costs or cache effects, and some non-proportional function could
+     * happen to fit three points. So this is strong EVIDENCE that the cost is proportional to input
+     * length over the sampled range — not a proof of asymptotic complexity. What it can do, and what
+     * it exists for, is discriminate decisively between "roughly constant" and "roughly
+     * proportional", which is exactly the fork H1 turns on.
      *
      * **Ordering.** All three sizes are measured twice, the second round in reverse order, so JIT
      * tier, allocator state and thermal drift show up as a discrepancy between rounds rather than as
@@ -884,8 +923,6 @@ class TxtTocScanCostTest {
             "mid" to safePrefix(text, MID_TEXT_CHARS),
             "short" to safePrefix(text, SHORT_TEXT_CHARS),
         )
-        val writesBefore = sinkWrites
-
         val overheadNs = measureSinkOverhead()
         val round1 = sizes.associate { (name, input) ->
             name to measureConstructionCost("$name-round1", pattern, input)
@@ -925,18 +962,18 @@ class TxtTocScanCostTest {
             assertTrue("arm (g) sub-measurement ${c.label} must be measurable (>0 ns)", c.totalNs > 0)
             assertTrue(
                 "arm (g) sub-measurement ${c.label} must have published a constructed Matcher to the " +
-                    "volatile sink — a loop that could be optimised away is not evidence",
+                    "volatile sink inside a TIMED batch — a loop that could be optimised away is not " +
+                    "evidence",
                 c.escaped,
             )
+            // EXACT, not circumstantial (Gate-4 R2 Medium): one sink write per timed construction,
+            // counted over the timed regions alone — warm-up, probe and the overhead loop excluded.
+            assertEquals(
+                "arm (g) sub-measurement ${c.label} must have written the sink exactly once per " +
+                    "timed construction",
+                c.count.toLong(), c.timedWrites,
+            )
         }
-        // The loop's execution is PROVEN by a counter that cannot false-negative, unlike an Int hash
-        // accumulator that can legitimately sum to zero (Gate-4 Low).
-        val expectedWrites = measured.sumOf { it.count.toLong() }
-        assertTrue(
-            "the sink must have been written at least once per timed construction " +
-                "(expected >= $expectedWrites, saw ${sinkWrites - writesBefore})",
-            sinkWrites - writesBefore >= expectedWrites,
-        )
     }
 
     /** A prefix of [text] that never splits a surrogate pair (the [sampleOf] rule, generalised). */
@@ -955,8 +992,13 @@ class TxtTocScanCostTest {
         val totalNs: Long,
         /** Did this size need an inter-batch collection (i.e. was it attaching real memory)? */
         val settled: Boolean,
-        /** Was the volatile sink non-null at the end of a timed batch, before it was cleared? */
+        /**
+         * Was the volatile sink non-null at the end of a timed batch? The sink is cleared before the
+         * first timed batch, so this can only be true if a TIMED construction published to it.
+         */
         val escaped: Boolean,
+        /** Sink writes inside the timed regions ONLY — excludes warm-up, probe and the overhead loop. */
+        val timedWrites: Long,
     ) {
         val rawNsPer = totalNs.toDouble() / count
         fun netNsPer(overheadNsPerIter: Double) = (rawNsPer - overheadNsPerIter).coerceAtLeast(0.0)
@@ -1021,6 +1063,12 @@ class TxtTocScanCostTest {
         )
         gcSettle()
 
+        // Clear the sink BEFORE the timed batches so the `escaped` observation below can only be
+        // satisfied by a TIMED write — warm-up and probe writes would otherwise leave it non-null
+        // and the check would pass without proving anything (Gate-4 R2 Medium).
+        matcherSink = null
+        val writesAtTimedStart = sinkWrites
+
         val deadline = SystemClock.elapsedRealtime() + TIME_BUDGET_MS
         var count = 0
         var batches = 0
@@ -1058,6 +1106,7 @@ class TxtTocScanCostTest {
             totalNs = totalNs,
             settled = settleBetweenBatches,
             escaped = escaped,
+            timedWrites = sinkWrites - writesAtTimedStart,
         )
     }
 }
