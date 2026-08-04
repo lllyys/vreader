@@ -1,12 +1,15 @@
 package com.vreader.app.reader.nav
 
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableJob
+import kotlinx.coroutines.InternalForInheritanceCoroutinesApi
 import kotlinx.coroutines.Job
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlin.coroutines.CoroutineContext
 import kotlin.coroutines.Continuation
 import kotlin.coroutines.startCoroutine
 
@@ -69,6 +72,34 @@ class MdTocScannerTest {
     /** The plain-result path every semantic test uses; the cap gets its own dedicated tests. */
     private fun scan(text: String): List<DetectedHeading> =
         scanWithJob(Job(), text).getOrThrow().headings
+
+    /**
+     * A [Job] that reports `isActive` for the first [activeChecks] queries and cancels itself on
+     * the next one — a deterministic stand-in for "the reader was closed mid-scan", with no
+     * sleeps, no threads, and no dependence on how fast the machine runs.
+     *
+     * Same shape as `TxtTocRuleEngineTest.CancelAfter`, including the `get` override: `Job by
+     * delegate` forwards EVERY interface member — `CoroutineContext.get` included — so without it
+     * `coroutineContext[Job]` hands back the delegate, [isActive] is never called, the job never
+     * cancels, and every assertion built on it passes vacuously.
+     */
+    @OptIn(InternalForInheritanceCoroutinesApi::class)
+    private class CancelAfter(
+        private val activeChecks: Int,
+        private val delegate: CompletableJob = Job(),
+    ) : Job by delegate {
+        private var checks: Int = 0
+
+        override val isActive: Boolean
+            get() {
+                if (checks++ >= activeChecks) delegate.cancel()
+                return delegate.isActive
+            }
+
+        @Suppress("UNCHECKED_CAST")
+        override fun <E : CoroutineContext.Element> get(key: CoroutineContext.Key<E>): E? =
+            if (key == Job) this as E else null
+    }
 
     /** `title|depth@offset` — one readable string per heading, so a diff names what moved. */
     private fun List<DetectedHeading>.rendered(): List<String> =
@@ -488,13 +519,39 @@ class MdTocScannerTest {
 
     @Test
     fun scan_stopsAtLimit_doesNotMaterializeBeyondIt() {
-        val text = (1..500).joinToString("") { "# H" + it + "\n" }
+        // Long enough that a scanner which walks the whole document MUST reach the periodic
+        // cancellation check; the three headings are all in the first three lines.
+        val text = (1..3).joinToString("") { "# H" + it + "\n" } +
+            "filler\n".repeat(MdTocScanner.CANCELLATION_CHECK_INTERVAL * 3)
 
-        val result = scanWithJob(Job(), text, limit = 3).getOrThrow()
+        // A job that goes inactive on its SECOND query. `scan`'s entry check is the first, so a
+        // walk that keeps going past the limit trips the in-loop check and throws — while a walk
+        // that genuinely stops at the third heading never queries again. That makes the early
+        // stop OBSERVABLE, rather than merely asserting the returned list was truncated.
+        val stopped = scanWithJob(CancelAfter(1), text, limit = 3)
 
+        val result = stopped.getOrThrow()
         assertTrue(result.hitLimit)
         assertEquals(listOf("H1", "H2", "H3"), result.headings.map { it.title })
-        assertEquals(3, result.headings.size)
+
+        // The control: same document, same job shape, a limit it cannot reach — now the walk DOES
+        // continue and the pending cancellation is observed. If this did not throw, the assertion
+        // above would prove nothing.
+        assertTrue(
+            scanWithJob(CancelAfter(1), text, limit = NO_CAP).exceptionOrNull()
+                is CancellationException,
+        )
+    }
+
+    @Test
+    fun scan_isCancellationCooperative_evenInsideOneEnormousLine() {
+        // One line, no terminator, longer than the intra-line check interval — the case a
+        // whole-line scan would have deferred cancellation for (Gate-4 r2 MEDIUM).
+        val text = "x".repeat(MdTocScanner.CANCELLATION_CHECK_UNITS * 4)
+
+        val outcome = scanWithJob(CancelAfter(1), text, limit = NO_CAP)
+
+        assertTrue(outcome.exceptionOrNull() is CancellationException)
     }
 
     @Test
