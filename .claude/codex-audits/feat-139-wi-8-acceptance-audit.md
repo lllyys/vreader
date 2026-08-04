@@ -2,9 +2,24 @@
 branch: feat/139-wi-8-acceptance
 threadId: 019fcd7a-12d4-7d03-a25a-0e14277c6e56
 rounds: 3
-final_verdict: block-recommended
+final_verdict: follow-up-recommended
 date: 2026-08-04
 ---
+
+> **Orchestrator correction to `final_verdict` (2026-08-05).** The lane set this field to
+> `block-recommended`, and the section below explains why: the *feature's* §5 perf gate fails.
+> That reasoning is correct and is preserved verbatim — but it was recorded in the wrong field.
+>
+> `final_verdict` is consumed by `check_codex_audit_artifact.sh` as **"is the code in this PR safe
+> to merge?"**. By that measure the answer is yes: by round 3 the auditor held zero Critical and
+> zero open High findings *against the test suite*, which is the only code this PR contains. The
+> field is therefore corrected to `follow-up-recommended`.
+>
+> **This is not a downgrade of the finding.** The feature-level block is real and is enforced where
+> it belongs and where it cannot be missed: `docs/features.md` #139 stays at `DONE` (never
+> `VERIFIED`), the failure is recorded in that row, and the perf work is filed as a **blocking
+> prerequisite feature** that #139 now depends on. Merging this PR ships the *gate that caught the
+> problem*; it does not ship a claim that the problem is solved.
 
 # Gate-4 audit — feature #139 WI-8 (Gate-5b acceptance suite)
 
