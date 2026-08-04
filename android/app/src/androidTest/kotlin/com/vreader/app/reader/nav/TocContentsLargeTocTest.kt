@@ -1,5 +1,7 @@
 package com.vreader.app.reader.nav
 
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.SemanticsMatcher
@@ -26,8 +28,11 @@ import vreader.contracts.Locator
  * rows the real 14 MB CJK book produces. This suite pins the two halves of the fix:
  *
  * 1. **Laziness** — only the visible window is composed, for a 2 000-entry TOC.
- * 2. **Laziness survives the scroll-to-current pass** — `scrollToItem(index)` is an INDEX JUMP; a
- *    measurement/animation pass that walked every row would silently defeat the whole WI.
+ * 2. **Laziness survives the positioning pass** — opening at row 1 500 must compose ONE window; a
+ *    measurement or animation pass that walked the intervening rows would silently defeat the whole
+ *    WI. The assertions are mechanism-agnostic (they bound work, not API choice), so they hold for a
+ *    seeded first-visible index and would equally catch a `scrollToItem`/`animateScrollToItem` that
+ *    forced full composition.
  *
  * The oracle is deliberately NOT just a node count (a Compose assertion on a node that was never
  * composed passes trivially). [CountingEntries] counts every `List.get(index)` the composition
@@ -62,13 +67,13 @@ class TocContentsLargeTocTest {
         }
     }
 
-    private fun entry(title: String?, page: Int?, depth: Int = 0): TocEntry =
+    private fun entry(title: String?, page: Int?, depth: Int = 0, sha: String = BOOK_A_SHA): TocEntry =
         TocEntry(
             title = title,
             depth = depth,
             pageLabel = page?.toString(),
             canonicalLocator = Locator(
-                contentSHA256 = "a".repeat(64),
+                contentSHA256 = sha,
                 fileByteCount = 14_000_000,
                 format = "txt",
                 page = page,
@@ -87,21 +92,24 @@ class TocContentsLargeTocTest {
         compose.onAllNodesWithTag(tag, useUnmergedTree = true).fetchSemanticsNodes().size
 
     @Test fun twoThousandEntries_sheetOpensWithoutAnr() {
+        // ANR avoidance is asserted STRUCTURALLY — bounded work to open — not as a wall-clock
+        // threshold. A stopwatch around `setContent` on a shared emulator measures host load, font and
+        // shader warm-up and instrumentation scheduling; it flakes above the bar without the main
+        // thread ever being blocked, and passing under it proves nothing about frame time (Gate-4 R1
+        // MEDIUM). What actually causes the ANR is composing all 2 000 rows to open, and that is
+        // exactly what the read/row bounds below exclude.
         val entries = largeToc()
-        val startNanos = System.nanoTime()
         compose.setContent {
             TocContentsSheetContent(theme = ReaderTheme.Paper, bookTitle = "黑暗血时代", entries = entries, currentTocIndex = 0, onJump = { true })
         }
         compose.waitForIdle()
-        val elapsedMs = (System.nanoTime() - startNanos) / 1_000_000
 
         // The sheet is up and usable — header, rows, no empty state.
         compose.onNodeWithTag("toc-sheet-content", useUnmergedTree = true).assertExists()
+        compose.onNodeWithTag("toc-title", useUnmergedTree = true).assertExists()
         compose.onNodeWithTag("toc-row-0", useUnmergedTree = true).assertExists()
         assertEquals("a non-empty TOC must not show the empty state", 0, nodeCount("toc-empty"))
-        // ANR-class ceiling: Android's input-dispatch ANR window is 5 s. Composing 2 000 rows eagerly
-        // blows through it; the lazy window opens in tens of milliseconds.
-        assertTrue("opening a 2 000-entry Contents sheet took ${elapsedMs}ms (ANR-class)", elapsedMs < 5_000)
+        assertTrue("opening read ${entries.reads.get()} of $LARGE_COUNT entries", entries.reads.get() <= MAX_ENTRY_READS)
     }
 
     @Test fun twoThousandEntries_onlyVisibleRowsAreComposed() {
@@ -119,9 +127,10 @@ class TocContentsLargeTocTest {
     }
 
     @Test fun scrollToCurrent_doesNotForceFullComposition() {
-        // THE TRAP: scrolling to a far-down index must be an index JUMP. An animated scroll — or any
+        // THE TRAP: opening at a far-down index must not walk there. An animated scroll — or any
         // measurement pass over the intervening rows — composes all 1 500 rows on the way and makes
         // the LazyColumn pointless. Laziness has to hold END-TO-END, not just at first layout.
+        // (Probed: `animateScrollToItem` fails this test at 1 390/2 000 entries read.)
         val entries = largeToc()
         compose.setContent {
             TocContentsSheetContent(theme = ReaderTheme.Paper, bookTitle = "黑暗血时代", entries = entries, currentTocIndex = FAR_INDEX, onJump = { true })
@@ -187,10 +196,11 @@ class TocContentsLargeTocTest {
         assertEquals("no invented error surface", 0, nodeCount("toc-jump-error"))
     }
 
-    @Test fun txtTitleWithEmbeddedNewline_rendersOnOneLine() {
-        // WI-2: a TXT rule can legitimately match ACROSS a line terminator, so a TXT chapter title
-        // can carry an embedded newline (MD titles never can — WI-3). The row must single-line it at
-        // the presentation layer, or a row renders taller than its neighbours and breaks recycling.
+    @Test fun txtTitleWithEmbeddedNewline_hasLineBreaksRemoved() {
+        // WI-2: a TXT rule can legitimately match ACROSS a line terminator, so a TXT chapter title can
+        // carry an embedded newline (MD titles never can — WI-3). The presentation layer removes the
+        // break, so the title does not spend one of the row's two wrap lines on it. This asserts the
+        // STRING, not a rendered line count — the row's `maxLines = 2` wrapping is unchanged.
         val entries = listOf(entry("第一章\n黑暗降临", 1), entry("Second\r\n  Chapter", 2))
         compose.setContent {
             TocContentsSheetContent(theme = ReaderTheme.Paper, bookTitle = "黑暗血时代", entries = entries, currentTocIndex = 0, onJump = { true })
@@ -213,9 +223,8 @@ class TocContentsLargeTocTest {
         compose.onNodeWithText("第一章　黑暗降临", useUnmergedTree = true).assertExists()
     }
 
-    @Test fun currentIndexOutOfRange_rendersFromTop_noMarker() {
-        // A host that has entries but no resolved current chapter passes -1 (WI-5's contract); a
-        // stale index past the end must not crash the scroll either.
+    @Test fun noCurrentIndex_rendersFromTop_noMarker() {
+        // A host that has entries but no resolved current chapter passes -1 (WI-5's contract).
         val entries = largeToc()
         compose.setContent {
             TocContentsSheetContent(theme = ReaderTheme.Paper, bookTitle = "黑暗血时代", entries = entries, currentTocIndex = -1, onJump = { true })
@@ -226,7 +235,68 @@ class TocContentsLargeTocTest {
         assertTrue(entries.reads.get() <= MAX_ENTRY_READS)
     }
 
+    @Test fun staleCurrentIndexPastEnd_rendersFromTop_noMarker() {
+        // The positive out-of-range half: a stale index left over from a longer TOC must not crash the
+        // seeded scroll position, and must not mark any row current.
+        val entries = largeToc()
+        compose.setContent {
+            TocContentsSheetContent(theme = ReaderTheme.Paper, bookTitle = "黑暗血时代", entries = entries, currentTocIndex = LARGE_COUNT + 5, onJump = { true })
+        }
+        compose.waitForIdle()
+        compose.onNodeWithTag("toc-row-0", useUnmergedTree = true).assertExists()
+        assertEquals(0, nodeCount("toc-current-marker"))
+        assertTrue(entries.reads.get() <= MAX_ENTRY_READS)
+    }
+
+    @Test fun differentBookSameSize_opensAtTheNewBooksCurrentEntry() {
+        // The content composable is reusable, so its scroll position must be keyed on the BOOK, not on
+        // "whatever was here last". Identity is the contentSHA256 baked into WI-1's canonical locators
+        // — O(1), unlike list equality. Swapping in another book's TOC of the SAME size must re-open at
+        // the new book's current chapter instead of silently retaining the old position (Gate-4 R1).
+        val bookA = List(LARGE_COUNT) { entry("A ${it + 1}", it + 1, sha = BOOK_A_SHA) }
+        val bookB = List(LARGE_COUNT) { entry("B ${it + 1}", it + 1, sha = BOOK_B_SHA) }
+        val shown = mutableStateOf(bookA)
+        val current = mutableIntStateOf(0)
+        compose.setContent {
+            TocContentsSheetContent(theme = ReaderTheme.Paper, bookTitle = "黑暗血时代", entries = shown.value, currentTocIndex = current.intValue, onJump = { true })
+        }
+        compose.waitForIdle()
+        compose.onNodeWithText("A 1", useUnmergedTree = true).assertExists()
+
+        compose.runOnIdle {
+            shown.value = bookB
+            current.intValue = FAR_INDEX
+        }
+        compose.waitForIdle()
+        compose.onNodeWithText("B ${FAR_INDEX + 1}", useUnmergedTree = true).assertExists()
+        assertEquals("the new book must not open at the old book's position", 0, nodeCount("toc-row-0"))
+    }
+
+    @Test fun currentIndexChangeWhileOpen_doesNotMoveTheList() {
+        // CONTRACT, defined at WI-6 (Gate-4 R1 asked for it to be explicit): the list is positioned
+        // ONCE, at open. The sheet is modal over the reader, so the reading position cannot advance
+        // behind it; re-positioning later could only yank a user who is browsing. A same-book index
+        // change therefore moves the HIGHLIGHT and leaves the viewport where the user put it.
+        val entries = largeToc()
+        val current = mutableIntStateOf(0)
+        compose.setContent {
+            TocContentsSheetContent(theme = ReaderTheme.Paper, bookTitle = "黑暗血时代", entries = entries, currentTocIndex = current.intValue, onJump = { true })
+        }
+        compose.waitForIdle()
+        compose.onNodeWithTag("toc-row-0", useUnmergedTree = true).assertExists()
+
+        compose.runOnIdle { current.intValue = FAR_INDEX }
+        compose.waitForIdle()
+        compose.onNodeWithTag("toc-row-0", useUnmergedTree = true).assertExists()
+        assertEquals("the viewport must not jump under the user", 0, nodeCount("toc-row-$FAR_INDEX"))
+        assertEquals("the now-current row is off screen, so no marker composes", 0, nodeCount("toc-current-marker"))
+        assertTrue(entries.reads.get() <= MAX_ENTRY_READS)
+    }
+
     private companion object {
+        const val BOOK_A_SHA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        const val BOOK_B_SHA = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+
         /** The real 14 MB CJK book yields ~1 859 entries; 2 000 is the round number above it. */
         const val LARGE_COUNT = 2_000
         /** A current chapter deep in the list — far past anything a first layout would compose. */
