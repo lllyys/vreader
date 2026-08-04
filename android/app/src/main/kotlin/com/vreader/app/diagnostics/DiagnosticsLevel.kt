@@ -28,6 +28,14 @@ enum class DiagnosticsLevel(val priorityChar: Char, val exportTag: String) {
 
     companion object {
         /** The logcat level column -> our level. `null` for `S` (silent) and anything unknown. */
-        fun fromPriorityChar(char: Char): DiagnosticsLevel? = null
+        fun fromPriorityChar(char: Char): DiagnosticsLevel? = when (char) {
+            'V' -> VERBOSE
+            'D' -> DEBUG
+            'I' -> INFO
+            'W' -> WARN
+            'E' -> ERROR
+            'F' -> ASSERT
+            else -> null
+        }
     }
 }
