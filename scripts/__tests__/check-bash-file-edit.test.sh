@@ -162,6 +162,36 @@ allows "read-only open() in python3" \
 allows "interpreter writing outside the repo" \
     "python3 -c 'open(\"/tmp/o.json\",\"w\").write(x)' < docs/bugs.md"
 
+# --- Regression: variable-bound path in a multi-line interpreter body -------
+# A real bypass, found 2026-08-04 by replaying an agent's `python3 - <<PY`
+# heredoc. The path was bound to `p` ~180 chars above `open(p,"w")`, which put
+# it outside the 120-char literal window — so the write was invisible. The
+# longer the script, the more reliably it evaded. Path-position identifiers are
+# now resolved against simple `name = "literal"` bindings anywhere in the body.
+blocks "python3 heredoc writing via a variable-bound path is blocked" \
+    'python3 - <<PY
+import re
+p="dev-docs/plans/some-plan.md"
+s=open(p).read()
+s=s.replace("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB")
+open(p,"w").write(s)
+PY' "dev-docs/plans/some-plan.md"
+
+blocks "Path(var).write_text is blocked" \
+    'python3 - <<PY
+from pathlib import Path
+p="docs/bugs.md"
+Path(p).write_text("x")
+PY' "docs/bugs.md"
+
+# The path POSITION is what decides where bytes land — a repo path merely
+# passed as CONTENT must not be mistaken for the target.
+allows "variable-bound /tmp target, repo path only as content" \
+    'python3 - <<PY
+out="/tmp/scratch-only-target.txt"
+open(out,"w").write("plain content with no slashes")
+PY'
+
 allows "heredoc BODY mentioning a write to a tracked file" \
 "cat > /tmp/rule.md <<'EOF'
 Never do: sed -i '' 's/a/b/' docs/features.md
