@@ -134,7 +134,13 @@ object DiagnosticsRedactor {
 
     private fun classify(id: String): Kind? {
         val lower = id.lowercase()
-        if (lower.endsWith("authorization")) return Kind.AUTH
+        // `authorization` — and ONLY it — demands a word boundary: it is the one credential word
+        // with a real English superstring (`deauthorization`), and its class is the aggressive one
+        // (an unrecognised scheme consumes the rest of the line). The other words take an
+        // unrestricted suffix DELIBERATELY: `dbpassword` / `userpassword` / `oldSecret` are
+        // plausible third-party field names, and missing a credential costs more than
+        // over-redacting a contrived identifier. See the header's "Known limitations".
+        if (lower.endsWith("authorization") && boundaryAt(id, id.length - 13)) return Kind.AUTH
         SPACED_WORDS.forEach { if (lower.endsWith(it)) return Kind.SPACED }
         TOKEN_WORDS.forEach { if (lower.endsWith(it)) return Kind.TOKEN }
         if (lower.endsWith("token") && qualified(id, id.length - 5, TOKEN_QUALIFIERS, true)) {
@@ -157,14 +163,17 @@ object DiagnosticsRedactor {
         if (p.isEmpty()) return allowEmpty
         val lower = p.lowercase()
         for (q in quals) {
-            if (!lower.endsWith(q)) continue
-            val at = p.length - q.length
-            if (at == 0) return true
-            val before = p[at - 1]
-            if (before == '_' || before == '-') return true
-            if (p[at].isUpperCase() && before.isLowerCase()) return true
+            if (lower.endsWith(q) && boundaryAt(p, p.length - q.length)) return true
         }
         return false
+    }
+
+    /** True when [at] starts a word in [id] — position 0, after a `_`/`-`, or at a camelCase hump. */
+    private fun boundaryAt(id: String, at: Int): Boolean {
+        if (at <= 0) return at == 0
+        val before = id[at - 1]
+        if (before == '_' || before == '-') return true
+        return id[at].isUpperCase() && before.isLowerCase()
     }
 
     // ============================================================== the scanner
@@ -175,10 +184,15 @@ object DiagnosticsRedactor {
     private fun isIdentStart(c: Char): Boolean =
         c in 'a'..'z' || c in 'A'..'Z' || c == '_' || c == '-'
 
-    private fun opener(closer: Char): Char = when (closer) {
-        ')' -> '('
-        ']' -> '['
-        else -> '{'
+    /**
+     * Bracket bookkeeping is three COUNTERS, not a stack of characters. `ArrayDeque.contains()` is
+     * linear in depth, and since the value body never updates the state, a crafted
+     * `"(".repeat(n) + "password=" + "x)".repeat(n)` made [unquotedEnd] quadratic.
+     */
+    private fun bracketIndex(c: Char): Int = when (c) {
+        '(', ')' -> 0
+        '[', ']' -> 1
+        else -> 2
     }
 
     /**
@@ -188,7 +202,7 @@ object DiagnosticsRedactor {
      */
     private fun scanKeyedValues(text: String): String {
         val out = StringBuilder(text.length + 16)
-        val open = ArrayDeque<Char>()
+        val open = IntArray(3)
         var i = 0
         while (i < text.length) {
             val c = text[i]
@@ -214,11 +228,14 @@ object DiagnosticsRedactor {
         return out.toString()
     }
 
-    private fun track(c: Char, open: ArrayDeque<Char>) {
+    private fun track(c: Char, open: IntArray) {
         when (c) {
-            '\n' -> open.clear()
-            '(', '[', '{' -> open.addLast(c)
-            ')', ']', '}' -> if (open.isNotEmpty() && open.last() == opener(c)) open.removeLast()
+            '\n' -> open.fill(0)
+            '(', '[', '{' -> open[bracketIndex(c)]++
+            ')', ']', '}' -> {
+                val i = bracketIndex(c)
+                if (open[i] > 0) open[i]--
+            }
         }
     }
 
@@ -226,12 +243,16 @@ object DiagnosticsRedactor {
      * Given a credential key ending at [pos], returns the half-open span of its VALUE, or null when
      * the text is not a credential assignment after all.
      */
-    private fun findValue(text: String, pos: Int, kind: Kind, open: ArrayDeque<Char>): Pair<Int, Int>? {
+    private fun findValue(text: String, pos: Int, kind: Kind, open: IntArray): Pair<Int, Int>? {
         var k = pos
         var sawAssign = false
         var sawStructural = false
         var quote = '\u0000'
-        var quoteEscaped = false
+        // Backslashes immediately before the OPENING quote — the serialization depth. 0 = a raw
+        // quote, 1 = one JSON layer (`\"`), 3 = two layers (`\\\"`). The MATCHING close carries the
+        // SAME run; a quote INSIDE the value carries a longer one. Comparing run lengths is the only
+        // way to tell those apart — collapsing it to a boolean leaked a credential suffix.
+        var openRun = 0
         loop@ while (k < text.length) {
             val c = text[k]
             when {
@@ -241,9 +262,18 @@ object DiagnosticsRedactor {
                 // start of the next field, and consuming it would redact that field's value.
                 (c == ',' || c == ']' || c == ')' || c == '}') && !sawAssign ->
                     { sawStructural = true; quote = '\u0000'; k++ }
-                c == '"' || c == '\'' -> { quote = c; quoteEscaped = false; k++ }
-                c == '\\' && k + 1 < text.length && (text[k + 1] == '"' || text[k + 1] == '\'') ->
-                    { quote = text[k + 1]; quoteEscaped = true; k += 2 }
+                c == '"' || c == '\'' -> { quote = c; openRun = 0; k++ }
+                // A backslash RUN of any length followed by a quote is an opening quote at that
+                // serialization depth. Requiring a run of exactly one missed `\\\"…` entirely, so a
+                // double-serialized dump never even reached the assignment check.
+                c == '\\' -> {
+                    var r = k
+                    while (r < text.length && text[r] == '\\') r++
+                    if (r >= text.length || (text[r] != '"' && text[r] != '\'')) break@loop
+                    quote = text[r]
+                    openRun = r - k
+                    k = r + 1
+                }
                 else -> break@loop
             }
         }
@@ -254,7 +284,7 @@ object DiagnosticsRedactor {
 
         var start = k
         var end = if (quote != '\u0000') {
-            closingQuote(text, k, quote, quoteEscaped) ?: lineEnd(text, k)
+            closingQuote(text, k, quote, openRun) ?: lineEnd(text, k)
         } else {
             -1
         }
@@ -286,26 +316,25 @@ object DiagnosticsRedactor {
         return -1
     }
 
-    /** Index of the matching close quote, honouring backslash escapes; null when unbalanced. */
-    private fun closingQuote(text: String, from: Int, quote: Char, escaped: Boolean): Int? {
+    /**
+     * Index at which the value ends, i.e. the start of the MATCHING close quote's backslash run —
+     * or null when the value is unbalanced, in which case the caller fails closed to end of line.
+     *
+     * A quote closes the value only when the backslash run immediately before it is exactly
+     * [openRun] long: at serialization depth d the structural delimiter is `\^d "` while a quote
+     * inside the value is `\^(2d+1) "`. Anything longer is value content and the scan continues, so
+     * an ambiguous run (a value that genuinely ends in a backslash) over-redacts rather than leaking.
+     */
+    private fun closingQuote(text: String, from: Int, quote: Char, openRun: Int): Int? {
         var k = from
-        if (!escaped) {
-            while (k < text.length) {
-                when {
-                    text[k] == '\\' -> k += 2
-                    text[k] == quote -> return k
-                    else -> k++
-                }
+        while (k < text.length) {
+            if (text[k] == quote) {
+                var run = 0
+                var j = k - 1
+                while (j >= from && text[j] == '\\') { run++; j-- }
+                if (run == openRun) return k - openRun
             }
-        } else {
-            while (k + 1 < text.length) {
-                if (text[k] == '\\') {
-                    if (text[k + 1] == quote) return k
-                    k += 2
-                } else {
-                    k++
-                }
-            }
+            k++
         }
         return null
     }
@@ -316,13 +345,15 @@ object DiagnosticsRedactor {
     }
 
     /** The unquoted-value terminator policy — see the class doc's "delimiter policy" decision. */
-    private fun unquotedEnd(text: String, start: Int, kind: Kind, open: ArrayDeque<Char>): Int {
+    private fun unquotedEnd(text: String, start: Int, kind: Kind, open: IntArray): Int {
         var k = start
         while (k < text.length) {
             val c = text[k]
             if (c == '\n') return k
             if (kind == Kind.TOKEN && (c == ' ' || c == '\t' || c == '\r')) return k
-            if ((c == ')' || c == ']' || c == '}') && open.contains(opener(c)) && closesTheDump(text, k + 1)) {
+            if ((c == ')' || c == ']' || c == '}') && open[bracketIndex(c)] > 0 &&
+                closesTheDump(text, k + 1)
+            ) {
                 return k
             }
             // NOT for [Kind.LINE]: a Digest credential IS a comma-separated parameter list, so
@@ -335,13 +366,20 @@ object DiagnosticsRedactor {
         return text.length
     }
 
-    /** True when nothing but the end of the dump follows — the bracket really terminated a field. */
+    /**
+     * True when nothing but the end of the dump follows — the bracket really terminated the field.
+     *
+     * A trailing `,`/`;` is NOT by itself proof: `Dump{password=abc},SUFFIX` would end the value at
+     * the `}` and leak `SUFFIX`, which is a legal password character sequence. The delimiter must
+     * itself introduce a new key/value pair.
+     */
     private fun closesTheDump(text: String, from: Int): Boolean {
         var k = from
         while (k < text.length && (text[k] == ' ' || text[k] == '\t')) k++
         if (k >= text.length) return true
         val c = text[k]
-        return c == '\n' || c == ')' || c == ']' || c == '}' || c == ',' || c == ';'
+        if (c == '\n' || c == ')' || c == ']' || c == '}') return true
+        return (c == ',' || c == ';') && nextKeyFollows(text, k + 1)
     }
 
     /** True when `[quote] identifier [quote] [:=]` follows — i.e. a genuinely new key/value pair. */
@@ -376,9 +414,18 @@ object DiagnosticsRedactor {
     /** Either a `file://` URL prefix, or a real token start (never mid-token: `pkg/data/data/x`). */
     private const val PATH_START = """(?:file://|(?<![\w/]))"""
 
+    /**
+     * Android storage roots. Beyond the app-private and primary-shared families, this covers the
+     * REMOVABLE/adopted volumes a real import failure names — `/storage/1A2B-3C4D/...` (the FAT
+     * volume id an SD card gets) carries the user's own folder names and was previously redacted
+     * only when it happened to arrive as a `file://` URL. The volume forms are shape-bounded so
+     * prose beginning `/storage/` is not swallowed.
+     */
     private const val PATH_ROOT_ANY =
-        """/(?:data/user(?:_de)?/\d+|data/data|data/media/\d+|""" +
-            """storage/emulated/\d+|storage/self/primary|sdcard|mnt/sdcard|mnt/user/\d+)"""
+        """/(?:data/user(?:_de)?/\d+|data/data|data/media/\d+|data/misc_(?:ce|de)/\d+|""" +
+            """storage/emulated/\d+|storage/self/primary|""" +
+            """storage/[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}|mnt/expand/[0-9a-fA-F-]{8,}|""" +
+            """sdcard|mnt/sdcard|mnt/user/\d+|mnt/media_rw|mnt/runtime/[a-z]+)"""
 
     /** THIS app's artifact directory — `applicationId` is pinned; see the class doc. */
     private const val PATH_ROOT_APP_BOOKS =

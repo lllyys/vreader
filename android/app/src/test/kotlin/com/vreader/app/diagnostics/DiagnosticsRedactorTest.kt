@@ -339,6 +339,43 @@ class DiagnosticsRedactorTest {
     }
 
     @Test
+    fun quoted_escapedContainerWhoseValueContainsAnEscapedQuote_isFullyRedacted() {
+        // Gate-4 round 1, High. A boolean "is the opener escaped" cannot tell a structural close
+        // (`\"`) from a quote INSIDE the value (`\\\"`), so the scan ended early and leaked the
+        // tail. The close is now the quote whose preceding backslash run MATCHES the opener's.
+        check(
+            """state={\"password\":\"abc\\\"USABLE-SUFFIX\"} -> 401""",
+            """state={\"password\":\"$redacted\"} -> 401""",
+            secrets = listOf("""abc\\\"USABLE-SUFFIX"""),
+            context = listOf("state=", "password", "-> 401"),
+        )
+    }
+
+    @Test
+    fun quoted_doubleSerializedContainer_isRedacted() {
+        // Gate-4 round 1, High. The separator run required a backslash run of exactly ONE before a
+        // quote, so a twice-serialized dump never reached the assignment check and survived whole.
+        check(
+            """state={\\\"password\\\":\\\"TOPSECRET123\\\"}""",
+            """state={\\\"password\\\":\\\"$redacted\\\"}""",
+            secrets = listOf("TOPSECRET123"),
+            context = listOf("state=", "password"),
+        )
+    }
+
+    @Test
+    fun quoted_valueEndingInABackslashOverRedactsRatherThanLeaking() {
+        // The one genuinely ambiguous run — a value that itself ends in a backslash looks exactly
+        // like an escaped inner quote. It fails CLOSED (to end of line), which is the safe side.
+        check(
+            """cfg {"password": "hunter2\\"} loaded""",
+            """cfg {"password": "$redacted""",
+            secrets = listOf("hunter2"),
+            context = listOf("cfg", "password"),
+        )
+    }
+
+    @Test
     fun quoted_nestedJsonDumpWithEscapedStructuralQuotes_isRedacted() {
         check(
             """state={\"encryptedApiKey\":\"AAAAFGhlbGxvd29ybGQxMjM0\"}""",
@@ -471,6 +508,26 @@ class DiagnosticsRedactorTest {
             secrets = listOf("sk-or-v1-abc123def456", "AAAAFGhlbGxvMTIz"),
             // maxTokens must SURVIVE — the over-redaction pin for the camel-case key rule.
             context = listOf("id=p1", "openrouter.ai", "maxTokens=4096"),
+        )
+    }
+
+    @Test
+    fun unquoted_bracketFollowedByANonFieldDelimiter_doesNotTerminateTheValue() {
+        // Gate-4 round 1, High. A closing bracket followed by `,` was treated as proof the dump
+        // ended, so `Dump{password=abc},SUFFIX` leaked `SUFFIX` — which is a legal password
+        // character sequence. The delimiter must now itself introduce a new key/value pair.
+        check(
+            "Dump{password=abc},USABLE-SUFFIX",
+            "Dump{password=$redacted",
+            secrets = listOf("abc},USABLE-SUFFIX"),
+            context = listOf("Dump{password="),
+        )
+        // …while a bracket that IS followed by a real next field still ends the value.
+        check(
+            "Dump{password=hunter2}, next=1",
+            "Dump{password=$redacted}, next=1",
+            secrets = listOf("hunter2"),
+            context = listOf("next=1"),
         )
     }
 
@@ -721,6 +778,31 @@ class DiagnosticsRedactorTest {
     }
 
     @Test
+    fun path_removableAndAdoptedVolumeRoots_areRedacted() {
+        // Gate-4 round 1, Medium. `/storage/<FAT-volume-id>` is where an SD-card import fails, and
+        // it carries the user's own folder names. It was covered only when it arrived as a
+        // `file://` URL; a raw path survived untouched.
+        check(
+            "BookImporter failed at /storage/1A2B-3C4D/Books/Alice/private.epub: Permission denied",
+            "BookImporter failed at $path Permission denied",
+            secrets = listOf("1A2B-3C4D", "private.epub"),
+            context = listOf("BookImporter failed at", "Permission denied"),
+        )
+        check(
+            "scan /mnt/media_rw/1A2B-3C4D/Books/private.epub failed",
+            "scan $path failed",
+            secrets = listOf("private.epub"),
+            context = listOf("scan", "failed"),
+        )
+        check(
+            "prefs /data/misc_ce/10/com.vreader.app/blob unreadable",
+            "prefs $path unreadable",
+            secrets = listOf("/data/misc_ce/10"),
+            context = listOf("prefs", "unreadable"),
+        )
+    }
+
+    @Test
     fun path_legacyDataDataPath_isRedacted() {
         check(
             "prefs /data/data/com.vreader.app/shared_prefs/settings.xml unreadable",
@@ -809,6 +891,42 @@ class DiagnosticsRedactorTest {
         assertUnchanged("Bearer tokens rejected")
         // No `:`/`=`/`,`/`]`/`)` after the header name — not a container, so not a credential.
         assertUnchanged("Authorization is required for this endpoint")
+    }
+
+    @Test
+    fun negative_englishSuperstringsOfAuthorizationSurvive() {
+        // Gate-4 round 1, Medium. `deauthorization` ends with `authorization`, and the AUTH class
+        // consumes the rest of the LINE, so an unrestricted suffix destroyed a whole diagnostic
+        // line. `authorization` — alone among the credential words — now demands a word boundary.
+        assertUnchanged("policy deauthorization=true result=completed")
+        assertUnchanged("session reauthorization=pending retries=2")
+        // …but the real header names are all at a boundary and still match.
+        check(
+            "Proxy-Authorization: Basic cHJveHk6c2VjcmV0OTk5",
+            "Proxy-Authorization: Basic $redacted",
+            secrets = listOf("cHJveHk6c2VjcmV0OTk5"),
+            context = listOf("Proxy-Authorization: Basic"),
+        )
+    }
+
+    @Test
+    fun lowercaseCompoundCredentialKeys_areStillRedacted() {
+        // The deliberate ASYMMETRY: the boundary rule applies to `authorization` ONLY. A lowercase
+        // compound like `dbpassword` is a plausible third-party field name, and missing a
+        // credential costs more than over-redacting a contrived identifier. Pinned so the
+        // asymmetry is a visible decision rather than an accident.
+        check(
+            "pool init dbpassword=hunter2secret999 host=db.internal",
+            "pool init dbpassword=$redacted",
+            secrets = listOf("hunter2secret999"),
+            context = listOf("pool init", "dbpassword="),
+        )
+        check(
+            "legacy userpassword=hunter2secret999",
+            "legacy userpassword=$redacted",
+            secrets = listOf("hunter2secret999"),
+            context = listOf("legacy", "userpassword="),
+        )
     }
 
     @Test
@@ -939,6 +1057,15 @@ class DiagnosticsRedactorTest {
     fun linear_repeatedKeyAssignment() {
         DiagnosticsRedactor.redact("api-key=".repeat(12_000))
         DiagnosticsRedactor.redact("Authorization:".repeat(12_000))
+    }
+
+    @Test(timeout = 15_000)
+    fun linear_deepBracketNestingInAnUnquotedValue() {
+        // Gate-4 round 1, Medium. Bracket state was an ArrayDeque and `contains()` is linear in
+        // depth, so every closer in the value body cost O(depth) — measured quadratic. It is three
+        // counters now.
+        val n = 50_000
+        DiagnosticsRedactor.redact("(".repeat(n) + "password=" + "x)".repeat(n))
     }
 
     @Test(timeout = 15_000)
