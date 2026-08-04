@@ -48,6 +48,7 @@ import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -77,12 +78,13 @@ import java.util.concurrent.atomic.AtomicReference
  *    (every title stands verbatim at its own offset; offsets strictly increase), and that the tapped
  *    row actually moves the reader.
  *  - [realCjkBook_scanCompletesWithinBudget] — §5 gate 1: the whole-document scan on the real book
- *    within the stated **1 500 ms**, with no reader open.
+ *    within the stated **1 500 ms**, with no reader open. A warm-process, first-call-in-method
+ *    measurement (see the method's own note — it is NOT a cold-process reading).
  *  - [realCjkBook_scanUnderContention_withinBudget] — §5 gate 1 under REALISTIC CONTENTION: the same
- *    budget while #138's `PaginationSession` grinds the same real document on worker threads and the
- *    search indexer (started unconditionally by `VReaderApp.onCreate`) works the same fresh 14 MB
- *    import. The contention is PROVEN, not assumed: the sealed page count must have GROWN across the
- *    measured window.
+ *    budget while #138's `PaginationSession` grinds the same real document on worker threads. The
+ *    contention is PROVEN, not assumed: the sealed page count must have GROWN across the measured
+ *    window. The search indexer's state is RECORDED in the log, never claimed as live load — in a
+ *    full-class run it has normally already settled.
  *  - [realCjkBook_openToFirstPage_doesNotRegress] — §5 gate 2, the BLOCKING PRIMARY gate. Reproduces
  *    #138's own measurement (`PaginationSession.openFromStart` → first published snapshot) on the
  *    real book twice: once with nothing else running (the #138 baseline, verified there at 8 ms) and
@@ -90,9 +92,9 @@ import java.util.concurrent.atomic.AtomicReference
  *    gate failed entirely. Both must meet #138's stated **< 2 000 ms** target, and the concurrent arm
  *    asserts the scan was genuinely still in flight when the first page published.
  *  - [realMdFile_producesNestedEntries] — the repo's own `docs/architecture.md`, opened through the
- *    same production path, checked against an INDEPENDENT in-test ATX oracle (fence-aware, written
- *    from the CommonMark rules rather than from `MdTocScanner`'s state machine) and shown to render
- *    its nesting as real indentation.
+ *    same production path, checked against a SECOND IMPLEMENTATION of the product's ATX rules
+ *    ([atxHeadingOracle] — a different strategy, deliberately not a CommonMark authority; see its
+ *    own note) and shown to render its nesting as real indentation.
  *  - [syntheticHeadingsFreeTxt_hidesContentsControl] — the other half of the acceptance criterion: a
  *    headings-free document reaches the reader through the Library with NO Contents control.
  *
@@ -104,8 +106,11 @@ import java.util.concurrent.atomic.AtomicReference
  * `LibraryScreen` → `TxtReaderActivity` → `ReaderChromeScaffold` → `TocBookmarksSheet` →
  * `TocContentsSheetContent`, fed by `TxtMdTocProvider` — lives in `src/main`, so NOTHING on the path
  * a user walks here comes from a `src/debug` source set that the release APK would drop (`src/debug`
- * holds only `backup/BackupDebugActivity` and `PreviewBackupService`). Adding an instrumentable
- * release-like variant is a build-config change, outside this work item.
+ * holds a manifest, a `res/` tree, and two Kotlin files — `backup/BackupDebugActivity` and
+ * `PreviewBackupService` — none of them on this path). This is honest SUPPORTING evidence, not an
+ * equivalent: it shows nothing debug-only is on the path, and does not show the feature behaves the
+ * same under release optimisation. Adding an instrumentable release-like variant is a build-config
+ * change outside this work item's write-set.
  *
  * Note for anyone running `scripts/check-orphan-surfaces.sh`: it reports `TocContentsSheet` as
  * orphaned. That is a naming artifact, not a reachability gap — production composes the sheet through
@@ -136,6 +141,20 @@ import java.util.concurrent.atomic.AtomicReference
  * Method order is PINNED (`NAME_ASCENDING`) so the logged measurements always appear in the same
  * order in the evidence file, and so a memory-heavy method's position in the run is reproducible
  * rather than an accident of JVM reflection order.
+ *
+ * **This class does not fit in one process on a 2.5 GB emulator — run it in two halves.** The app
+ * process grows by several hundred MB of NATIVE memory per full-document scan and does not give it
+ * back (the Java heap stays around 20 MB throughout), so after roughly three whole-book scans the
+ * `lowmemorykiller` takes the app and the run is truncated mid-class. That accumulation is itself a
+ * finding reported with this work item, NOT a harness defect to paper over; until it is understood,
+ * split the run:
+ *
+ * ```
+ * -Pandroid.testInstrumentationRunnerArguments.class=\
+ *   com.vreader.app.reader.TxtTocAcceptanceTest#realCjkBook_openToFirstPage_doesNotRegress,\
+ *   com.vreader.app.reader.TxtTocAcceptanceTest#realCjkBook_producesExpectedChapterCount
+ * # …then the remaining four methods in a second invocation, re-pushing the fixtures each time.
+ * ```
  */
 @RunWith(AndroidJUnit4::class)
 @FixMethodOrder(MethodSorters.NAME_ASCENDING)
@@ -204,6 +223,20 @@ class TxtTocAcceptanceTest {
 
         /** How long the contention arm waits for its pagination load to publish a first window. */
         const val LOAD_START_TIMEOUT_MS = 60_000L
+
+        /**
+         * How long the first-page gate waits for its concurrent scan to finish. Far above the
+         * observed 7–17 s so a slow scan is still reported as a latency number, not a hang.
+         */
+        const val SCAN_JOIN_TIMEOUT_MS = 180_000L
+
+        /**
+         * Every character Java treats as a line terminator. A heading's recorded offset may be
+         * preceded only by SAME-LINE whitespace, so the anchor oracle rejects all of these — not just
+         * `\n`/`\r` (Gate-4 Medium: U+0085/U+2028/U+2029 would otherwise let an offset sitting on a
+         * previous line pass, which is exactly the defect the oracle exists to catch).
+         */
+        val LINE_TERMINATORS = charArrayOf('\n', '\r', '', ' ', ' ')
     }
 
     @Before
@@ -482,12 +515,16 @@ class TxtTocAcceptanceTest {
      */
     @Test
     fun realCjkBook_producesExpectedChapterCount() {
-        val text = requireRealBookText()
         val book = importRealBook()
+        // The reader holds its OWN 7 M-char copy of this book while it is open. The oracle's copy is
+        // therefore decoded only AFTER the reader has been finished (below), so the two never coexist
+        // — on a 2.5 GB emulator this method is where the process peaks, and it was being
+        // lowmemorykiller-ed here.
+        var entries: List<TocEntry> = emptyList()
 
         openThroughLibrary(REAL_BOOK_TITLE, book.fingerprintKey) { reader ->
             reader.awaitScan()
-            val entries = reader.read { it.tocEntriesForTest() }
+            entries = reader.read { it.tocEntriesForTest() }
 
             assertEquals(
                 "the real book yields the plan's stated chapter count",
@@ -501,7 +538,6 @@ class TxtTocAcceptanceTest {
                 "last chapter is $EXPECTED_LAST_CHAPTER_PREFIX… (was '${entries.last().title}')",
                 entries.last().title?.startsWith(EXPECTED_LAST_CHAPTER_PREFIX) == true,
             )
-            assertTxtEntriesAnchoredIn(text, entries)
 
             // The user-visible delta of this feature: Contents is REACHABLE on a TXT book.
             openContentsSheet()
@@ -525,11 +561,17 @@ class TxtTocAcceptanceTest {
             )
             Log.i(
                 TAG,
-                "ACCEPT-TXT book=real:黑暗血时代.txt chars_utf16=${text.length} entries=${entries.size} " +
+                "ACCEPT-TXT book=real:黑暗血时代.txt entries=${entries.size} " +
                     "first='${entries.first().title}' last='${entries.last().title}' " +
                     "jumped_row=$target landed_chunk=${reader.read { it.firstVisibleChunkForTest() }}",
             )
         }
+
+        // The reader is finished; NOW decode the oracle's copy and check every entry against the real
+        // bytes. Same assertion, run outside the memory peak.
+        val text = requireRealBookText()
+        assertTxtEntriesAnchoredIn(text, entries)
+        Log.i(TAG, "ACCEPT-TXT-ANCHORED chars_utf16=${text.length} entries=${entries.size} all_anchored=true")
     }
 
     /**
@@ -556,7 +598,7 @@ class TxtTocAcceptanceTest {
             assertTrue(
                 "entry $i offset $offset must point at the heading's OWN line — no line terminator " +
                     "may precede the title (found '${window.take(40)}')",
-                indent.none { it == '\n' || it == '\r' },
+                indent.none { it in LINE_TERMINATORS },
             )
             assertTrue(
                 "entry $i title '$title' must stand at its own offset $offset (found '${window.take(40)}')",
@@ -612,9 +654,14 @@ class TxtTocAcceptanceTest {
         val book = importRealBook()
         val provider = TxtMdTocProvider(text, book, BookFormat.txt, Dispatchers.Default)
 
-        // Memory is measured ACROSS the scan, not just after it: an absolute reading would be the
-        // whole process's posture (including everything earlier methods left behind) and would
-        // attribute nothing. The delta is what the scan itself costs.
+        // A process-wide memory SIGNAL, sampled either side of the scan. It is deliberately NOT
+        // labelled a cost: the readings are whole-process PSS, and across runs the same pair of
+        // samples produced 267→381 MB and 259→1439 MB, so GC timing, retained native allocator pages
+        // and whatever earlier methods left behind are all confounders that this sampling cannot
+        // separate (Gate-4 Medium — do not report it as "what the scan costs"). It is recorded
+        // because the app WAS lowmemorykiller-ed at ~1 GB RSS during earlier full-class runs, which
+        // is worth investigating alongside the latency — isolating it needs repeated single-method
+        // runs with peak sampling, which is follow-up work, not a claim this suite can make.
         System.gc()
         Thread.sleep(200)
         val runtime = Runtime.getRuntime()
@@ -629,31 +676,35 @@ class TxtTocAcceptanceTest {
         val heapAfterMb = (runtime.totalMemory() - runtime.freeMemory()) / 1_048_576
 
         // Diagnostic split — LOGGED, never gated. When this gate fails, the follow-up has to be
-        // designed from where the time actually goes (one-time `Pattern.compile` + JIT vs steady-state
-        // regex throughput; detection over the 512 KB sample vs extraction over all 7 M chars), not
-        // from a single opaque total. Necessarily WARM, since it runs after the gated cold call — and
-        // the cold-vs-warm gap is itself the answer to "is this compilation or throughput?".
+        // designed from where the time goes (detection over the 512 KB sample vs extraction over all
+        // 7 M chars), not from a single opaque total.
+        //
+        // Only DETECTION is re-run: it reads a 512 KB sample, so it costs ~130 ms and negligible
+        // memory. A second EXTRACTION pass is deliberately NOT run — each whole-document pass grows
+        // the process by several hundred MB of native memory that is never returned, and a version of
+        // this method that ran three passes was lowmemorykiller-ed at ~1.48 GB before it could report
+        // anything. Extraction is therefore INFERRED as (gated total − detection), which is exact up
+        // to the provider's dispatcher hop and its 1 859 `TocEntry` mappings. Direct measurements of
+        // the extraction pass from earlier runs — 7 630 / 7 840 / 6 604 ms — are recorded in the
+        // evidence file and agree with the inference.
         val d0 = SystemClock.elapsedRealtime()
         val rule = runBlocking { TxtTocRuleEngine.detectBestRule(text) }
         val warmDetectMs = SystemClock.elapsedRealtime() - d0
-        val e0 = SystemClock.elapsedRealtime()
-        val warmExtractCount = runBlocking {
-            TxtTocRuleEngine.extractHeadings(text, requireNotNull(rule), TxtMdTocProvider.MAX_TOC_ENTRIES + 1)
-        }.headings.size
-        val warmExtractMs = SystemClock.elapsedRealtime() - e0
 
         Log.i(
             TAG,
             "SCAN-QUIET book=real:黑暗血时代.txt chars_utf16=${text.length} entries=${entries.size} " +
                 "scan_ms=$elapsedMs budget_ms=$SCAN_BUDGET_MS met=${elapsedMs <= SCAN_BUDGET_MS} " +
-                "warm_detect_ms=$warmDetectMs warm_extract_ms=$warmExtractMs " +
-                "warm_total_ms=${warmDetectMs + warmExtractMs} " +
-                "winning_rule=${rule?.id}:${rule?.name} warm_extracted=$warmExtractCount " +
-                "pss_mb=$pssBeforeMb->$pssAfterMb heap_mb=$heapBeforeMb->$heapAfterMb",
+                "warm_detect_ms=$warmDetectMs implied_extract_ms=${elapsedMs - warmDetectMs} " +
+                "winning_rule=${rule?.id}:${rule?.name} " +
+                "process_pss_signal_mb=$pssBeforeMb->$pssAfterMb heap_mb=$heapBeforeMb->$heapAfterMb",
         )
 
         assertEquals("the scan found the real book's chapters", EXPECTED_CHAPTER_COUNT, entries.size)
-        assertEquals("a repeat extraction is deterministic", entries.size, warmExtractCount)
+        assertEquals(
+            "detection must land on the same winning rule the plan measured (id 1, 中文章节（通用）)",
+            1, requireNotNull(rule).id,
+        )
         assertTxtEntriesAnchoredIn(text, entries)
         assertTrue("the scan latency must be measured (>0 ms)", elapsedMs > 0)
         assertTrue(
@@ -789,7 +840,10 @@ class TxtTocAcceptanceTest {
      *     is asserted to have still been in flight at the first publish, so this arm cannot pass by
      *     having quietly finished first.
      *
-     * BOTH arms must meet #138's stated < [FIRST_PAGE_TARGET_MS] target.
+     * BOTH arms must meet #138's stated `< ` [FIRST_PAGE_TARGET_MS] target. Note the comparison is
+     * STRICT here while §5 gate 1's budget is `<=`: the two numbers come from different documents
+     * (#138's evidence file states `< 2 s`; #139's plan states `≤ 1 500 ms`) and each is asserted as
+     * ITS source words it, so neither is silently loosened (Gate-4 Low).
      *
      * Reading the two numbers: arm 1 runs FIRST and therefore pays this class's cold class-load and
      * JIT, so arm 2 is routinely the *faster* of the two. That ordering effect is why the gate is
@@ -815,7 +869,7 @@ class TxtTocAcceptanceTest {
                 "first_window_pages=${quiet.firstWindowPages}/${contended.firstWindowPages} " +
                 "scan_unfinished_at_publish=${contended.scanUnfinishedAtPublish} " +
                 "concurrent_scan_entries=${contended.scanEntries} target_ms=$FIRST_PAGE_TARGET_MS " +
-                "met=${quiet.firstPageMs <= FIRST_PAGE_TARGET_MS && contended.firstPageMs <= FIRST_PAGE_TARGET_MS} " +
+                "met=${quiet.firstPageMs < FIRST_PAGE_TARGET_MS && contended.firstPageMs < FIRST_PAGE_TARGET_MS} " +
                 "build_type=${com.vreader.app.BuildConfig.BUILD_TYPE} " +
                 "content_box=${shaping.box.widthPx.toInt()}x${shaping.box.heightPx.toInt()}",
         )
@@ -838,8 +892,8 @@ class TxtTocAcceptanceTest {
         }
         assertTrue(
             "quiet open-to-first-page (${quiet.firstPageMs} ms) must meet #138's stated " +
-                "<= ${FIRST_PAGE_TARGET_MS}ms target — the #139 build has not moved the baseline",
-            quiet.firstPageMs <= FIRST_PAGE_TARGET_MS,
+                "< ${FIRST_PAGE_TARGET_MS}ms target — the #139 build has not moved the baseline",
+            quiet.firstPageMs < FIRST_PAGE_TARGET_MS,
         )
         assertTrue(
             "the concurrent TOC scan must NOT have finished before the first page published — " +
@@ -852,8 +906,8 @@ class TxtTocAcceptanceTest {
         )
         assertTrue(
             "open-to-first-page WITH a concurrent #139 TOC scan (${contended.firstPageMs} ms) must " +
-                "meet #138's stated <= ${FIRST_PAGE_TARGET_MS}ms target (plan §5 gate 2, BLOCKING)",
-            contended.firstPageMs <= FIRST_PAGE_TARGET_MS,
+                "meet #138's stated < ${FIRST_PAGE_TARGET_MS}ms target (plan §5 gate 2, BLOCKING)",
+            contended.firstPageMs < FIRST_PAGE_TARGET_MS,
         )
     }
 
@@ -935,8 +989,19 @@ class TxtTocAcceptanceTest {
         bg.cancelAndJoin()
         // Let the scan RUN TO COMPLETION rather than cancelling it: its entry count is the evidence
         // that the concurrent load was the genuine whole-document scan, and a failure inside it must
-        // surface here instead of being lost with the cancelled job.
-        scanJob?.join()
+        // surface here instead of being lost with the cancelled job. BOUNDED, though — a bare join()
+        // on a provider that stopped completing would park until the suite watchdog and report a
+        // timeout instead of a diagnosis (Gate-4 Medium). `firstPageMs` was captured long before
+        // this point, so the wait cannot distort the measurement.
+        scanJob?.let { job ->
+            val finished = withTimeoutOrNull(SCAN_JOIN_TIMEOUT_MS) { job.join() } != null
+            if (!finished) {
+                job.cancelAndJoin()
+                throw AssertionError(
+                    "the concurrent TOC scan did not finish within ${SCAN_JOIN_TIMEOUT_MS}ms",
+                )
+            }
+        }
         scanError.get()?.let { throw AssertionError("the concurrent TOC scan failed", it) }
         FirstPageMeasurement(firstPageMs, firstWindow.pageCount, unfinishedAtPublish, scanEntries.get())
     }
