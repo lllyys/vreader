@@ -47,6 +47,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -59,6 +60,8 @@ import org.junit.runners.MethodSorters
 import vreader.contracts.BookFormat
 import java.io.File
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * Feature #139 WI-8 — the Gate-5b ACCEPTANCE suite: the TXT/MD table of contents exercised on REAL
@@ -90,8 +93,24 @@ import java.util.concurrent.atomic.AtomicInteger
  *    same production path, checked against an INDEPENDENT in-test ATX oracle (fence-aware, written
  *    from the CommonMark rules rather than from `MdTocScanner`'s state machine) and shown to render
  *    its nesting as real indentation.
- *  - [realTxtWithoutHeadings_hidesContentsControl] — the other half of the acceptance criterion: a
+ *  - [syntheticHeadingsFreeTxt_hidesContentsControl] — the other half of the acceptance criterion: a
  *    headings-free document reaches the reader through the Library with NO Contents control.
+ *
+ * **Build configuration — a stated, bounded deviation from rule 47 Gate 5.** Gate 5 asks for a
+ * *release-configured* build. This module declares no `buildTypes` block, so `release` is unsigned
+ * and there is no instrumentable release variant; `connectedAndroidTest` runs `debug`, and the actual
+ * build type is LOGGED (`build_type=…`) rather than assumed. The gap is closed on the other axis
+ * instead: every file on the entry path — `MainActivity` (the manifest's LAUNCHER activity) →
+ * `LibraryScreen` → `TxtReaderActivity` → `ReaderChromeScaffold` → `TocBookmarksSheet` →
+ * `TocContentsSheetContent`, fed by `TxtMdTocProvider` — lives in `src/main`, so NOTHING on the path
+ * a user walks here comes from a `src/debug` source set that the release APK would drop (`src/debug`
+ * holds only `backup/BackupDebugActivity` and `PreviewBackupService`). Adding an instrumentable
+ * release-like variant is a build-config change, outside this work item.
+ *
+ * Note for anyone running `scripts/check-orphan-surfaces.sh`: it reports `TocContentsSheet` as
+ * orphaned. That is a naming artifact, not a reachability gap — production composes the sheet through
+ * `TocBookmarksSheet` → `TocContentsSheetContent`; the top-level `TocContentsSheet` WRAPPER is #132's
+ * original entry point, left behind when WI-6 promoted the two-tab sheet, and is separately dead.
  *
  * **Fixtures — real books first (AGENTS.md), and the fallback is FAILURE, not synthesis.** Every
  * real-fixture accessor is `requireNotNull`/`require`-d with a byte-size or content identity check,
@@ -129,10 +148,18 @@ class TxtTocAcceptanceTest {
     private companion object {
         const val TAG = "WI139-ACCEPT"
 
-        /** The pushed real 14 MB CJK novel + its exact byte size (a truncated push must NOT pass). */
+        /**
+         * The pushed real 14 MB CJK novel. Identity is pinned by CONTENT DIGEST, not by size: the
+         * byte-size check below is only a cheap early diagnostic, and a same-sized synthetic corpus
+         * would sail straight through it (Gate-4 High). The digest is verified against the hash the
+         * REAL importer computes over the stored bytes, so it costs nothing extra and covers exactly
+         * the artifact the app went on to read. This book is a fixed local fixture that never
+         * changes, so pinning it is stable.
+         */
         const val REAL_BOOK_FILE = "perf-cjk.txt"
         const val REAL_BOOK_BYTES = 14_059_220L
         const val REAL_BOOK_BYTES_TOLERANCE = 1_000L
+        const val REAL_BOOK_SHA256 = "04d60f6d93256c0d82f714ad1237a57ca88dcd469fb37bef231af062c543cfe4"
         const val REAL_BOOK_DISPLAY_NAME = "黑暗血时代.txt"
         const val REAL_BOOK_TITLE = "黑暗血时代"
 
@@ -142,7 +169,17 @@ class TxtTocAcceptanceTest {
         const val EXPECTED_FIRST_CHAPTER_PREFIX = "第一章"
         const val EXPECTED_LAST_CHAPTER_PREFIX = "第一千八百六十章"
 
-        /** The pushed real MD document (`docs/architecture.md`) + its identity markers. */
+        /**
+         * The pushed real MD document (`docs/architecture.md`) + its identity markers.
+         *
+         * Deliberately NOT digest-pinned, unlike the book: `docs/architecture.md` is a LIVING repo
+         * document that rule 24 requires PRs to edit, so a pinned hash would turn every
+         * architecture-doc edit into a red acceptance test. The correctness guarantee therefore does
+         * not rest on identity at all — it rests on [atxHeadingOracle], which derives the expectation
+         * from whatever document was actually pushed. The markers below are a sanity check that a
+         * markdown document of the right shape arrived, and the imported digest is LOGGED so the
+         * evidence file records exactly which revision was measured (Gate-4 High).
+         */
         const val REAL_MD_FILE = "real-architecture.md"
         const val REAL_MD_DISPLAY_NAME = "real-architecture.md"
         const val REAL_MD_TITLE = "real-architecture"
@@ -164,6 +201,9 @@ class TxtTocAcceptanceTest {
 
         /** Generous budgets: a 14 MB import + decode + first paint on a loaded emulator is slow, not hung. */
         const val UI_TIMEOUT_MS = 120_000L
+
+        /** How long the contention arm waits for its pagination load to publish a first window. */
+        const val LOAD_START_TIMEOUT_MS = 60_000L
     }
 
     @Before
@@ -268,6 +308,23 @@ class TxtTocAcceptanceTest {
         book
     }
 
+    /**
+     * Import the real book and PROVE it is the real book by content, not by size.
+     *
+     * `BookImporter` hashes exactly the bytes it stores, so its own `contentSHA256` is a free,
+     * exact identity check on the artifact the app then reads — no second pass over 14 MB. A
+     * same-sized synthetic corpus, a truncated push or a different novel all fail here (Gate-4
+     * High: the byte-size check alone was not identity).
+     */
+    private fun importRealBook(): Book {
+        val book = importFile(requireRealBookFile(), REAL_BOOK_DISPLAY_NAME)
+        assertEquals(
+            "the imported artifact must BE the real 黑暗血时代.txt (content digest), not merely its size",
+            REAL_BOOK_SHA256, book.contentSHA256,
+        )
+        return book
+    }
+
     private fun importAsset(asset: String): Book {
         val staged = File(instrumentation.targetContext.cacheDir, "acc-${System.nanoTime()}-$asset")
         instrumentation.context.assets.open(asset).use { input ->
@@ -286,12 +343,17 @@ class TxtTocAcceptanceTest {
         throw AssertionError("layout $layout not committed to the store in time")
     }
 
-    /** Every [TxtReaderActivity] currently in a live stage (resumed, started or paused). */
+    /**
+     * Every [TxtReaderActivity] that is not yet DESTROYED. All non-terminal stages are included on
+     * purpose: a reader sitting in `CREATED` or `STOPPED` is still on the stack and would still be
+     * found by a later lookup, so a cleanup that only drained the visible stages would leave exactly
+     * the leak it was written to prevent (Gate-4 Medium).
+     */
     private fun liveReaders(): List<TxtReaderActivity> {
         var found: List<TxtReaderActivity> = emptyList()
         instrumentation.runOnMainSync {
             val monitor = ActivityLifecycleMonitorRegistry.getInstance()
-            found = listOf(Stage.RESUMED, Stage.STARTED, Stage.PAUSED)
+            found = listOf(Stage.PRE_ON_CREATE, Stage.CREATED, Stage.STARTED, Stage.RESUMED, Stage.PAUSED, Stage.STOPPED, Stage.RESTARTED)
                 .flatMap { monitor.getActivitiesInStage(it) }
                 .filterIsInstance<TxtReaderActivity>()
                 .distinct()
@@ -311,15 +373,21 @@ class TxtTocAcceptanceTest {
         return found
     }
 
-    /** Finish every live reader and wait (bounded, non-throwing) for the stack to drain. */
-    private fun finishAnyReader() {
+    /**
+     * Finish every live reader and wait for the stack to drain, returning whether it fully drained.
+     * The caller decides whether an incomplete drain is fatal: it is when a test is ABOUT to look a
+     * reader up (a survivor would be mistaken for this test's own), and it is not in `@After`, where
+     * failing would replace a real assertion failure with a cleanup one.
+     */
+    private fun finishAnyReader(): Boolean {
         val readers = liveReaders()
-        if (readers.isEmpty()) return
+        if (readers.isEmpty()) return true
         instrumentation.runOnMainSync { readers.forEach { it.finish() } }
         val deadline = SystemClock.elapsedRealtime() + 15_000
         while (liveReaders().isNotEmpty() && SystemClock.elapsedRealtime() < deadline) {
             Thread.sleep(50)
         }
+        return liveReaders().isEmpty()
     }
 
     /** Read a reader seam on the main thread (several read Compose state, not just `@Volatile` fields). */
@@ -336,18 +404,36 @@ class TxtTocAcceptanceTest {
      * [block] the reader that tap opened. No `TxtReaderActivity.intent(...)`, no debug launcher, no
      * composable invoked directly — this is the path a user walks from app launch.
      *
+     * Identity is checked twice, because "a reader is resumed" is NOT the same claim as "the tap I
+     * just made opened this book" (Gate-4 Medium):
+     *  - the stack is drained FIRST and a failure to drain is FATAL, so no survivor from an earlier
+     *    method can be mistaken for this one's;
+     *  - the reader that appears must carry [expectedKey] in the very intent extra the production
+     *    route put there (`TxtReaderActivity.EXTRA_FINGERPRINT_KEY`), so tapping the wrong row — or
+     *    matching a title substring that belongs to another book — fails loudly instead of quietly
+     *    asserting against the wrong document.
+     *
      * The reader is finished on the way out so it cannot leak into the next test.
      */
-    private fun openThroughLibrary(title: String, block: (TxtReaderActivity) -> Unit) {
-        finishAnyReader()
+    private fun openThroughLibrary(title: String, expectedKey: String, block: (TxtReaderActivity) -> Unit) {
+        assertTrue(
+            "a reader from an earlier test is still on the stack — this test's lookup would be ambiguous",
+            finishAnyReader(),
+        )
         ActivityScenario.launch(MainActivity::class.java).use {
             compose.waitUntil(UI_TIMEOUT_MS) {
                 compose.onAllNodesWithText(title, substring = true).fetchSemanticsNodes().isNotEmpty()
             }
             compose.onNodeWithText(title, substring = true).performClick()
             compose.waitUntil(UI_TIMEOUT_MS) { resumedReader() != null }
+            val reader = requireNotNull(resumedReader())
             try {
-                block(requireNotNull(resumedReader()))
+                assertEquals(
+                    "the Library tap must have opened THIS book (production intent extra)",
+                    expectedKey,
+                    reader.read { it.intent.getStringExtra(TxtReaderActivity.EXTRA_FINGERPRINT_KEY) },
+                )
+                block(reader)
             } finally {
                 finishAnyReader()
             }
@@ -397,9 +483,9 @@ class TxtTocAcceptanceTest {
     @Test
     fun realCjkBook_producesExpectedChapterCount() {
         val text = requireRealBookText()
-        importFile(requireRealBookFile(), REAL_BOOK_DISPLAY_NAME)
+        val book = importRealBook()
 
-        openThroughLibrary(REAL_BOOK_TITLE) { reader ->
+        openThroughLibrary(REAL_BOOK_TITLE, book.fingerprintKey) { reader ->
             reader.awaitScan()
             val entries = reader.read { it.tocEntriesForTest() }
 
@@ -448,8 +534,14 @@ class TxtTocAcceptanceTest {
 
     /**
      * A structural oracle over EVERY TXT entry, against the real decoded text: each title is exactly
-     * what stands at its own source offset (leading indent allowed — `extractHeadings` records the
-     * match start and trims the title), and offsets strictly increase in document order.
+     * what stands at its own source offset, and offsets strictly increase in document order.
+     *
+     * `TxtTocRuleEngine.extractHeadings` records `match.range.first` as the offset and
+     * `match.value.trim()` as the title, so the only thing legally allowed between the offset and the
+     * title is SAME-LINE horizontal whitespace. A line terminator is NOT allowed: a naive
+     * `trimStart()` would also skip `\n`, which would let an offset that points at the END OF THE
+     * PREVIOUS LINE pass — precisely the off-by-one-line locator defect an anchor check exists to
+     * catch (Gate-4 Medium).
      */
     private fun assertTxtEntriesAnchoredIn(text: String, entries: List<TocEntry>) {
         var previous = -1
@@ -460,9 +552,15 @@ class TxtTocAcceptanceTest {
             assertTrue("entry offsets strictly increase (entry $i: $previous → $offset)", offset > previous)
             previous = offset
             val window = text.substring(offset, minOf(text.length, offset + title.length + 64))
+            val indent = window.takeWhile { it.isWhitespace() }
+            assertTrue(
+                "entry $i offset $offset must point at the heading's OWN line — no line terminator " +
+                    "may precede the title (found '${window.take(40)}')",
+                indent.none { it == '\n' || it == '\r' },
+            )
             assertTrue(
                 "entry $i title '$title' must stand at its own offset $offset (found '${window.take(40)}')",
-                window.trimStart().startsWith(title),
+                window.startsWith(indent + title),
             )
         }
     }
@@ -495,9 +593,15 @@ class TxtTocAcceptanceTest {
 
     /**
      * Plan §5 gate 1: the whole-document TXT scan on the real 14 MB book completes within the STATED
-     * [SCAN_BUDGET_MS] with no reader open. Measured COLD — no warm-up run, because production scans
-     * once per reader session with a cold `Pattern` cache and a cold JIT, so a warmed number would
-     * flatter it.
+     * [SCAN_BUDGET_MS], with no reader open.
+     *
+     * **What "the gated call" is, precisely** (rule 22 — an earlier revision of this comment claimed
+     * a COLD measurement, which was false): the timed call is the first `provider.toc()` in THIS
+     * method, but under `NAME_ASCENDING` two earlier methods have already driven the same engine, so
+     * class loading and JIT are warm at the process level. The number is therefore a warm-process,
+     * first-call-in-method measurement. Run in ISOLATION (`--tests …#realCjkBook_scanCompletesWithinBudget`
+     * against a freshly installed app) the same call measured 7 877 ms, i.e. the same order — the gate
+     * does not hinge on which reading you take, and the evidence file records both.
      *
      * The correctness assertion is deliberately in the SAME test: a scan that returned nothing would
      * beat any latency budget, so the budget only means something next to the 1 859-entry result.
@@ -505,7 +609,7 @@ class TxtTocAcceptanceTest {
     @Test
     fun realCjkBook_scanCompletesWithinBudget() {
         val text = requireRealBookText()
-        val book = importFile(requireRealBookFile(), REAL_BOOK_DISPLAY_NAME)
+        val book = importRealBook()
         val provider = TxtMdTocProvider(text, book, BookFormat.txt, Dispatchers.Default)
 
         // Memory is measured ACROSS the scan, not just after it: an absolute reading would be the
@@ -541,7 +645,7 @@ class TxtTocAcceptanceTest {
         Log.i(
             TAG,
             "SCAN-QUIET book=real:黑暗血时代.txt chars_utf16=${text.length} entries=${entries.size} " +
-                "scan_ms=$elapsedMs budget_ms=$SCAN_BUDGET_MS met=${elapsedMs < SCAN_BUDGET_MS} " +
+                "scan_ms=$elapsedMs budget_ms=$SCAN_BUDGET_MS met=${elapsedMs <= SCAN_BUDGET_MS} " +
                 "warm_detect_ms=$warmDetectMs warm_extract_ms=$warmExtractMs " +
                 "warm_total_ms=${warmDetectMs + warmExtractMs} " +
                 "winning_rule=${rule?.id}:${rule?.name} warm_extracted=$warmExtractCount " +
@@ -554,7 +658,7 @@ class TxtTocAcceptanceTest {
         assertTrue("the scan latency must be measured (>0 ms)", elapsedMs > 0)
         assertTrue(
             "the real-book TOC scan ($elapsedMs ms) must meet the STATED ${SCAN_BUDGET_MS}ms budget (plan §5 gate 1)",
-            elapsedMs < SCAN_BUDGET_MS,
+            elapsedMs <= SCAN_BUDGET_MS,
         )
     }
 
@@ -565,8 +669,15 @@ class TxtTocAcceptanceTest {
      * The load is the real thing, not a synthetic spinner: #138's `PaginationSession` is driven over
      * the same real document with the same production shaping, so the background completion pass
      * (≈15 s of continuous measurement for this book's 30 695 pages) is saturating the emulator while
-     * the scan runs, and the search indexer — started unconditionally by `VReaderApp.onCreate` — is
-     * working through the same fresh 14 MB import.
+     * the scan runs.
+     *
+     * **What is proven vs merely recorded** (rule 22 — an earlier revision claimed the search indexer
+     * was "working through the same fresh import", which the observed runs falsified: by the time
+     * this method runs the import is already settled and `search_index_state=indexed`). The PROVEN
+     * contention is the pagination pass, asserted below by page-count growth. The search indexer's
+     * state is RECORDED in the log line and asserted about nothing — it is started unconditionally by
+     * `VReaderApp.onCreate`, but in a full-class run its work on this book has normally finished
+     * earlier, so claiming it as live load would be false.
      *
      * **Why the session is driven directly rather than by opening the reader.** A first pass that
      * opened `TxtReaderActivity` on this book in Paged layout measured the same thing but was
@@ -584,7 +695,7 @@ class TxtTocAcceptanceTest {
     @Test
     fun realCjkBook_scanUnderContention_withinBudget() {
         val text = requireRealBookText()
-        val book = importFile(requireRealBookFile(), REAL_BOOK_DISPLAY_NAME)
+        val book = importRealBook()
         val document = TxtDocument.of(text)
         val shaping = productionShaping()
         val provider = TxtMdTocProvider(text, book, BookFormat.txt, Dispatchers.Default)
@@ -615,8 +726,19 @@ class TxtTocAcceptanceTest {
                 onReveal = { },
             )
         }
+        // If the load dies before publishing anything, complete the barrier EXCEPTIONALLY: an
+        // un-completed deferred would otherwise park the test until the outer watchdog fired, turning
+        // a clear failure into a 20-minute timeout (Gate-4 Medium).
+        load.invokeOnCompletion { cause ->
+            if (!firstPublished.isCompleted) {
+                firstPublished.completeExceptionally(
+                    AssertionError("the contention pagination ended before publishing a first window", cause),
+                )
+            }
+        }
         try {
-            runBlocking { firstPublished.await() }   // pagination is now demonstrably in flight
+            // Bounded even so — belt and braces against a load that neither publishes nor completes.
+            runBlocking { withTimeout(LOAD_START_TIMEOUT_MS) { firstPublished.await() } }
             val pagesBefore = sealedPages.get()
             val t0 = SystemClock.elapsedRealtime()
             val entries = runBlocking { provider.toc() }
@@ -626,7 +748,7 @@ class TxtTocAcceptanceTest {
             Log.i(
                 TAG,
                 "SCAN-CONTENDED book=real:黑暗血时代.txt entries=${entries.size} scan_ms=$elapsedMs " +
-                    "budget_ms=$SCAN_BUDGET_MS met=${elapsedMs < SCAN_BUDGET_MS} " +
+                    "budget_ms=$SCAN_BUDGET_MS met=${elapsedMs <= SCAN_BUDGET_MS} " +
                     "paged_pages=$pagesBefore->$pagesAfter search_index_state=$indexStateBefore",
             )
 
@@ -640,10 +762,13 @@ class TxtTocAcceptanceTest {
             assertTrue(
                 "the CONTENDED real-book TOC scan ($elapsedMs ms) must meet the STATED " +
                     "${SCAN_BUDGET_MS}ms budget (plan §5 gate 1)",
-                elapsedMs < SCAN_BUDGET_MS,
+                elapsedMs <= SCAN_BUDGET_MS,
             )
         } finally {
-            load.cancel()
+            // JOIN, don't just cancel: an un-joined pagination pass would keep burning cores into the
+            // next method (and through `@After`'s collection), quietly contaminating the next
+            // measurement (Gate-4 Medium).
+            runBlocking { load.cancelAndJoin() }
             loadScope.cancel()
         }
     }
@@ -674,7 +799,7 @@ class TxtTocAcceptanceTest {
     @Test
     fun realCjkBook_openToFirstPage_doesNotRegress() {
         val text = requireRealBookText()
-        val book = importFile(requireRealBookFile(), REAL_BOOK_DISPLAY_NAME)
+        val book = importRealBook()
         val document = TxtDocument.of(text)
         val shaping = productionShaping()
         val provider = TxtMdTocProvider(text, book, BookFormat.txt, Dispatchers.Default)
@@ -688,49 +813,72 @@ class TxtTocAcceptanceTest {
                 "quiet_first_page_ms=${quiet.firstPageMs} " +
                 "with_toc_scan_first_page_ms=${contended.firstPageMs} " +
                 "first_window_pages=${quiet.firstWindowPages}/${contended.firstWindowPages} " +
-                "scan_in_flight_at_publish=${contended.scanStillRunning} target_ms=$FIRST_PAGE_TARGET_MS " +
-                "met=${quiet.firstPageMs < FIRST_PAGE_TARGET_MS && contended.firstPageMs < FIRST_PAGE_TARGET_MS} " +
+                "scan_unfinished_at_publish=${contended.scanUnfinishedAtPublish} " +
+                "concurrent_scan_entries=${contended.scanEntries} target_ms=$FIRST_PAGE_TARGET_MS " +
+                "met=${quiet.firstPageMs <= FIRST_PAGE_TARGET_MS && contended.firstPageMs <= FIRST_PAGE_TARGET_MS} " +
+                "build_type=${com.vreader.app.BuildConfig.BUILD_TYPE} " +
                 "content_box=${shaping.box.widthPx.toInt()}x${shaping.box.heightPx.toInt()}",
         )
 
         assertTrue("quiet open-to-first-page must be measured (>0 ms)", quiet.firstPageMs > 0)
-        assertTrue(
-            "the first published window must seal at least the initial-window target " +
-                "(${TxtPaginator.DEFAULT_INITIAL_WINDOW_PAGES}) — i.e. this is a genuine first page",
-            quiet.firstWindowPages >= TxtPaginator.DEFAULT_INITIAL_WINDOW_PAGES,
-        )
-        assertTrue(
-            "the first publish must be genuinely PARTIAL on a 14 MB book (windowed, not whole-doc)",
-            quiet.firstWindowPages < 1_000,
-        )
+        // BOTH arms must be a genuine WINDOWED first page: at least the initial-window target, and
+        // strictly short of the whole 30 695-page book. Asserted on the loaded arm too, so a
+        // degenerate or whole-document publish there could never be read as a fast first page.
+        listOf("quiet" to quiet, "with-scan" to contended).forEach { (name, m) ->
+            assertTrue(
+                "the $name arm's first published window must seal at least the initial-window " +
+                    "target (${TxtPaginator.DEFAULT_INITIAL_WINDOW_PAGES}) — i.e. a genuine first page",
+                m.firstWindowPages >= TxtPaginator.DEFAULT_INITIAL_WINDOW_PAGES,
+            )
+            assertTrue(
+                "the $name arm's first publish must be genuinely PARTIAL on a 14 MB book " +
+                    "(windowed, not the whole document): ${m.firstWindowPages} pages",
+                m.firstWindowPages < 1_000,
+            )
+        }
         assertTrue(
             "quiet open-to-first-page (${quiet.firstPageMs} ms) must meet #138's stated " +
-                "< ${FIRST_PAGE_TARGET_MS}ms target — the #139 build has not moved the baseline",
-            quiet.firstPageMs < FIRST_PAGE_TARGET_MS,
+                "<= ${FIRST_PAGE_TARGET_MS}ms target — the #139 build has not moved the baseline",
+            quiet.firstPageMs <= FIRST_PAGE_TARGET_MS,
         )
         assertTrue(
-            "the concurrent TOC scan must still have been RUNNING when the first page published — " +
-                "otherwise the under-load arm proves nothing",
-            contended.scanStillRunning,
+            "the concurrent TOC scan must NOT have finished before the first page published — " +
+                "otherwise the under-load arm measured an idle device",
+            contended.scanUnfinishedAtPublish,
+        )
+        assertEquals(
+            "the concurrent load must be the REAL whole-document scan, not a fast failure",
+            EXPECTED_CHAPTER_COUNT, contended.scanEntries,
         )
         assertTrue(
             "open-to-first-page WITH a concurrent #139 TOC scan (${contended.firstPageMs} ms) must " +
-                "meet #138's stated < ${FIRST_PAGE_TARGET_MS}ms target (plan §5 gate 2, BLOCKING)",
-            contended.firstPageMs < FIRST_PAGE_TARGET_MS,
+                "meet #138's stated <= ${FIRST_PAGE_TARGET_MS}ms target (plan §5 gate 2, BLOCKING)",
+            contended.firstPageMs <= FIRST_PAGE_TARGET_MS,
         )
     }
 
     private class FirstPageMeasurement(
         val firstPageMs: Long,
         val firstWindowPages: Int,
-        val scanStillRunning: Boolean,
+        /** The scan had NOT finished when the first page published — a temporal fact, not a guess. */
+        val scanUnfinishedAtPublish: Boolean,
+        /** How many chapters the concurrent scan went on to produce (-1 when no scan was run). */
+        val scanEntries: Int,
     )
 
     /**
-     * One cold `openFromStart` on [document], timed to its FIRST published snapshot. When [provider]
-     * is non-null a #139 TOC scan is launched first and confirmed DISPATCHED (the scan coroutine
-     * completes a started-signal before calling into the provider) so the pagination genuinely opens
-     * against a busy CPU; whether it was still running at the publish is REPORTED, not assumed.
+     * One `openFromStart` on [document], timed to its FIRST published snapshot. When [provider] is
+     * non-null a #139 TOC scan runs alongside it.
+     *
+     * **How the overlap is proven.** An earlier version signalled "dispatched" and then read
+     * `Job.isActive` at publish time; neither shows that the scanner was doing work — a coroutine
+     * that has been launched but not yet scheduled is `isActive` too, and a `runCatching` around the
+     * call would have hidden a provider that failed instantly (Gate-4 High). So instead the scan
+     * records the wall-clock at which it FINISHED, and the publish callback samples that value: if
+     * the scan had not finished when the page published, the two genuinely overlapped in time. The
+     * scan's entry count is returned as well, so the caller can assert the concurrent load was the
+     * real full-document scan and not a fast failure, and any throwable it raised is rethrown rather
+     * than swallowed.
      *
      * The background completion loop is cancelled right after the first snapshot — this gate is about
      * the first page, and the full 30 695-page pass is #138's own already-verified measurement.
@@ -746,18 +894,28 @@ class TxtTocAcceptanceTest {
             extendPages = TxtPaginator.DEFAULT_EXTEND_PAGES,
         )
         var scanJob: Job? = null
+        val scanFinishedAtMs = AtomicLong(-1L)
+        val scanEntries = AtomicInteger(-1)
+        val scanError = AtomicReference<Throwable?>(null)
         if (provider != null) {
             val dispatched = CompletableDeferred<Unit>()
             scanJob = launch(Dispatchers.Default) {
                 dispatched.complete(Unit)
-                runCatching { provider.toc() }
+                try {
+                    scanEntries.set(provider.toc().size)
+                } catch (t: Throwable) {
+                    scanError.set(t)
+                    throw t
+                } finally {
+                    scanFinishedAtMs.set(SystemClock.elapsedRealtime())
+                }
             }
             dispatched.await()   // the scan coroutine is on a worker thread before the clock starts
         }
 
         val firstPublished = CompletableDeferred<TxtPageIndex>()
         var firstPageMs = -1L
-        var scanStillRunning = false
+        var unfinishedAtPublish = false
         val t0 = SystemClock.elapsedRealtime()
         val bg = launch {
             session.openFromStart(
@@ -766,7 +924,7 @@ class TxtTocAcceptanceTest {
                 onSnapshot = { snap ->
                     if (!firstPublished.isCompleted) {
                         firstPageMs = SystemClock.elapsedRealtime() - t0
-                        scanStillRunning = scanJob?.isActive == true
+                        unfinishedAtPublish = provider != null && scanFinishedAtMs.get() < 0
                         firstPublished.complete(snap)
                     }
                 },
@@ -775,8 +933,12 @@ class TxtTocAcceptanceTest {
         }
         val firstWindow = firstPublished.await()
         bg.cancelAndJoin()
-        scanJob?.cancelAndJoin()
-        FirstPageMeasurement(firstPageMs, firstWindow.pageCount, scanStillRunning)
+        // Let the scan RUN TO COMPLETION rather than cancelling it: its entry count is the evidence
+        // that the concurrent load was the genuine whole-document scan, and a failure inside it must
+        // surface here instead of being lost with the cancelled job.
+        scanJob?.join()
+        scanError.get()?.let { throw AssertionError("the concurrent TOC scan failed", it) }
+        FirstPageMeasurement(firstPageMs, firstWindow.pageCount, unfinishedAtPublish, scanEntries.get())
     }
 
     /** The production shaping inputs a pagination pass needs (the `TxtReaderBody` triple). */
@@ -844,9 +1006,9 @@ class TxtTocAcceptanceTest {
             "the real markdown document must nest at least three levels",
             expected.map { it.first }.distinct().size >= 3,
         )
-        importFile(file, REAL_MD_DISPLAY_NAME)
+        val book = importFile(file, REAL_MD_DISPLAY_NAME)
 
-        openThroughLibrary(REAL_MD_TITLE) { reader ->
+        openThroughLibrary(REAL_MD_TITLE, book.fingerprintKey) { reader ->
             reader.awaitScan()
             val entries = reader.read { it.tocEntriesForTest() }
 
@@ -875,7 +1037,8 @@ class TxtTocAcceptanceTest {
             compose.waitUntil(UI_TIMEOUT_MS) { reader.read { it.currentTocIndexForTest() } == depthTwo }
             Log.i(
                 TAG,
-                "ACCEPT-MD doc=real:docs/architecture.md bytes=${file.length()} entries=${entries.size} " +
+                "ACCEPT-MD doc=real:docs/architecture.md bytes=${file.length()} " +
+                    "sha256=${book.contentSHA256} entries=${entries.size} " +
                     "depths=${entries.map { it.depth }.distinct().sorted()} jumped_row=$depthTwo " +
                     "jumped_title='$targetTitle'",
             )
@@ -883,10 +1046,27 @@ class TxtTocAcceptanceTest {
     }
 
     /**
-     * An INDEPENDENT ATX-heading oracle: `(depth, title)` for every heading in [text], written from
-     * the CommonMark rules (1–6 `#` then a literal space; title trimmed; a trailing closing-hash run
-     * dropped only when something is left) with fence tracking — NOT from `MdTocScanner`'s state
-     * machine. Setext headings are deliberately not modelled: the real document contains none, and a
+     * A SECOND IMPLEMENTATION of the product's ATX-heading rules: `(depth, title)` for every heading
+     * in [text] — 1–6 `#` then a literal space, title trimmed, a trailing closing-hash run dropped
+     * only when something is left — with fence tracking.
+     *
+     * **What this does and does not prove** (rule 22 — an earlier revision called this an
+     * "independent CommonMark oracle", which overstated it on both counts). It is written from the
+     * documented rules using a completely different strategy — split the document into lines and
+     * inspect each — whereas `MdTocScanner` walks raw indices across the whole string, tracking line
+     * boundaries, front matter, fences and setext state by hand. That difference is what makes it
+     * useful: it independently catches index-walking, line-boundary, fence-state and offset bugs,
+     * which is the class of defect this scanner is actually exposed to.
+     *
+     * It is NOT an independent authority on CommonMark, and it cannot be: the product deliberately
+     * diverges from CommonMark (arbitrary leading indentation is accepted; only a literal U+0020
+     * separates the hashes from the title) for iOS parity, so an off-the-shelf CommonMark parser
+     * would disagree with the SPEC, not with a bug. Consequently both implementations could share a
+     * misreading of the spec and still agree. Conformance to the intended rules is pinned by
+     * `MdTocScannerTest`'s per-rule unit cases (WI-3); this oracle's job here is to prove the scanner
+     * behaves the same way on a large, messy, real document.
+     *
+     * Setext headings are deliberately not modelled: the real document contains none, so a
      * disagreement introduced by a future edit should surface as a red test rather than be absorbed
      * here.
      */
@@ -931,14 +1111,17 @@ class TxtTocAcceptanceTest {
      * asserted only AFTER the scan has genuinely COMPLETED, so a stranded gate can never be mistaken
      * for "this book has no chapters" (the WI-7 discipline, re-run here on the production path).
      *
-     * Fixture exception (AGENTS.md "real books first"): the committed `resume-sample.txt` asset is the
-     * deterministic-tiny-structure case — the assertion is the ABSENCE of a control, which needs a
-     * document known to contain no chapter markers, not a large one.
+     * Fixture exception (AGENTS.md "real books first"): the committed `resume-sample.txt` asset is
+     * GENERATED (100 `Line NNN …` lines), not real prose, under the rule's deterministic-tiny-
+     * structure exception — the assertion is the ABSENCE of a control, which needs a document KNOWN
+     * to contain no chapter markers, and no real book can offer that guarantee. The method is named
+     * for what the fixture actually is (Gate-4 Low: the previous name, `realTxtWithoutHeadings…`,
+     * claimed a real document).
      */
     @Test
-    fun realTxtWithoutHeadings_hidesContentsControl() {
-        importAsset("resume-sample.txt")
-        openThroughLibrary("resume-sample") { reader ->
+    fun syntheticHeadingsFreeTxt_hidesContentsControl() {
+        val book = importAsset("resume-sample.txt")
+        openThroughLibrary("resume-sample", book.fingerprintKey) { reader ->
             reader.awaitScan()
             assertEquals(
                 "no headings detected in the headings-free document",
