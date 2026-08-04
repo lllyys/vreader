@@ -71,6 +71,8 @@ import com.vreader.app.annotations.SelectionPopoverActions
 import com.vreader.app.annotations.SelectionPopoverViewModel
 import com.vreader.app.data.Book
 import com.vreader.app.data.LibraryRepository
+import com.vreader.app.diagnostics.DiagnosticsCategory
+import com.vreader.app.diagnostics.VLog
 import com.vreader.app.reader.chrome.ReaderChromeState
 import com.vreader.app.reader.chrome.ReaderSheet
 import com.vreader.app.reader.nav.BookmarkDateRenderer
@@ -753,7 +755,14 @@ class ReaderActivity : AppCompatActivity() {
                 val prefs = EpubPreferences(scroll = settings.layout == com.vreader.app.reader.settings.ReaderLayout.Scroll) +
                     settings.toEpubPreferences()
                 runCatching { nav.submitPreferences(prefs) }
-                    .onFailure { android.util.Log.w("ReaderActivity", "submitPreferences failed; display change not applied", it) }
+                    .onFailure {
+                        VLog.w(
+                            DiagnosticsCategory.READER,
+                            "ReaderActivity",
+                            "submitPreferences failed; display change not applied",
+                            it,
+                        )
+                    }
                 // feature #131 WI-7b — a `submitPreferences` reflow can drop the injected decorations
                 // (a CSS/typography reflow re-renders the resource DOM). Schedule a probe-gated re-inject
                 // (on the dedicated job — never suspend this settings collector) so the interlinear
