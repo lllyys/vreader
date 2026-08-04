@@ -19,7 +19,11 @@ package com.vreader.app.reader.nav
  * One detected heading, before it becomes a [TocEntry].
  *
  * @param title             the heading text, already trimmed. Never blank — a match whose text
- *                          trims to nothing is dropped rather than emitted.
+ *                          trims to nothing is dropped rather than emitted. Usually a single
+ *                          line, but a TXT rule's whitespace positions are ICU-`\s` (which
+ *                          includes line terminators), so a heading split across lines yields a
+ *                          title with an embedded newline — iOS parity; a renderer that must show
+ *                          one line should collapse it at the presentation layer, not here.
  * @param sourceOffsetUtf16 UTF-16 offset of the heading LINE's start in the raw document text.
  *                          Guaranteed to be a code-point boundary (never inside a surrogate pair).
  * @param depth             0-based nesting level; TXT is always 0.

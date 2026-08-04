@@ -540,20 +540,23 @@ class TxtTocRuleEngineTest {
     }
 
     @Test
-    fun extractHeadings_largeNoMatchDocument_terminatesWithinTheBoundedWindow() {
-        // The worst-case UNINTERRUPTIBLE window, made an asserted number rather than a claim:
-        // `find()` is one non-suspending java.util.regex call, so a document with no match at all
-        // is walked in a single uncancellable step. 14 MB is the real CJK book's size; the plan
-        // measures a full pass at ~100 ms (§5 / Appendix A.1). The ceiling below is deliberately
-        // loose — this pins the ORDER of magnitude (bounded, linear), not a benchmark.
-        val text = "没有任何章节标记的正文段落。".repeat(1_000_000) // ~14M UTF-16 units
+    fun extractHeadings_largeNoMatchDocument_isACatastrophicRegressionSmokeTest() {
+        // The worst-case UNINTERRUPTIBLE window: `find()` is one non-suspending java.util.regex
+        // call, so a document with NO match at all is walked in a single uncancellable step.
+        //
+        // Stated honestly (Gate-4 round 2): one input size against a loose ceiling is a
+        // CATASTROPHIC-regression smoke test — it does not measure the ~100 ms the plan reports
+        // (§5 / Appendix A.1) and does not establish linearity. A precise budget belongs to WI-8's
+        // measured evidence on the real device, not to a JVM unit test on a shared machine.
+        // Fixture size is ~14M UTF-16 code units — about twice the real book's 7 029 609.
+        val text = "没有任何章节标记的正文段落。".repeat(1_000_000)
         val startedNs = System.nanoTime()
         val result = run { TxtTocRuleEngine.extractHeadings(text, rule(1), noCap) }
         val elapsedMs = (System.nanoTime() - startedNs) / 1_000_000
 
         assertEquals(emptyList<DetectedHeading>(), result.headings)
         assertTrue(
-            "a full no-match pass must stay bounded and linear (took ${elapsedMs}ms over ${text.length} units)",
+            "a full no-match pass must not blow up (took ${elapsedMs}ms over ${text.length} units)",
             elapsedMs < 10_000,
         )
     }
@@ -613,6 +616,36 @@ class TxtTocRuleEngineTest {
         assertTrue("cancellation must propagate out of match counting", outcome.isFailure)
         assertTrue(outcome.exceptionOrNull() is CancellationException)
         assertTrue("the third check must come from inside countMatches", job.checks > 2)
+    }
+
+    @Test
+    fun extractHeadings_cancelDuringTheFinalScanStep_isNotSwallowed() {
+        // Gate-4 round 2 LOW: a cancel landing during the LAST `next()` — the long walk to
+        // end-of-text — used to be lost, because the loop exits on null and returned a normal
+        // result. Reproduced exactly: too few matches for any in-loop interval check to fire, so
+        // the ONLY query after entry is the post-loop one.
+        val text = "第一章 甲\n第二章 乙\n"
+        val job = CancelAfter(activeChecks = 1) // entry check passes; the next query cancels
+        val outcome = runWithJob(job) { TxtTocRuleEngine.extractHeadings(text, rule(1), noCap) }
+
+        assertTrue("a cancel during the final scan step must not be swallowed", outcome.isFailure)
+        assertTrue(outcome.exceptionOrNull() is CancellationException)
+        assertEquals("exactly the entry check plus the post-loop check", 2, job.checks)
+    }
+
+    @Test
+    fun detectBestRule_cancelAfterTheLastRule_isNotSwallowed() {
+        // The detection-side twin: exhaust the entry check and every per-rule check, so the only
+        // query left is the post-loop one. The document is small enough that countMatches never
+        // reaches its interval, making the query count exact rather than approximate.
+        val text = "第一章 甲\n第二章 乙\n"
+        val checksBeforeTheEnd = 1 + defaults.count { it.enabled }
+        val job = CancelAfter(activeChecks = checksBeforeTheEnd)
+        val outcome = runWithJob(job) { TxtTocRuleEngine.detectBestRule(text, defaults) }
+
+        assertTrue("a cancel after the last rule must not be swallowed", outcome.isFailure)
+        assertTrue(outcome.exceptionOrNull() is CancellationException)
+        assertEquals(checksBeforeTheEnd + 1, job.checks)
     }
 
     @Test

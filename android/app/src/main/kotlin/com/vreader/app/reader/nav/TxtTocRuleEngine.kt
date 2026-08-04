@@ -9,9 +9,14 @@
 //   both iOS parity. Ties resolve toward the rule that appears FIRST in the supplied list
 //   (strictly-greater comparison), which is [TxtTocRules.defaults]' serialNumber order.
 // - Patterns compile with `RegexOption.MULTILINE` and NOTHING else. `DOT_MATCHES_ALL` would let a
-//   title swallow the rest of the document (the bounded `.{0,30}$` tail is what confines a match
-//   to one line) and `IGNORE_CASE` would reintroduce the Unicode case-folding divergence the rules
+//   title swallow the rest of the document (the bounded `.{0,30}$` tail cannot cross a line
+//   terminator) and `IGNORE_CASE` would reintroduce the Unicode case-folding divergence the rules
 //   avoid by spelling both cases. See TxtTocRules' header for the D1/D1b class repairs.
+// - A title is the WHOLE MATCH, trimmed — usually one line, but not necessarily: the `.` tail
+//   cannot cross a terminator, yet the marker's own bounded whitespace positions are `WS` =
+//   ICU-`\s`, which CONTAINS terminators, so a heading split as "第\n一\n章 标题" matches and its
+//   title carries the embedded newline. That is iOS's ICU behavior too, so it is parity, not a
+//   defect; it is pinned by test and is what makes the scan non-splittable by line (below).
 // - An offset is the match START = the LINE start, leading indent included, in UTF-16 code units
 //   over the RAW text. Everything downstream (the Contents jump, #138's paged
 //   `ensureMeasuredThrough` seam) treats it as a source offset, so it must never be a rendered
@@ -30,7 +35,9 @@
 //   A single `find()` / `next()` is a non-suspending `java.util.regex` call that cannot observe
 //   cancellation, so the worst case after a cancel is one uninterrupted walk of the gap to the
 //   next match — bounded by a full pass over the text (measured at ~100 ms for the real 14 MB CJK
-//   book, plan §5 / Appendix A.1), off the main thread. Splitting the scan into line-bounded
+//   book, plan §5 / Appendix A.1). That pass is off the MAIN thread only because
+//   `TxtMdTocProvider` (WI-4) owns the `withContext(dispatcher)` hop; this engine does not hop by
+//   itself and must not be called on the main thread. Splitting the scan into line-bounded
 //   regions to tighten that was REJECTED, not overlooked: `TxtTocRules.WS` widens whitespace to
 //   ICU's `\s`, which contains line terminators, so a rule genuinely can match ACROSS a newline
 //   (probed: rule 1 matches "第\n一\n章 标题" at offset 0 — and iOS's ICU `\s` behaves the same).
@@ -102,15 +109,19 @@ object TxtTocRuleEngine {
             }
         }
 
+        // Same reason as extractHeadings': a cancel during the LAST rule's count must not be
+        // swallowed by the loop simply running out of rules.
+        coroutineContext.ensureActive()
         return if (bestCount >= MIN_MATCHES) bestRule else null
     }
 
     /**
      * Extracts every heading [rule] finds in [text], in document order, stopping early at [limit].
      *
-     * Each heading's title is the whole matched LINE trimmed; matches that trim to nothing are
-     * dropped (iOS parity) and cost nothing against [limit]. Each offset is the match start — the
-     * line start, leading indent included — as a UTF-16 offset into [text].
+     * Each heading's title is the whole MATCH trimmed — one line for every ordinary heading, but
+     * see the file header for the legitimate cross-terminator case. Matches that trim to nothing
+     * are dropped (iOS parity) and cost nothing against [limit]. Each offset is the match start —
+     * the line start, leading indent included — as a UTF-16 offset into [text].
      *
      * @param limit the maximum number of headings to collect; must be positive. Callers pass
      *              `cap + 1` so [ExtractResult.hitLimit] reads as "more than `cap` headings exist"
@@ -144,6 +155,11 @@ object TxtTocRuleEngine {
             match = match.next()
         }
 
+        // A cancel landing DURING the final `next()` — the long walk to end-of-text — would
+        // otherwise be swallowed: the loop exits on null and returns a normal result. Check once
+        // more so the outcome is always "cancelled" rather than "a full result for a job nobody
+        // is waiting on".
+        coroutineContext.ensureActive()
         return ExtractResult(headings, hitLimit = false)
     }
 
