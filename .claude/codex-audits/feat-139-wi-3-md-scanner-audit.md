@@ -1,8 +1,8 @@
 ---
 branch: feat/139-wi-3-md-scanner
-threadId: 019fcb8f-c586-7e30-a06c-27ca5991a5f9
-rounds: 3
-final_verdict: block-recommended
+threadId: 019fcb97-9687-7823-a40b-54be17f6e8bb
+rounds: 4
+final_verdict: ship-as-is
 date: 2026-08-04
 ---
 
@@ -13,9 +13,9 @@ Files under review (both new on this branch):
 - `android/app/src/main/kotlin/com/vreader/app/reader/nav/MdTocScanner.kt`
 - `android/app/src/test/kotlin/com/vreader/app/reader/nav/MdTocScannerTest.kt`
 
-Auditor: Codex `gpt-5.6-sol` via `scripts/run-codex.sh` (rule 53), read-only sandbox, three
-independent sessions. Raw transcripts: `.reports/audit-r1.txt`, `-r2.txt`, `-r3.txt` (not
-committed — they are ~170 KB each).
+Auditor: Codex `gpt-5.6-sol` via `scripts/run-codex.sh` (rule 53), read-only sandbox, four
+independent sessions. Raw transcripts: `.reports/audit-r{1,2,3,4}.txt` (not committed — ~90–215 KB
+each); the round-4 scope diff is `.reports/r4-scope.diff`.
 
 Every round was asked for the same five things: fidelity to the iOS original
 (`vreader/Services/TOCBuilder.swift:107-216`), fence/setext/front-matter edge cases,
@@ -55,24 +55,40 @@ and that `scan(text, MAX_TOC_ENTRIES + 1)` remains compatible with WI-4's `apply
 
 | Sev | Finding | Disposition |
 | --- | --- | --- |
-| Medium | Cancellation was still unbounded during range *classification*: `trimmedStart`, `trimmedEnd`, `fenceRunLength`, `parseAtxHeading` and `setextDepth` could each traverse an arbitrarily long line without a check (a huge all-space line, a huge marker run), so the header's "observed every 8 192 units inside one line" claim overclaimed. The enormous-line test cancelled inside `contentEnd()` and could not detect it. | **FIXED after the round** (`02072f85`) — every traversal that can run a line's length now goes through one shared checked pair, `walkForward` / `walkBackward`; `contentEnd` is expressed in terms of it. The header claim is restated to say exactly that. New test `scan_isCancellationCooperative_insideALongClassifierRun` cancels on the sixth query — the first one raised *inside* the setext run — with the query accounting written out in the test. |
+| Medium | Cancellation was still unbounded during range *classification*: `trimmedStart`, `trimmedEnd`, `fenceRunLength`, `parseAtxHeading` and `setextDepth` could each traverse an arbitrarily long line without a check (a huge all-space line, a huge marker run), so the header's "observed every 8 192 units inside one line" claim overclaimed. The enormous-line test cancelled inside `contentEnd()` and could not detect it. | **FIXED** (`02072f85`) — every traversal that can run a line's length now goes through one shared checked pair, `walkForward` / `walkBackward`; `contentEnd` is expressed in terms of it. The header claim is restated to say exactly that. New test `scan_isCancellationCooperative_insideALongClassifierRun` cancels on the sixth query — the first one raised *inside* the setext run — with the query accounting written out in the test. **Independently confirmed closed by round 4.** |
 
-## Status — why this artifact says `block-recommended`
+## Round 4 — threadId `019fcb97-9687-7823-a40b-54be17f6e8bb` — ship-as-is
 
-Rule 47 / rule 55 cap the in-lane audit loop at **3 rounds**, and round 3 ended
-`block-recommended`. Its single Medium is **fixed on the branch and the targeted gate is green
-(44/44)**, but that fix is itself **unaudited** — a fourth round would exceed the cap, so the lane
-stops here and reports rather than self-certifying.
+**Sanctioned override of rule 47's 3-round cap — authorized by the orchestrator, reason recorded
+so the cap is not treated as advisory by default.** Round 3 ended `block-recommended`; its single
+Medium was fixed immediately afterwards in `02072f85`, which left the fix itself unaudited. The
+lane offered an accept-with-precedent instead (merged WI-2 documents a strictly larger residual of
+the same class), and the orchestrator declined it for a specific reason: the artifact's
+`final_verdict` was `block-recommended`, the merge hook accepts only `ship-as-is` /
+`follow-up-recommended`, so the real choice was "one scoped round" versus "hand-edit a verdict
+nobody earned". One round on a ~60-line diff was the cheaper and more honest path. This is the
+same shape of override the Gate-2 plan audit took (its R4), and for the same kind of reason.
 
-To clear this, the orchestrator needs exactly one of:
+Scope was narrowed to the fix ONLY — three questions, with the `ExtractResult` signature
+deviation, ATX/fence/setext/front-matter semantics, the CR-only improvement and the file length
+declared out of scope and non-reportable.
 
-1. **One confirmation audit round** scoped to the r3 fix (the `walkForward`/`walkBackward`
-   extraction + the header claim + the new test) — then update `final_verdict` here; or
-2. **An explicit accept** of the residual with rationale. The precedent for accepting it is in
-   this feature's own merged WI-2: `TxtTocRuleEngine`'s header documents and accepts exactly this
-   class ("the worst case after a cancel is one uninterrupted walk … bounded by a full pass over
-   the text (~100 ms for the real 14 MB book)"), on a background dispatcher. The MD residual was
-   strictly smaller than that even before the fix.
+| Question | Result |
+| --- | --- |
+| Is EVERY line-length traversal now routed through the checked pair, or did the refactor move the unbounded work elsewhere? | **No finding.** Confirmed for `contentEnd`, both trims, the fence run, the fence info-string scan, the ATX opening and closing hash runs, and the setext run. "Each predicate is O(1), and no alternative unchecked loop bypasses the pair or skips checks during a pathological matching run." |
+| Does `scan_isCancellationCooperative_insideALongClassifierRun` genuinely exercise a classifier, or pass vacuously (specifically: the wrong-object shape a sibling WI hit)? | **No finding.** The auditor re-derived the query arithmetic independently — entry 1, four during the 32 768-unit terminator scan, so query 6 lands 8 192 units into `setextDepth` — and confirmed `CancelAfter`'s `CoroutineContext.get(Job)` override makes the scanner query the wrapper, "if it queried the delegate instead, the cancellation assertion would fail". The no-cancel control confirms the fixture is a valid setext heading. |
+| Does the header now claim exactly what is true? | **No finding** — "precise for the scanner's line traversals: neither overclaiming nor underclaiming". |
+
+**Severity counts: Critical 0, High 0, Medium 0, Low 0. Verdict: ship-as-is.**
+
+No code changed in round 4, so no re-test was required by the lane order; the gate was re-run
+against the final tree anyway and stayed green.
+
+## Status
+
+**Gate 4 CLOSED — zero open Critical/High/Medium findings** across four rounds (r1 H=1 M=1 L=2,
+r2 M=1 L=2, r3 M=1, r4 clean). Every finding is dispositioned above; none was accepted-with-
+rationale, all were fixed.
 
 ## Test gate
 
