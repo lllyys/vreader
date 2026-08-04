@@ -47,6 +47,14 @@
 //   at `end + (if (end == start) 1 else 0)` and no-arg `find()` applies the same rule, and the
 //   reset `find(int)` performs is unobservable here (no region is ever set, no append is
 //   performed, and matching uses the full text with default bounds).
+//   ONE PRECONDITION, and it is guarded by test: no rule may use `\G`. `\G` is the only construct
+//   that can OBSERVE where a walk resumed — after an EMPTY match the old walk anchored it at
+//   `end + 1` and this one anchors it at `end` — so a `\G` rule would be the one pattern this
+//   rewrite silently changes. `TxtTocEngineWalkEquivalenceTest#noShippedRuleUsesAResumeSensitive
+//   Construct` fails if one is ever added. Lookbehind is NOT affected (the region is the whole
+//   text either way, and the bounds flags are never touched, so `reset()` restores the defaults
+//   they already had) — the oracle sweeps a lookbehind rule to demonstrate that rather than argue
+//   it.
 // - No Android imports and no logging: this is pure CPU work that must stay JVM-unit-testable
 //   (`android.util.Log` throws "not mocked" in a plain unit test). A rule that fails to compile is
 //   skipped, mirroring iOS's `try?` — degrading to "no Contents" beats crashing a working reader,
@@ -179,7 +187,7 @@ object TxtTocRuleEngine {
         }
 
         // A cancel landing DURING the final `find()` — the long walk to end-of-text — would
-        // otherwise be swallowed: the loop exits on null and returns a normal result. Check once
+        // otherwise be swallowed: the loop exits on `false` and returns a normal result. Check once
         // more so the outcome is always "cancelled" rather than "a full result for a job nobody
         // is waiting on".
         coroutineContext.ensureActive()

@@ -204,8 +204,50 @@ class TxtTocEngineWalkEquivalenceTest {
         example = "x", serialNumber = 994,
     )
 
+    /**
+     * A LOOKBEHIND rule — a construct that reads text BEFORE the match start.
+     *
+     * The equivalence argument claims `find(int)`'s extra `reset()` is unobservable because no
+     * region is ever set. Lookbehind is where that claim would break if it were wrong: with
+     * non-transparent bounds (the default, and what `reset()` restores) a lookbehind cannot see
+     * outside the REGION — and the region is the whole text in both walks, so it sees everything
+     * either way. Sweeping it proves that rather than asserting it.
+     */
+    private val lookbehindRule = TxtTocRule(
+        id = 996, enabled = true, name = "lookbehind", pattern = "(?<=\\n)第[一二三四五]章.{0,10}$",
+        example = "第一章", serialNumber = 996,
+    )
+
+    /**
+     * `$` alone — a zero-width match at every line END, INCLUDING end-of-input.
+     *
+     * A zero-width match at the very last position is the boundary where a resume position can
+     * legally run off the end of the input: Kotlin's `next()` computes `end + 1` and returns null
+     * when that exceeds the length, while no-arg `find()` reaches the same conclusion internally.
+     * They must agree, and this is the rule that makes them prove it.
+     */
+    private val endAnchorRule = TxtTocRule(
+        id = 997, enabled = true, name = "end-anchor", pattern = "$",
+        example = "", serialNumber = 997,
+    )
+
+    /**
+     * The EMPTY pattern — matches empty at EVERY code-unit position, including between the two
+     * halves of a surrogate pair.
+     *
+     * This is the strongest available probe of empty-match advancement: both walks advance by one
+     * CODE UNIT, so on the corpus's astral documents they must step through a surrogate pair
+     * identically. (Nothing is emitted — every title trims to `""` — so its value is entirely in
+     * the walk agreeing, and in the walk terminating at all.)
+     */
+    private val emptyPatternRule = TxtTocRule(
+        id = 998, enabled = true, name = "empty-pattern", pattern = "",
+        example = "", serialNumber = 998,
+    )
+
     private val extraRules = listOf(
         zeroWidthRule, zeroWidthIndentRule, blankTitleRule, uncompilableRule, everyLineRule,
+        lookbehindRule, endAnchorRule, emptyPatternRule,
     )
 
     /**
@@ -396,17 +438,26 @@ class TxtTocEngineWalkEquivalenceTest {
     }
 
     /**
-     * **Proof that the sweep above is not vacuous.**
+     * **Proof that the sweep above is not vacuous — for the four LOOP-BODY mistakes named in
+     * [Mutation], and only those.**
      *
-     * An oracle whose corpus cannot distinguish a wrong implementation is decoration. Each
-     * [Mutation] is a walk that differs from the engine in exactly one named way; every one of them
-     * must be CAUGHT by some (document, rule, limit) in the corpus. If a mutation ever survives,
-     * the corpus has a hole and the equality asserted above is weaker than it looks.
+     * An oracle whose corpus cannot distinguish a wrong implementation is decoration, so each
+     * [Mutation] — a walk differing from the correct one in exactly one named way — must be CAUGHT
+     * by some (document, rule, limit) in the corpus. If one ever survives, the corpus has a hole.
+     *
+     * **What this does NOT prove** (Gate-4 R1 Low, stated rather than implied by the name): it says
+     * nothing about RESUME-STATE mistakes, because a walk that resumes wrongly either does not
+     * terminate or is not expressible as a one-line variant of the loop body. Those are covered
+     * elsewhere and deliberately: empty-match advancement by
+     * [theZeroWidthResumeRuleIsLoadBearing], zero-width matches at end-of-input and across a
+     * surrogate pair by [emptyPatternRule] and [endAnchorRule] in the main sweep, lookbehind across
+     * the resume point by [lookbehindRule], and `\G` — the ONE construct under which the two walks
+     * genuinely differ — by [noShippedRuleUsesAResumeSensitiveConstruct].
      *
      * The failure message names the mutation that got through, not just "a test failed".
      */
     @Test
-    fun theCorpusDiscriminatesEveryPlausiblyWrongWalk() {
+    fun theCorpusDiscriminatesTheFourLoopBodyMistakes() {
         for (how in Mutation.entries) {
             var caughtBy: String? = null
             outer@ for (doc in corpus()) {
@@ -512,6 +563,36 @@ class TxtTocEngineWalkEquivalenceTest {
         return out
     }
 
+    /**
+     * **The equivalence's one genuine precondition, guarded mechanically.**
+     *
+     * `\G` ("where the previous match ended") is the single regex construct that can OBSERVE how a
+     * walk resumes, and it is the one place the two walks are not interchangeable: the legacy walk
+     * called `find(from)` on a fresh matcher with `from = end + 1` after an EMPTY match, so its
+     * `\G` anchored at `end + 1`, while a reused matcher's no-arg `find()` anchors at `end`. No
+     * shipped rule uses it, which is exactly why the rewrite is safe — so that precondition is
+     * asserted here rather than left as a comment nobody re-checks.
+     *
+     * If someone adds a `\G` rule, this fails and points at the engine header's decision block
+     * instead of shipping a silent behaviour change on a pattern nobody thought about.
+     *
+     * Lookbehind and the bounds flags are deliberately NOT guarded: they are resume-INsensitive
+     * (the region is the whole text in both walks and `useTransparentBounds` / `useAnchoringBounds`
+     * are never called, so `reset()` restores values that were already the defaults), and the
+     * main sweep runs [lookbehindRule] to demonstrate it rather than argue it.
+     */
+    @Test
+    fun noShippedRuleUsesAResumeSensitiveConstruct() {
+        val offenders = TxtTocRules.defaults.filter { it.pattern.contains("\\G") }
+        assertEquals(
+            "a rule using \\G would observe WHERE the walk resumed, which is the one property the " +
+                "one-Matcher rewrite (feature #172 WI-2) does not preserve — see TxtTocRuleEngine's " +
+                "header before adding one: $offenders",
+            emptyList<TxtTocRule>(), offenders,
+        )
+        assertEquals("the guard must have inspected the real rule set", 25, TxtTocRules.defaults.size)
+    }
+
     // ------------------------------------------------------------------ preserved semantics
 
     /**
@@ -569,17 +650,53 @@ class TxtTocEngineWalkEquivalenceTest {
     }
 
     /**
-     * The cancellation cadence survived the rewrite.
+     * The cancellation cadence survived the rewrite — including the INTERVAL branch, counted.
      *
      * Not a comparison against the legacy walk (the reference above deliberately has no checks) but
      * against the engine's own documented contract: one check at entry, one every
      * `CANCELLATION_CHECK_INTERVAL` matches EXAMINED, and one after the loop so a cancel during the
      * final `find()` is not swallowed.
+     *
+     * **The document is sized to REACH the interval branch** (Gate-4 R1 Medium): an earlier revision
+     * used a 40-match fixture, which never gets past the entry and post-loop checks, so it would
+     * have passed with the whole `sinceCheck` block deleted. This one produces
+     * `2 × CANCELLATION_CHECK_INTERVAL + 953` matches, and every one of them has an EMPTY title —
+     * so it also discriminates "per match EXAMINED" from "per heading EMITTED": zero headings are
+     * emitted, and if the counter had been moved onto emissions the observed check count would be 2
+     * instead of 4.
      */
     @Test
     fun cancellationCadenceIsUnchanged() {
+        val interval = TxtTocRuleEngine.CANCELLATION_CHECK_INTERVAL
+        val blankMatches = 2 * interval + 953
+        val blanks = "  \n".repeat(blankMatches)
         val text = (1..40).joinToString("\n") { "第${it}章 标题$it" } + "\n"
 
+        // --- the cadence itself, counted on a job that never cancels ---
+        val counting = CancelAfter(activeChecks = Int.MAX_VALUE)
+        val walked = runWithJob(counting) {
+            TxtTocRuleEngine.extractHeadings(blanks, blankTitleRule, BIG_LIMIT)
+        }.getOrThrow()
+        assertEquals("every match's title trims to empty, so nothing is emitted", 0, walked.headings.size)
+        assertEquals(
+            "expected 1 entry check + ${blankMatches / interval} interval checks + 1 post-loop check " +
+                "over $blankMatches EXAMINED matches; a per-EMITTED-heading cadence would give 2",
+            1 + blankMatches / interval + 1, counting.checks,
+        )
+
+        // --- and it is genuinely a CANCELLATION point, not just a query ---
+        val cancelAtInterval = CancelAfter(activeChecks = 1) // entry passes; the interval check cancels
+        val interrupted = runWithJob(cancelAtInterval) {
+            TxtTocRuleEngine.extractHeadings(blanks, blankTitleRule, BIG_LIMIT)
+        }
+        assertTrue("a cancel at the interval check must propagate", interrupted.isFailure)
+        assertTrue(interrupted.exceptionOrNull() is CancellationException)
+        assertEquals(
+            "the scan must stop AT the interval check, not run to completion and report later",
+            2, cancelAtInterval.checks,
+        )
+
+        // --- entry, post-loop, and detection ---
         val alreadyCancelled = Job().apply { cancel() }
         val atEntry = runWithJob(alreadyCancelled) {
             TxtTocRuleEngine.extractHeadings(text, rule(1), BIG_LIMIT)
@@ -587,7 +704,7 @@ class TxtTocEngineWalkEquivalenceTest {
         assertTrue("an already-cancelled scope must not run the scan", atEntry.isFailure)
         assertTrue(atEntry.exceptionOrNull() is CancellationException)
 
-        // The entry check passes; the post-loop check is the next query and must cancel there.
+        // 40 matches never reach the interval, so here the next query IS the post-loop check.
         val duringFinalStep = CancelAfter(activeChecks = 1)
         val late = runWithJob(duringFinalStep) {
             TxtTocRuleEngine.extractHeadings(text, rule(1), BIG_LIMIT)
@@ -602,6 +719,17 @@ class TxtTocEngineWalkEquivalenceTest {
         }
         assertTrue("detection must stay cancellation-cooperative", detection.isFailure)
         assertTrue(detection.exceptionOrNull() is CancellationException)
+
+        // Detection's counting walk has the same interval cadence — the countMatches rewrite.
+        val countingDetection = CancelAfter(activeChecks = Int.MAX_VALUE)
+        runWithJob(countingDetection) {
+            TxtTocRuleEngine.detectBestRule(blanks, listOf(blankTitleRule))
+        }.getOrThrow()
+        assertTrue(
+            "countMatches must check cancellation DURING the count, not only around it " +
+                "(${countingDetection.checks} checks over $blankMatches matches)",
+            countingDetection.checks >= 2 + blankMatches / interval,
+        )
     }
 
 }
