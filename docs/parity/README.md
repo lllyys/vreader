@@ -42,7 +42,7 @@ complete.
 | Resume (precise-first / canonical-fallback) | ✓ | ✓ | Android: `ReaderActivity` saves on locationDidChange (debounced + onStop flush) + restores precise-first via `ResumeResolver` (WI-9). |
 | TXT reader | ✓ | ✓ | feature #111 (`android/v0.4.0`) — encoding-detected decode (UTF-16LE/CJK) + LazyColumn render + charOffsetUTF16 resume, emulator-verified incl. a real 14MB book. |
 | Markdown (.md) reader | ✓ | ✓ | feature #112 (`android/v0.5.0`) — thin delta over the TXT reader: `MarkdownRenderer` (line-chunk → AnnotatedString, single-line CommonMark subset: headers/bold/italic/code/bullets) reusing the TXT decode/document/resume/chrome; `md` routes to the shared text reader. Emulator-verified (library-path render + TXT-renders-literally regression + md resume). |
-| AZW3 reader | ✓ | ✗ | Phase 3 — DEFERRED on feasibility: Readium-Kotlin has no native AZW3/MOBI; iOS uses a libmobi C lib (large/HIGH-risk port). |
+| AZW3 reader | ✓ | ✓ | feature #126 (`android/v0.12.9`, VERIFIED 2026-06-29) — WebView + a pinned security-patched foliate-js bundle (NO NDK), mirroring iOS's `FoliateSpikeView`. The earlier "libmobi NDK port" framing was wrong: iOS renders these with foliate-js too. Render/resume/page-turn/secure-bridge/backup verified on a real 6 MB CJK AZW3 (API-35). |
 | PDF reader | ✓ | ✓ | feature #115 (`android/v0.7.0`, VERIFIED) — `PdfDocument` (PdfRenderer, Mutex-serialized) + `PdfReaderActivity` continuous-scroll page bitmaps + 'Page N of M' pill + resume by page; emulator-verified. (DEFERRED designed follow-ons: paged toggle, page-jump overlay, encrypted-unlock — platform/API constraints.) |
 
 ## Sync & backup (Phase 3)
@@ -53,22 +53,32 @@ complete.
 | WebDAV client + backup/restore pipeline | ✓ | ✓ | feature #116 (`android/v0.7.7`, VERIFIED) — `WebDavClient` + content-addressed blob store + `BackupCollector`/`RestoreImporter` + `WebDavBackupService` (byte-for-byte the iOS materializing-restore layout); credentials in DataStore + AndroidKeyStore. Verified by a LIVE rclone round-trip on the emulator (`scripts/run-webdav-roundtrip.sh`). |
 | Backup/restore + WebDAV-settings UI | ✓ | ✓ | feature #114 (`android/v0.6.0`, VERIFIED) — the 5 designed Compose surfaces (#1767): WebDAV server list, server edit + test-connection, backup&restore + every WebDAV error, restore confirm→progress→result, selective picker. DEBUG-reachable; production entry-point wiring is the remaining design-gated step. |
 
-## Remaining Phase-3 backlog (the #110 driver's queue)
+## Phase 3 complete — the queue moved to Phase 4
 
-**See [`android-checklist.md`](android-checklist.md) for the authoritative, checkable queue.** As of
-2026-06-28, OPDS UI (#120), AI provider+chat (#118), and TTS read-aloud (#121) have ALL SHIPPED +
-VERIFIED (this section previously, wrongly, listed them as gated/unbuilt). The batch-2 designs
-(stats/annotations/library/bilingual) are now imported, so nothing remaining is design-blocked.
+**See [`android-checklist.md`](android-checklist.md) for the authoritative, checkable queue.**
 
-Remaining (finite — the checklist's build queue):
+**Phase 3 (#110) is DONE as of 2026-07-15.** Every capability block A–F reached `VERIFIED`: reading
+stats (#122), highlights & annotations (#123/#124/#125 + #132/#135), library collections + search
+(#127/#128), bilingual interlinear (#131), reader display settings + layout (#129/#137/#138), reader
+navigation chrome (#132/#133/#134/#135), and the AZW3 reader (#126, which turned out to need a
+foliate-js WebView, not an NDK port).
 
-- **Reading stats** (#122) — IN PROGRESS (WI-1 merged).
-- **Highlights & annotations** — designed (`vreader-android-annotations.jsx`), not started.
-- **Library management (collections + search)** — designed (`vreader-library-android.jsx`), not started.
-- **Bilingual interlinear reading** — designed (`vreader-ai-android.jsx`); live-translation verification
-  is AI-credential-gated, but the pipeline + UI are autonomously buildable.
-- **Reader display settings (themes/fonts/layout)** + **reader navigation chrome (TOC/bookmarks/
-  find-in-book/more-menu/details/share)** — designed (iOS bundle reuses per #106), not started.
-- **AZW3/MOBI reader** — DEFERRED on feasibility (libmobi NDK port, HIGH risk); needs a user go/no-go.
+**Phase 4 is the live queue.** A–F answered "does Android have this capability *at all*"; it did not
+answer "do the two apps do the same things". A 2026-08-04 code-level sweep against the iOS VERIFIED
+feature set found **31 remaining gaps**, filed as `docs/features.md` rows **#139–#169** and grouped
+into boxes **G1–G8**:
 
-Android parity = every checklist box `VERIFIED` (the AZW3 row excepted, pending its go/no-go).
+- **G1 Contents/TOC** (#139–#141) — TXT/MD/AZW3 hide the Contents control entirely.
+- **G2 Text interaction** (#142–#143) — AZW3 has no selection/highlighting; the popover lacks
+  translate/define/Ask-AI.
+- **G3 AI** (#144–#148) — no stop button, no conversation sessions, no tool-calling, fixed summary
+  scope, narrow context.
+- **G4 TTS** (#149–#151) — read-aloud is wired into the TXT host only; EPUB/AZW3/PDF are silent.
+- **G5 Library** (#152–#155) — no real cover art, no sort, not registered as a document handler.
+- **G6 Reader settings** (#156–#160) — no justification, fixed tap zones, no auto-turn, global-only
+  settings.
+- **G7 Bilingual** (#161–#163) — headings untranslated, no post-setup reconfiguration, no whole-book job.
+- **G8 Diagnostics & portability** (#164–#166) — no in-app diagnostics, no annotation export/import.
+- **Deferred**: PDF text-layer highlights (#167), book-source scraping (#168), RTL/vertical (#169).
+
+Android parity = every phase-4 box `VERIFIED` (the three DEFERRED rows excepted, pending go/no-go).

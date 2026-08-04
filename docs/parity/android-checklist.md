@@ -6,6 +6,14 @@ let every session reach "zero open issues" and read it as done while parity wasn
 checklist is the fix: a finite, checkable list.** Android parity = every box below checked. When the
 last unchecked box reaches `VERIFIED`, #110 is complete (modulo the explicit DEFERRED row).
 
+> **STATUS 2026-08-04 — boxes A–F are all complete; #110 is DONE.** But A–F were the
+> *capability-block* definition of parity ("does Android have a reader / library / backup / AI / TTS
+> at all"), not feature-for-feature parity: iOS shipped ~90 VERIFIED features and Android implements
+> roughly a third of them. A code-level sweep on 2026-08-04 found **31 concrete remaining gaps**,
+> filed as rows **#139–#169** and organised into boxes **G1–G8** in the
+> [Phase 4](#phase-4--the-remaining-iosandroid-gap-filed-2026-08-04) section below. **Phase 4 is the
+> live build queue; A–F below are history — do not re-open them.**
+
 Each unchecked item is built as its own feature through the rule-47 6-gate workflow (`/feature-workflow`),
 gets its own `docs/features.md` row + GH issue when started, and is checked off here when VERIFIED.
 
@@ -130,7 +138,124 @@ Build order is roughly reuse-leverage / dependency order.
 
 ---
 
-## Definition of done
+---
+
+# Phase 4 — the remaining iOS↔Android gap (filed 2026-08-04)
+
+**Why there is a phase 4.** Boxes A–F were the *capability-block* definition of parity: does Android
+have a reader, a library, backup, AI, TTS, annotations at all. They are all `[x]`. But iOS shipped
+~90 VERIFIED features and Android implements roughly a third of them, so "every box checked" ≠ "the
+two apps do the same things". A 2026-08-04 code-level sweep (iOS `docs/features.md` VERIFIED rows ×
+the actual `android/app/src/main/kotlin` surface) found **31 concrete gaps**, now filed as
+`docs/features.md` rows **#139–#169**.
+
+These are deliberately *small* features (2–6 WIs each) so they can be run in batches, several lanes
+at a time, through `/dispatch` (rule 55) or `/feature-workflow` individually.
+
+**Legend:** same as above. Each box lists its feature row; dependency edges are the machine-readable
+`Deps:[…]` tokens in the tracker (`scripts/deps-check.sh feature <id>` is the gate — nothing
+dispatches that isn't READY).
+
+## G1. Reader navigation — Contents (TOC) on every format
+
+- [ ] **#139 TXT/MD auto-generated TOC** — TXT/MD hide Contents entirely today. iOS: #23 + #12.
+- [ ] **#140 AZW3 Contents (TOC)** — foliate exposes a real TOC; Android hides it. iOS: #38.
+- [ ] **#141 Filterable TOC** — designed filter field (`toc-filter-artboards.jsx`). iOS: #94.
+      `Deps:[feat:#139, feat:#140]`.
+- *Out of scope*: PDF outline — `android.graphics.pdf.PdfRenderer` has no outline API (see #167).
+
+## G2. Reader text interaction
+
+- [ ] **#142 AZW3 text selection + highlights/notes** — the only reader with zero annotation
+      capability. Bridge-security-sensitive (rule 54). iOS: #11/#64.
+- [ ] **#143 Selection-popover actions — translate · define · Ask AI** — Android offers only
+      Highlight/Note/Copy/Share/Remove. iOS: #33 + #78.
+
+## G3. AI parity (all build on #118's `AiClient`)
+
+> These five share the `ai/` write-set — run them **sequentially within a batch** (rule 48,
+> one writer per area), not fanned out concurrently.
+
+- [ ] **#144 AI stop/cancel control** — no Stop affordance exists. iOS: #87.
+- [ ] **#145 AI conversation sessions + WebDAV backup** — one implicit thread, no history.
+      iOS: #88 + #89. `Deps:[feat:#144]`.
+- [ ] **#146 Summarize scope selector + bilingual summary** — summary is chapter-fixed and
+      monolingual. iOS: #69 + #90.
+- [ ] **#147 Expanded AI reading scope & sources** — narrow context window. iOS: #86.
+      `Deps:[feat:#145]`.
+- [ ] **#148 Agentic tool-calling + library tool** — no tool-use at all. iOS: #91 + #97.
+      `Deps:[feat:#144]`.
+
+## G4. Text-to-speech beyond TXT
+
+- [ ] **#149 EPUB TTS + sentence highlight + auto-advance** — TTS is wired ONLY into
+      `TxtReaderActivity`. iOS: #26/#40/#41. *Highest-visibility TTS gap.*
+- [ ] **#150 AZW3 TTS** — iOS: #57. `Deps:[feat:#142]` (shares the foliate bridge work).
+- [ ] **#151 HTTP cloud TTS provider** — on-device engine only. iOS: #72. `Deps:[feat:#149]`.
+
+## G5. Library
+
+- [ ] **#152 Cover extraction + generated fallback** — every book renders a tinted `FallbackCover`;
+      no real art is ever extracted. iOS: #43. **Highest user-visible gap in phase 4.**
+- [ ] **#153 Custom book covers** — iOS: #30. `Deps:[feat:#152]`.
+- [ ] **#154 Library sort order** — no sort exists. iOS: #20. `Deps:[feat:#152]`.
+- [ ] **#155 Open-with / system document handler** — manifest declares LAUNCHER only, so vreader
+      never appears as a share/open target. iOS: #59. *Disjoint — good concurrent-lane partner.*
+
+## G6. Reader settings & typography
+
+- [ ] **#156 Justified text (TXT/MD + EPUB)** — all text is ragged-right. iOS: #92 + #95.
+- [ ] **#157 Configurable tap zones** — zones are hard-coded. iOS: #25.
+- [ ] **#158 Auto page turning** — iOS: #31. `Deps:[feat:#157]`.
+- [ ] **#159 Per-book reading settings** — settings are global-only. iOS: #37. `Deps:[feat:#156]`.
+- [ ] **#160 Reading theme backgrounds** — 5 flat themes only. iOS: #32. `Deps:[feat:#156]`.
+
+## G7. Bilingual completion (over #131)
+
+- [ ] **#161 Chapter-heading translation** — body blocks only today. iOS: #100.
+- [ ] **#162 Change target language / granularity after setup** — iOS: #99. `Deps:[feat:#161]`.
+- [ ] **#163 Whole-book translation job + background resilience** — per-chapter on-demand only.
+      iOS: #56 + #98. `Deps:[feat:#162]`.
+
+## G8. Diagnostics & data portability
+
+- [ ] **#164 Diagnostics — log capture + viewer/export** — nothing exists; this is what makes
+      user-reported Android issues diagnosable without a cable. iOS: #96. *Fully disjoint.*
+- [ ] **#165 Export / import annotations** — share-as-text only. iOS: #35.
+- [ ] **#166 Content replacement rules + S/T Chinese conversion** — iOS: #27 + #28.
+      *Offset-safety is the hard part* (annotations anchor on source offsets).
+
+### Deferred (tracked, not queued — each needs a go/no-go or a fixture)
+
+- [-] **#167 PDF text-layer highlights** — `PdfRenderer` exposes no text API; needs a third-party
+      PDF text engine (size/license/security review). Same posture #126 had pre-GO. iOS: #17.
+- [-] **#168 Book source scraping (web novels)** — largest single remaining item, least load-bearing
+      for core reading, and rule-54-sensitive (untrusted remote content). iOS: #24.
+- [-] **#169 RTL / vertical-writing rendering** — no real RTL or tategaki book exists in
+      `test-books/books/`, so Gate-5 could not verify it against a real book. iOS: #75 + #76.
+
+## Suggested batch order (dependency- and write-set-aware)
+
+| Batch | Rows | Why grouped |
+| --- | --- | --- |
+| 1 | #152, #155, #164 | Three fully disjoint write-sets (library covers · manifest · new diagnostics module) — safe true fan-out, and #152 is the biggest visible win. |
+| 2 | #139, #140, #142 | Reader nav + AZW3 bridge; disjoint from each other. #141 follows once both TOC providers land. |
+| 3 | #144 → #145 → #148, then #146, #147 | The AI block. Shared `ai/` write-set ⇒ sequential within the batch. |
+| 4 | #149, #143, #154, #153 | EPUB TTS (big, disjoint) alongside the selection-popover actions and the library follow-ons. |
+| 5 | #156, #157, #161, #165 | Typography + tap zones + bilingual headings + annotation export — disjoint areas. |
+| 6 | #158, #159, #160, #162, #163, #150, #151, #166, #141 | The dependent tail, unblocked by batches 2–5. |
+
+## Definition of done (phase 4)
+
+- **Phase-4 parity reached** when G1–G8 are all `[x] VERIFIED` (the three DEFERRED rows excepted,
+  pending their go/no-go).
+- Each row follows the standard rule-47 6 gates: it gets its GH issue at the Gate-2 → `PLANNED`
+  flip, and its box is checked here on `VERIFIED`.
+- **Do not re-open the A–F boxes** — they are the capability-block definition and are complete.
+
+---
+
+## Definition of done (phases 0–3 — historical)
 
 - **Autonomous parity reached** when A–F are all `[x] VERIFIED`.
 - **STATUS 2026-07-14:** A/B/C/D/F ✅ VERIFIED; AZW3 ✅ (GO, #126). **The ONLY remaining box is E's layout (scroll/paged) toggle → feature #137** (PLANNED, GH #1990; Gate-2 passed 3 Codex rounds; 12 WIs incl. a new Compose paged text renderer for TXT/MD). When #137 reaches VERIFIED, box E checks and **all boxes complete → driver #110 → DONE.**
