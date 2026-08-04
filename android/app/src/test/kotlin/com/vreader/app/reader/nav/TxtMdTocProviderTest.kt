@@ -27,9 +27,10 @@ import kotlin.coroutines.CoroutineContext
  * - **A row's `canonicalLocator` is CONSTRUCTION-IDENTICAL to a #135 bookmark** at the same source
  *   offset — that identity is what makes "the chapter I jumped to" and "the chapter I bookmarked"
  *   the same position across restore/engine swap.
- * - **The 50 000 cap REJECTS, never truncates**, and both boundaries are pinned — which together
- *   also pin that the provider passes exactly `MAX_TOC_ENTRIES + 1` as its scan budget (a smaller
- *   limit fails the at-exactly test; a larger one fails the at-max-plus-one test).
+ * - **The 50 000 cap REJECTS, never truncates**, with both boundaries pinned on BOTH branches
+ *   (TXT and MD are two separate call sites with their own budgets) — which together also pin that
+ *   the provider passes exactly `MAX_TOC_ENTRIES + 1` as its scan budget: a smaller limit fails the
+ *   at-exactly test, a larger one fails the at-max-plus-one test.
  * - **Detection policy is EXACTLY iOS's**: the `>= 2` match threshold plus that cap. There is no
  *   density guard, no saturation guard, no ambiguous-rule set and no format-specific exemption —
  *   divergence D4 was deleted (plan §4.4, Option A), and [noDensityOrSaturationGuardExists] fails
@@ -244,11 +245,26 @@ class TxtMdTocProviderTest {
         assertEquals(emptyList<TocEntry>(), entries)
     }
 
+    // The TXT branch is a SECOND call site with its own budget, so it gets its own boundary pair
+    // rather than inheriting the MD one (Gate-4 round 1, Medium).
+
+    @Test fun cap_txtAtExactlyMaxTocEntries_returnsEntries() {
+        val entries = toc(txtChapters(TxtMdTocProvider.MAX_TOC_ENTRIES), BookFormat.txt)
+        assertEquals(TxtMdTocProvider.MAX_TOC_ENTRIES, entries.size)
+    }
+
+    @Test fun cap_txtAtMaxPlusOne_returnsEmpty() {
+        val entries = toc(txtChapters(TxtMdTocProvider.MAX_TOC_ENTRIES + 1), BookFormat.txt)
+        assertEquals(emptyList<TocEntry>(), entries)
+    }
+
     @Test fun cap_rejectionHappensWithoutMaterializingFullList() {
         val text = mdHeadings(TxtMdTocProvider.MAX_TOC_ENTRIES + 10_000)
         assertEquals(emptyList<TocEntry>(), toc(text, BookFormat.md))
-        // The bound the provider relies on: the scan STOPS at `cap + 1` rather than building the
-        // document's full 60 000-heading list and truncating it afterwards.
+        // The two boundary pairs above pin the provider's budget at exactly `cap + 1` (a smaller
+        // limit rejects the at-exactly case; a larger one keeps the at-max-plus-one case). This
+        // adds the other half: at that budget the scan STOPS rather than building the document's
+        // full 60 000-heading list and truncating it afterwards.
         val bounded = runBlocking {
             MdTocScanner.scan(text, TxtMdTocProvider.MAX_TOC_ENTRIES + 1)
         }

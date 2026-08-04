@@ -592,9 +592,12 @@ language reconcile).
   (`contracts/identity/locator.md`): precise-first / canonical-fallback,
   with `ResumeTarget.Precise` carrying the canonical fallback so the host can
   degrade if the Readium anchor won't reapply.
-- `reader.nav.TxtMdTocProvider` (feature #139) is the `TocProvider` for TXT/MD —
-  the auto-generated Contents source beside `ReadiumTocProvider` (EPUB) and
-  `EmptyTocProvider` (PDF/AZW3). It runs the ported iOS heuristics over the
+- `reader.nav.TxtMdTocProvider` (feature #139) is the `TocProvider`
+  implementation for TXT/MD — the auto-generated Contents source beside
+  `ReadiumTocProvider` (EPUB) and `EmptyTocProvider` (PDF/AZW3). *(Host wiring
+  lands in #139 WI-7; until then `TxtReaderActivity` still passes an empty
+  `tocEntries`, so the Contents control stays hidden on TXT/MD.)* It runs the
+  ported iOS heuristics over the
   already-decoded document on an **injected** dispatcher it hops onto itself
   (`TxtTocRuleEngine` = the 25 Legado-derived regex rules with the ICU→Java
   `\d`/`\s` repairs, ≥2-match confidence threshold, for `.txt`; `MdTocScanner`
