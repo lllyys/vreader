@@ -16,6 +16,8 @@ import androidx.webkit.WebViewAssetLoader
 import androidx.webkit.WebViewClientCompat
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
+import com.vreader.app.diagnostics.DiagnosticsCategory
+import com.vreader.app.diagnostics.VLog
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -90,7 +92,11 @@ class FoliateBridge(
                 if (m.messageLevel() == android.webkit.ConsoleMessage.MessageLevel.ERROR ||
                     m.messageLevel() == android.webkit.ConsoleMessage.MessageLevel.WARNING
                 ) {
-                    android.util.Log.w("FoliateBridge", "console[${m.messageLevel()}]: ${m.message()} @${m.sourceId()}:${m.lineNumber()}")
+                    VLog.w(
+                        DiagnosticsCategory.READER,
+                        "FoliateBridge",
+                        "console[${m.messageLevel()}]: ${m.message()} @${m.sourceId()}:${m.lineNumber()}",
+                    )
                 }
                 return true
             }

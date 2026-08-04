@@ -15,9 +15,10 @@ import android.content.ActivityNotFoundException
 import android.content.ClipData
 import android.content.Context
 import android.content.Intent
-import android.util.Log
 import androidx.core.content.FileProvider
 import com.vreader.app.data.Book
+import com.vreader.app.diagnostics.DiagnosticsCategory
+import com.vreader.app.diagnostics.VLog
 import vreader.contracts.BookFormat
 import java.io.File
 
@@ -45,7 +46,7 @@ fun shareBookFileIntent(context: Context, book: Book): Intent? {
         FileProvider.getUriForFile(context, authority, file)
     } catch (e: IllegalArgumentException) {
         // FileProvider throws when the file is outside every configured <paths> root — reject.
-        Log.w(TAG, "file not shareable via FileProvider (outside grant scope)", e)
+        VLog.w(DiagnosticsCategory.LIBRARY, TAG, "file not shareable via FileProvider (outside grant scope)", e)
         return null
     }
 
@@ -73,7 +74,7 @@ fun shareBook(context: Context, book: Book) {
     try {
         context.startActivity(chooser)
     } catch (e: ActivityNotFoundException) {
-        Log.w(TAG, "no activity to receive the shared book file", e)
+        VLog.w(DiagnosticsCategory.LIBRARY, TAG, "no activity to receive the shared book file", e)
     }
 }
 

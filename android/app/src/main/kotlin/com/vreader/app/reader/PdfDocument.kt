@@ -12,7 +12,8 @@ import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.pdf.PdfRenderer
 import android.os.ParcelFileDescriptor
-import android.util.Log
+import com.vreader.app.diagnostics.DiagnosticsCategory
+import com.vreader.app.diagnostics.VLog
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
@@ -98,7 +99,7 @@ class PdfDocument private constructor(
                 fd?.let { runCatching { it.close() } }
                 PdfOpenResult.Corrupt
             } catch (e: Throwable) {
-                Log.w(TAG, "unexpected error opening PDF; treating as corrupt", e)
+                VLog.w(DiagnosticsCategory.READER, TAG, "unexpected error opening PDF; treating as corrupt", e)
                 fd?.let { runCatching { it.close() } }
                 PdfOpenResult.Corrupt
             }

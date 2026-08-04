@@ -22,12 +22,13 @@
 // per-book failure is isolated and recorded as a retryable `failed` state (only if the book exists).
 package com.vreader.app.search
 
-import android.util.Log
 import com.vreader.app.data.Book
 import com.vreader.app.data.LibraryRepository
 import com.vreader.app.data.SearchDao
 import com.vreader.app.data.SearchIndexStateEntity
 import com.vreader.app.data.SearchStagingEntity
+import com.vreader.app.diagnostics.DiagnosticsCategory
+import com.vreader.app.diagnostics.VLog
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -154,7 +155,12 @@ class SearchIndexCoordinator(
             // Any other failure (e.g. an FK-constraint loss to a concurrent delete) is a benign no-op
             // for collector availability, but log it so a persistent DB/programming fault is observable
             // (Gate-4 round-2 follow-up) rather than silently swallowed.
-            Log.w(TAG, "search-index terminal-state write for $bookKey ($status) failed; skipping", e)
+            VLog.w(
+                DiagnosticsCategory.LIBRARY,
+                TAG,
+                "search-index terminal-state write for $bookKey ($status) failed; skipping",
+                e,
+            )
         }
     }
 
