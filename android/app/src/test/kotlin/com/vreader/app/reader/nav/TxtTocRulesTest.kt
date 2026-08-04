@@ -141,10 +141,11 @@ class TxtTocRulesTest {
 
     /**
      * The iOS table, transcribed INDEPENDENTLY from `TXTTocRuleEngine.swift:142-350` — id to
-     * (name, pattern body after the leading indent, example). This is the golden source: the
-     * shipped rule must round-trip back to exactly this text once the two permitted
-     * substitutions are undone. Transcribing rather than deriving is the point — a pattern and
-     * its example can otherwise drift together and still satisfy "matches its own example".
+     * (name, pattern body after the leading indent, example). This is the golden source: running
+     * [expandIosPattern] over a body must produce the shipped pattern character for character,
+     * so the ONLY permitted difference from iOS is the D1/D1b substitution. Transcribing rather
+     * than deriving is the point — a pattern and its example can otherwise drift together and
+     * still satisfy "matches its own example".
      */
     private val iosRules: Map<Int, Triple<String, String, String>> = mapOf(
         1 to Triple(
@@ -226,6 +227,21 @@ class TxtTocRulesTest {
                 IOS_INDENT + expandIosPattern(iosBody), rule.pattern,
             )
         }
+    }
+
+    @Test
+    fun theWidenedClasses_areExactlyWhatTheyClaimToBe() {
+        // Everything else in this suite states its expectations in terms of these four constants,
+        // so a consistently-wrong constant (an extra character in WS_CHARS, say) would ride
+        // through every other assertion. Pin them independently; the full-width digit bounds come
+        // from code points because they are easy to confuse with their ASCII twins by eye.
+        assertEquals("ICU \\s = [\\t\\n\\v\\f\\r\\p{Z}], plus NEL which is Cc not Z",
+            "\\s\\p{Z}\\x{0085}", TxtTocRules.WS_CHARS)
+        assertEquals("[\\s\\p{Z}\\x{0085}]", TxtTocRules.WS)
+        val fullWidthRange = Char(0xFF10).toString() + "-" + Char(0xFF19)
+        assertEquals("ASCII digits plus the full-width range ICU's \\d covers",
+            "0-9$fullWidthRange", TxtTocRules.DIGIT_CHARS)
+        assertEquals("[0-9$fullWidthRange]", TxtTocRules.DIGIT)
     }
 
     @Test
