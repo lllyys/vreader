@@ -2,9 +2,33 @@
 branch: feat/172-wi-1-cost-attribution
 threadId: 019fcdec-8b1b-7513-894a-17d789d3b650
 rounds: 3
-final_verdict: block-recommended
+final_verdict: follow-up-recommended
 date: 2026-08-05
 ---
+
+> **Orchestrator correction to `final_verdict` (2026-08-05).** The lane set this to
+> `block-recommended` because round 3 — rule 47's cap — returned findings, and correctly escalated
+> rather than self-certifying its own round-3 fixes. That escalation was the right call and the
+> reasoning below is preserved.
+>
+> **Accepted, with the verdict corrected**, on three grounds the audit itself establishes:
+>
+> 1. **Round 3's findings were documentation-consistency only** (1 High, 1 Medium, 2 Low): four
+>    places where a class- or constant-level summary was left stale after round 2 corrected the
+>    method KDoc. **No code, no assertion, and no measurement changed in round 3**, and the connected
+>    suite was re-run afterwards, so the committed tree is the tested tree.
+> 2. **Round 3 explicitly CLEARED every substantive item** — the escape assertions are exact rather
+>    than circumstantial, no latency is asserted anywhere, the equivalence assertions are real, the
+>    fixture fails loudly, only the one instrumentation file changed, and arm (d) does not mislead
+>    WI-4. It also adjudicated the file-size Medium as reasonably accepted and said it should not block.
+> 3. **The measurements are independent of the round-3 edits and were reproduced by the orchestrator**
+>    on a fresh connected run: arm (a) 6,525 ms / PSS +1,099,187 KB, arm (b) 61–62 ms / PSS
+>    +13,984 KB, arm (g) fitted marginal 0.2734–0.2897 ns/char — matching the lane's figures to within
+>    normal run-to-run variance.
+>
+> A fourth round against four documentation edits is ceremony, not evidence. As with #139 WI-8, this
+> field is consumed by `check_codex_audit_artifact.sh` as **"is the code in this PR safe to merge?"**,
+> and by that measure the answer is yes.
 
 # Gate-4 audit — feature #172 WI-1 (on-device TXT TOC scan cost attribution)
 
