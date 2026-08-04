@@ -12,7 +12,7 @@ DISPATCH CUTOVER (feature #130 WI-7 — owner go-ahead recorded in the WI-7 PR):
 
 5. Map the result: `work_done` if at least one item's PR merged; `no_work_in_scope` if nothing eligible; `blocked` per steps 1/2/4 or genuinely missing tooling; `error` on unrecoverable failure. /dispatch owns lane cleanup — before ENDED, confirm `scripts/agent-lock.sh status` and `scripts/sim-lease.sh status` show nothing held by this session.
 
-SKIP-ANDROID-UNTIL-READY (feature #107): until the Android app shell (#106) lands, an `android-app`-platform bug (label `platform:android`, or whose fix touches `android/`/`*.kt`/Gradle) cannot be tested/verified end-to-end. Skip such an issue with a one-line note (`blocked on #106 app shell`) and pick the next. iOS, `shared`, `contracts/`, and `spikes/`/tooling bugs ARE in scope (rule 55's Android degrade caps `android-*` lanes at width 1 once #106 lands).
+ANDROID IS IN SCOPE (2026-08-04). The old SKIP-ANDROID-UNTIL-READY guard is REMOVED: it skipped every `android-app` bug until the app shell (#106) landed, and #106 reached `VERIFIED` long ago — the guard has been silently deferring Android bugs ever since. `android-app` bugs (label `platform:android`, or a fix touching `android/`/`*.kt`/Gradle) are now first-class: test via `scripts/run-android-tests.sh`, verify via `scripts/run-android-verify.sh` on the emulator (never a bare `./gradlew` — rule 52 Cause D). Rule 55's Android degrade caps `android-*` lanes at width 1.
 
 SCOPE GUARDRAIL — only fix bugs from the authoritative trackers:
 - Acceptable scope sources:

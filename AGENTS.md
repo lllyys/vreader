@@ -45,13 +45,15 @@ cross-platform rewrite. **Source of truth for the Android strategy:
     `scripts/tdd-guardian-test.sh` so a Kotlin change can't false-green on the iOS
     command. `check_audit_debt.sh` now classifies `android/`/`*.kt`/`contracts/`
     as code at Stop time too.
-  - **SKIP-Android-until-ready**: the app shell is **#106**. Until it lands the
-    only Android target is the `spikes/` harness, so an `android-app` change can't
-    reach Gate-5 — the crons skip auto-starting it and the verify skill marks it
-    harness-blocked. iOS / `shared` / `contracts/` / `spikes/` work is unaffected.
-  - **Version bump** stays iOS (`project.yml`) for `shared`/spike PRs (rule 40);
-    the Android `android/version.properties` + `android/vX.Y.Z` lane begins with
-    #106.
+  - **Android is FIRST-CLASS (2026-08-04).** The former "SKIP-Android-until-ready"
+    guard — which deferred every `android-app` change until the app shell (#106)
+    landed — is **removed**: #106 reached `VERIFIED` long ago, and the stale guard
+    had been making the crons skip Android work and the verify skill mark Android
+    candidates harness-blocked. That suppression is part of why four Android
+    features (#114/#118/#120/#122) shipped `VERIFIED` with UI a user cannot reach.
+    `android-app` features and bugs now run the normal gates on the emulator.
+  - **Version bump**: iOS (`project.yml`) for iOS/`shared` PRs; Android PRs bump
+    `android/version.properties` and tag `android/vX.Y.Z` (rule 40).
 
 - You are an AI assistant working on the project.
 - **Read `docs/architecture.md` before making any code changes. Update it when adding new layers, patterns, services, or changing how components communicate.**

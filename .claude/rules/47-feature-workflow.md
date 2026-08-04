@@ -93,8 +93,8 @@ Record slice verification in the PR description (what was run, what was observed
 
 **Android tier (feature #107)** — the platform-router (`code_paths_platform`) picks the lane:
 - **iOS WIs**: iPhone 17 Pro Simulator + `vreader-debug://` harness, as above.
-- **Android WIs** (`android-app` / `android-spike`): verify on a booted **Android emulator** (AVD, android-35+) via `scripts/run-android-verify.sh` (the emulator analog of driving the simulator — rule 49/52/53). The CU-free instrumentation lane is the Spike-B `am instrument` pattern (#104/#105 precedent); the evidence file's `device_or_simulator` records the AVD (e.g. "Pixel 7 API 35 emulator"). Until #106's app shell exists, the only Android target is the `spikes/` harness, so Android-app Gate-5 is itself blocked on #106; pre-#106 Android work is spike/tooling (no device-verify, like a foundational WI).
-- **Shared WIs** route to the iOS lane (rule 40 — shared is iOS while Android is pre-foundation).
+- **Android WIs** (`android-app` / `android-spike`): verify on a booted **Android emulator** (AVD, android-35+) via `scripts/run-android-verify.sh` (the emulator analog of driving the simulator — rule 49/52/53). The CU-free instrumentation lane is the Spike-B `am instrument` pattern (#104/#105 precedent); the evidence file's `device_or_simulator` records the AVD (e.g. "Pixel 7 API 35 emulator"). **The old "blocked on #106's app shell" caveat is REMOVED (2026-08-04)** — #106 reached `VERIFIED` long ago, so `android-app` Gate-5 is a first-class lane, not a deferral. (The guard outlived its condition and had been suppressing Android verification; see the Gate-5 production-reachability precedent.)
+- **Shared WIs** route to the iOS lane (rule 40).
 
 **Acceptance bar per PR**: every behavioral slice in the PR has been verified end-to-end at the level appropriate to its WI tier, through a production entry point where the tier requires one. Final WI requires full acceptance pass + evidence file naming the user-visible path.
 

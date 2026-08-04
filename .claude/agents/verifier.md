@@ -31,12 +31,31 @@ Verify against the platform's gates — classify by changed files
 ## Lanes
 
 - **iOS / shared**: `scripts/run-tests.sh` green (watchdog wrapper only —
-  rule 52); behavioral slices via the `vreader-debug://` harness on the
-  leased verify sim (DebugBridge command → XCUITest → `scripts/sim-tap.sh`,
-  in that order).
+  rule 52); behavioral slices driven on the leased verify sim (DebugBridge
+  command → XCUITest → `scripts/sim-tap.sh`, in that order).
 - **Android**: `scripts/run-android-tests.sh` / `scripts/run-android-verify.sh`
   on the emulator (rule 47 Android tier).
 
+## Production reachability (binding — rule 47 Gate 5)
+
+Driving a surface is not the same as reaching it. `vreader-debug://` commands,
+`android/app/src/debug/` launchers, and tests that invoke a screen/composable
+directly are **setup mechanisms, not entry points** — they may seed state, but
+they never by themselves show that a user can get there.
+
+So for every behavioral criterion you MUST also observe, and report, the
+**production path from app launch through the shipped UI** (e.g. "Library →
+gear → Backup"). If you cannot find one, that criterion is `fail` with
+`observed: no production entry point` — say so plainly rather than reporting a
+pass you reached by harness. `scripts/check-orphan-surfaces.sh` is a cheap
+detector for the Android case (a top-level composable with no production call
+site); it is a detector, not proof of the path.
+
+Precedent: features #114/#118/#120/#122 each passed this gate on instrumented
+tests plus a debug launcher, and shipped `VERIFIED` with UI a user could not
+open.
+
 You verify: the platform test gate passed; no data-loss path introduced
-(SwiftData/Room migrations + backup/restore); the plan's acceptance criteria
-are satisfied — as OBSERVATIONS for the orchestrator's evidence file.
+(SwiftData/Room migrations + backup/restore); every acceptance criterion is
+satisfied **through the production entry path** — as OBSERVATIONS for the
+orchestrator's evidence file.

@@ -79,7 +79,8 @@ The Android lane has the same ghost-class shapes as iOS, with Android tools:
   Android `run-tests.sh`): hard wall-clock timeout, exact-pid wait (rule 49),
   kills the process tree + Gradle daemon on timeout, prints one
   `RUN-ANDROID-TESTS RESULT:` line. The verify lane is `scripts/run-android-verify.sh`.
-  Until #106's app shell exists, these drive the `spikes/` harness.
+  These drive the **app** (`:app`) — #106's shell shipped long ago; the
+  `spikes/` harness is legacy and no longer the default target.
 
 ```bash
 scripts/run-android-tests.sh                 # spike-harness smoke (needs a booted emulator)

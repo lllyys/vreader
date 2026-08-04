@@ -67,9 +67,12 @@ phase** — the phases below are written iOS-first; the Android substitutions ar
 | Version bump (Phase 7) | `project.yml` (`vX.Y.Z`) | **stays iOS** until #106 — rule 40: spike/shared PRs bump `project.yml`; an Android `android/version.properties` + `android/vX.Y.Z` tag lane begins only with #106 |
 | Evidence `device_or_simulator` | "iPhone 17 Pro Simulator" | the AVD (e.g. "Pixel 7 API 35 emulator") |
 
-**`shared`-only and pre-#106 spike work route to the iOS lane** (rule 40). An
-`android-app` issue whose Gate-5 needs the app shell is **blocked on #106** — mark
-it `verification-blocked` rather than forcing it.
+**`shared`-only work routes to the iOS lane** (rule 40). **`android-app` issues are
+first-class**: the old "blocked on #106's app shell" guard is removed (2026-08-04)
+— #106 is `VERIFIED` and the stale guard had been deferring Android bugs. Do NOT
+label such an issue `verification-blocked` on those grounds; test via
+`scripts/run-android-tests.sh` and verify on the emulator via
+`scripts/run-android-verify.sh`.
 
 ## Pre-flight Checks
 
