@@ -328,6 +328,38 @@ class LogcatSelfReadConnectedTest {
     }
 
     @Test
+    fun aStalledCloseCannotWedgeTheCaller_becauseTheKillUnblocksTheReader() = runBlocking {
+        // The watchdog destroys the child BEFORE closing the stream precisely so there are two
+        // independent ways to unblock the reader. Here close() hangs forever; only the kill
+        // can free us, so this test fails if the ordering is ever reversed.
+        val stream = KillUnblockedInputStream()
+        val process = FakeProcess(
+            stream,
+            exitCode = 143,
+            aliveUntilKilled = true,
+            onDestroy = { stream.releaseAsIfWriterDied() },
+        )
+        val timeoutMs = 500L
+        val source = LogcatDiagnosticsSource(
+            ownUid = 10_209,
+            processTimeoutMs = timeoutMs,
+            exec = { process },
+        )
+
+        val startedAt = System.nanoTime()
+        val result = source.recentEntries(limit = 100)
+        val elapsedMs = (System.nanoTime() - startedAt) / 1_000_000
+
+        assertTrue("a timeout must be Unavailable, was $result", result is SourceResult.Unavailable)
+        val bound = timeoutMs + LogcatDiagnosticsSource.CLEANUP_BUDGET_MS + SCHEDULING_SLACK_MS
+        assertTrue(
+            "a stalled close() must not wedge the caller (elapsed=${elapsedMs}ms, bound=${bound}ms)",
+            elapsedMs <= bound,
+        )
+        assertEquals("no reader may be left blocked", 0, stream.blockedReaders.get())
+    }
+
+    @Test
     fun anUnexpectedFailureStillReapsTheChild() = runBlocking {
         // The outer finally is the belt-and-braces guarantee: even a throw from inside the
         // read path may not leave a logcat child behind.
@@ -471,31 +503,39 @@ class LogcatSelfReadConnectedTest {
      * `waitFor` is not a timeout at all: if the pipe stalls, the wait is never reached and the
      * nominal 5 s gate hangs forever after the real source has already answered.
      */
-    private fun readRawLogcatInThisProcess(): List<String> = try {
-        val process = ProcessBuilder(LogcatDiagnosticsSource.command())
-            .redirectErrorStream(true)
-            .start()
-        val stream = process.inputStream
-        val finished = CountDownLatch(1)
-        val watchdog = Thread({
-            if (!finished.await(RAW_READ_BUDGET_MS, TimeUnit.MILLISECONDS)) {
-                runCatching { stream.close() }
-                runCatching { process.destroyForcibly() }
+    private fun readRawLogcatInThisProcess(): List<String> {
+        val process = try {
+            ProcessBuilder(LogcatDiagnosticsSource.command()).redirectErrorStream(true).start()
+        } catch (t: Throwable) {
+            return emptyList()
+        }
+        return try {
+            val stream = process.inputStream
+            val finished = CountDownLatch(1)
+            val watchdog = Thread({
+                if (!finished.await(RAW_READ_BUDGET_MS, TimeUnit.MILLISECONDS)) {
+                    // Kill FIRST: that closes the pipe's far end and unblocks readLines() even
+                    // if our own close() were to stall. A close-then-kill watchdog can never
+                    // reach the kill, which is not a timeout at all.
+                    runCatching { process.destroyForcibly() }
+                    runCatching { stream.close() }
+                }
+            }).apply { isDaemon = true; start() }
+            try {
+                stream.bufferedReader(StandardCharsets.UTF_8).use { it.readLines() }
+            } catch (t: Throwable) {
+                emptyList()
+            } finally {
+                finished.countDown()
+                runCatching { watchdog.join(500) }
             }
-        }).apply { isDaemon = true; start() }
-        val lines = try {
-            stream.bufferedReader(StandardCharsets.UTF_8).use { it.readLines() }
         } catch (t: Throwable) {
             emptyList()
         } finally {
-            finished.countDown()
-            watchdog.join(500)
+            // Outer finally: the child is reaped however we leave, including on a throw.
+            runCatching { process.destroyForcibly() }
+            runCatching { process.waitFor(2, TimeUnit.SECONDS) }
         }
-        process.destroyForcibly()
-        process.waitFor(2, TimeUnit.SECONDS)
-        lines
-    } catch (t: Throwable) {
-        emptyList()
     }
 
     /** The 4th whitespace-delimited column of a `-v uid -v threadtime -v year` line. */
@@ -510,6 +550,7 @@ class LogcatSelfReadConnectedTest {
         aliveUntilKilled: Boolean,
         private val ignoreDestroy: Boolean = false,
         private val ignoreDestroyForcibly: Boolean = false,
+        private val onDestroy: () -> Unit = {},
     ) : Process() {
         val destroyCalls = AtomicInteger()
         val destroyForciblyCalls = AtomicInteger()
@@ -539,6 +580,7 @@ class LogcatSelfReadConnectedTest {
         /** Deliberately a no-op when [ignoreDestroy] — the child that forces the escalation. */
         override fun destroy() {
             destroyCalls.incrementAndGet()
+            onDestroy()
             if (!ignoreDestroy) dead.countDown()
         }
 
@@ -572,6 +614,32 @@ class LogcatSelfReadConnectedTest {
         override fun close() {
             closed.set(true)
             gate.countDown()
+        }
+    }
+
+    /**
+     * A reader that ONLY the child's death can unblock: `close()` hangs forever, exactly the
+     * pathological case the destroy-before-close ordering exists to survive.
+     */
+    private class KillUnblockedInputStream : InputStream() {
+        val blockedReaders = AtomicInteger()
+        private val writerDied = CountDownLatch(1)
+
+        fun releaseAsIfWriterDied() = writerDied.countDown()
+
+        override fun read(): Int {
+            blockedReaders.incrementAndGet()
+            try {
+                writerDied.await(30, TimeUnit.SECONDS)
+            } finally {
+                blockedReaders.decrementAndGet()
+            }
+            return -1 // the writer is gone: EOF, exactly as a killed child's pipe behaves
+        }
+
+        override fun close() {
+            // Never returns — a close() that cannot rescue the reader.
+            CountDownLatch(1).await(30, TimeUnit.SECONDS)
         }
     }
 

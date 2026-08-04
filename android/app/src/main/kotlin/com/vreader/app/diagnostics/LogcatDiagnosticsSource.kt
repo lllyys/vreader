@@ -11,6 +11,8 @@ import java.nio.charset.StandardCharsets
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
+import kotlin.coroutines.cancellation.CancellationException
 
 /**
  * Purpose: Feature #164 WI-1 — the OS boundary. Execs `logcat -d` from the app's own
@@ -31,17 +33,24 @@ import java.util.concurrent.atomic.AtomicBoolean
  *   diagnostic line in the output means Unavailable**; parsing even one of our own rows is
  *   positive proof the reader worked, and zero rows with no diagnostic is a genuinely quiet
  *   buffer.
- * - **The timeout is a watchdog that CLOSES the stream**, not a cancellation of a blocking
- *   read: `InputStream.read` ignores coroutine cancellation, and closing the stream is the
- *   only thing that unblocks it. The watchdog is a short-lived DAEMON THREAD rather than a
- *   coroutine child on purpose — as a structured child, a `close()`/`destroy()` that blocked
- *   would stall `withContext` indefinitely, which is exactly the wedge a diagnostics path
- *   must never cause.
+ * - **The timeout is a watchdog that KILLS the child and closes the stream**, not a
+ *   cancellation of a blocking read: `InputStream.read` ignores coroutine cancellation. The
+ *   child is destroyed FIRST and the stream closed second, because killing the writer closes
+ *   the pipe's far end and unblocks the reader even if our own `close()` were to stall — two
+ *   independent ways out instead of one. The watchdog is a short-lived DAEMON THREAD rather
+ *   than a coroutine child on purpose: as a structured child, a blocking cleanup call would
+ *   stall `withContext` indefinitely, which is exactly the wedge a diagnostics path must
+ *   never cause.
+ * - **Cleanup has exactly ONE owner.** An [AtomicReference] state machine arbitrates
+ *   `READING -> COMPLETED` (reader won) versus `READING -> TIMED_OUT` (watchdog won), so a
+ *   read that finishes just as the watchdog fires is classified deterministically and is
+ *   never both cleaned up twice and discarded.
  * - **The child is reaped on every exit path**, including an unexpected throw (outer
  *   `finally`). Cleanup is `destroy()` -> bounded wait -> `destroyForcibly()` -> bounded
- *   wait; an unconfirmed exit yields `null`, and `null` is never treated as success. The
- *   total worst-case wall clock is [processTimeoutMs] + [CLEANUP_BUDGET_MS] — stated here
- *   and asserted by the connected test rather than left vague.
+ *   wait; an unconfirmed exit yields `null`, and **`null` is never treated as success on any
+ *   path, truncated or not**. [CLEANUP_BUDGET_MS] bounds the cleanup WAITS; `close(2)` and
+ *   `kill(2)` on a pipe fd are taken as non-blocking, and if a platform ever made them block
+ *   it is the daemon watchdog — not the caller — that absorbs it.
  * - **`redirectErrorStream(true)` + a single reader.** Two pipes with one drain deadlocks as
  *   soon as the undrained one fills; folding stderr into stdout removes the second pipe.
  * - **`sinceMillis` is applied in Kotlin, not via logcat's `-t <time>`**, whose time format
@@ -76,6 +85,14 @@ class LogcatDiagnosticsSource(
             val reaped = AtomicBoolean(false)
             try {
                 collect(process, reaped, sinceMillis, limit)
+            } catch (cancellation: CancellationException) {
+                throw cancellation // cancelling the caller is not a source failure
+            } catch (t: Throwable) {
+                // The "never throws" half of the contract, enforced at the boundary rather
+                // than trusted to every internal call site.
+                SourceResult.Unavailable(
+                    "logcat read failed unexpectedly: ${t.javaClass.simpleName}: ${t.message}"
+                )
             } finally {
                 // No exit path — including an unexpected throw — may leave a child behind.
                 if (reaped.compareAndSet(false, true)) reap(process, force = true)
@@ -94,31 +111,39 @@ class LogcatDiagnosticsSource(
             return SourceResult.Unavailable("logcat stdout unavailable: ${t.javaClass.simpleName}")
         }
 
-        val timedOut = AtomicBoolean(false)
+        val state = AtomicReference(ReadState.READING)
         val finished = CountDownLatch(1)
         val watchdog = Thread({
             if (!finished.await(processTimeoutMs, TimeUnit.MILLISECONDS)) {
-                timedOut.set(true)
-                closeQuietly(stream)
-                runCatching { process.destroy() }
+                // Only the CAS winner cleans up, so a read that completed microseconds ago is
+                // never torn down underneath a valid result.
+                if (state.compareAndSet(ReadState.READING, ReadState.TIMED_OUT)) {
+                    runCatching { process.destroy() } // kill first: unblocks the reader itself
+                    closeQuietly(stream)
+                }
             }
         }, WATCHDOG_THREAD_NAME).apply { isDaemon = true; start() }
 
         var readFailure: Throwable? = null
         val drained = try {
             readBounded(stream)
+        } catch (cancellation: CancellationException) {
+            throw cancellation
         } catch (t: Throwable) {
             readFailure = t
             Drained(emptyList(), truncated = false)
         } finally {
+            val weOwnCleanup = state.compareAndSet(ReadState.READING, ReadState.COMPLETED)
             finished.countDown()
-            // Bounded: a watchdog stuck in a blocking close() must not become our problem.
-            watchdog.join(WATCHDOG_JOIN_BUDGET_MS)
-            closeQuietly(stream)
+            // ONLY the CAS winner closes. If the watchdog won, the close belongs to its daemon
+            // thread and a stall there costs us nothing; the caller never re-closes a stream it
+            // does not own. On our own path the pipe is already at EOF, where close cannot block.
+            if (weOwnCleanup) closeQuietly(stream)
+            runCatching { watchdog.join(WATCHDOG_JOIN_BUDGET_MS) }
         }
 
         reaped.set(true)
-        if (timedOut.get()) {
+        if (state.get() == ReadState.TIMED_OUT) {
             reap(process, force = true)
             return SourceResult.Unavailable("logcat timed out after ${processTimeoutMs}ms")
         }
@@ -130,11 +155,14 @@ class LogcatDiagnosticsSource(
         }
 
         // A truncated read means logcat produced MORE than we asked for, which is itself
-        // positive evidence the reader works — but we killed it mid-write, so its exit status
-        // is meaningless and is not consulted.
+        // positive evidence the reader works — so we ignore a CONFIRMED non-zero status there
+        // (we killed it mid-write). An UNCONFIRMED reap is never success on either path.
         val exitCode = reap(process, force = drained.truncated)
+        if (exitCode == null) {
+            return SourceResult.Unavailable("logcat could not be confirmed reaped")
+        }
         if (!drained.truncated && exitCode != 0) {
-            return SourceResult.Unavailable("logcat exited with ${exitCode ?: "no status"}")
+            return SourceResult.Unavailable("logcat exited with $exitCode")
         }
 
         val parsed = LogcatLineParser.parse(drained.lines.asSequence(), ownUid)
@@ -156,22 +184,25 @@ class LogcatDiagnosticsSource(
      * Retains at most [maxLines] lines and [maxBytes] encoded bytes — a HARD bound: a line
      * that would cross the budget is not retained at all (so a single oversized line cannot
      * blow past it). `truncated` means we stopped on our own bound rather than at EOF.
+     *
+     * Deliberately does NOT close the stream (hence no `use`): closing belongs to whichever
+     * of reader/watchdog wins the cleanup CAS, so a `close()` that stalled could never be
+     * executed on the caller's thread against a stream it does not own.
      */
     private fun readBounded(stream: InputStream): Drained {
         val lines = ArrayList<String>(minOf(maxLines, INITIAL_CAPACITY))
         var bytes = 0L
         var truncated = false
-        BufferedReader(InputStreamReader(stream, StandardCharsets.UTF_8)).use { reader ->
-            while (true) {
-                val line = reader.readLine() ?: break
-                val lineBytes = line.toByteArray(StandardCharsets.UTF_8).size + 1
-                if (lines.size >= maxLines || bytes + lineBytes > maxBytes) {
-                    truncated = true
-                    break
-                }
-                bytes += lineBytes
-                lines.add(line)
+        val reader = BufferedReader(InputStreamReader(stream, StandardCharsets.UTF_8))
+        while (true) {
+            val line = reader.readLine() ?: break
+            val lineBytes = line.toByteArray(StandardCharsets.UTF_8).size + 1
+            if (lines.size >= maxLines || bytes + lineBytes > maxBytes) {
+                truncated = true
+                break
             }
+            bytes += lineBytes
+            lines.add(line)
         }
         return Drained(lines, truncated)
     }
@@ -205,6 +236,9 @@ class LogcatDiagnosticsSource(
 
     private data class Drained(val lines: List<String>, val truncated: Boolean)
 
+    /** Who owns cleanup: whoever moves the state out of [READING] first. */
+    private enum class ReadState { READING, COMPLETED, TIMED_OUT }
+
     companion object {
         const val DEFAULT_MAX_LINES: Int = 5_000
         const val DEFAULT_MAX_BYTES: Int = 2 * 1024 * 1024
@@ -216,9 +250,15 @@ class LogcatDiagnosticsSource(
         private const val WATCHDOG_THREAD_NAME: String = "vreader-diag-logcat-watchdog"
 
         /**
-         * Worst-case cleanup wall clock after the read budget expires: two bounded reap waits
-         * plus the watchdog join. Part of the contract so callers (and the connected test) can
+         * Worst-case cleanup WAIT time after the read budget expires: the watchdog join plus
+         * two bounded reap waits. Part of the contract so callers (and the connected test) can
          * assert a real upper bound instead of an arbitrary slack.
+         *
+         * It bounds the waits, not the syscalls: `close(2)` on a pipe fd and `kill(2)` on a
+         * child are taken as non-blocking. That assumption is load-bearing and is why the
+         * watchdog destroys the child BEFORE closing the stream — the kill alone unblocks the
+         * reader, so a stalled `close()` would strand only the daemon watchdog, never the
+         * caller.
          */
         const val CLEANUP_BUDGET_MS: Long = 2 * REAP_BUDGET_MS + WATCHDOG_JOIN_BUDGET_MS
 
