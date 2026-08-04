@@ -3,6 +3,7 @@ package com.vreader.app.reader.nav
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -39,6 +40,9 @@ class MdTocScannerTest {
         /** U+3000 IDEOGRAPHIC SPACE — a Zs, so `trim`-before-test must treat it as indent. */
         val IDEO: String = Char(0x3000).toString()
 
+        /** A budget no semantic fixture can reach; the cap has its own tests. */
+        const val NO_CAP: Int = Int.MAX_VALUE
+
         /** U+00A0 NO-BREAK SPACE — also a Zs, and also NOT the space ATX requires. */
         val NBSP: String = Char(0x00A0).toString()
 
@@ -55,15 +59,16 @@ class MdTocScannerTest {
      * cancelled job under test would never be the object `ensureActive()` queries. It also pins a
      * real property — the scanner is pure CPU work and must never actually suspend.
      */
-    private fun scanWithJob(job: Job, text: String): Result<List<DetectedHeading>> {
-        var outcome: Result<List<DetectedHeading>>? = null
-        val block: suspend () -> List<DetectedHeading> = { MdTocScanner.scan(text) }
+    private fun scanWithJob(job: Job, text: String, limit: Int = NO_CAP): Result<ExtractResult> {
+        var outcome: Result<ExtractResult>? = null
+        val block: suspend () -> ExtractResult = { MdTocScanner.scan(text, limit) }
         block.startCoroutine(Continuation(job) { outcome = it })
         return requireNotNull(outcome) { "MdTocScanner must not suspend — it is pure CPU work" }
     }
 
+    /** The plain-result path every semantic test uses; the cap gets its own dedicated tests. */
     private fun scan(text: String): List<DetectedHeading> =
-        scanWithJob(Job(), text).getOrThrow()
+        scanWithJob(Job(), text).getOrThrow().headings
 
     /** `title|depth@offset` — one readable string per heading, so a diff names what moved. */
     private fun List<DetectedHeading>.rendered(): List<String> =
@@ -452,10 +457,84 @@ class MdTocScannerTest {
     }
 
     @Test
+    fun md_documentEndingWithATerminator_doesNotShiftOffsets() {
+        // The final terminator creates a trailing empty line; the two-line-ending bookkeeping
+        // must survive it under all three conventions (Gate-4 r1 LOW).
+        listOf("\n", "\r\n", "\r").forEach { eol ->
+            val text = "# A" + eol + "body" + eol + "## B" + eol
+
+            assertEquals(
+                listOf(
+                    "A|0@0",
+                    "B|1@" + text.indexOf("## B"),
+                ),
+                scan(text).rendered(),
+            )
+        }
+    }
+
+    @Test
     fun emptyDocument_yieldsNoHeadings() {
         assertEquals(emptyList<DetectedHeading>(), scan(""))
         assertEquals(emptyList<DetectedHeading>(), scan("   \n\t\n\n"))
         assertEquals(emptyList<DetectedHeading>(), scan("just prose, no headings at all\n"))
+
+        // Positive control: the same prose WITH a heading is not empty, so this test cannot pass
+        // against a scanner that simply never scans (Gate-4 r1 LOW).
+        assertEquals(listOf("Real"), titles("just prose, no headings at all\n# Real\n"))
+    }
+
+    // ------------------------------------------------------------------ bounded extraction
+
+    @Test
+    fun scan_stopsAtLimit_doesNotMaterializeBeyondIt() {
+        val text = (1..500).joinToString("") { "# H" + it + "\n" }
+
+        val result = scanWithJob(Job(), text, limit = 3).getOrThrow()
+
+        assertTrue(result.hitLimit)
+        assertEquals(listOf("H1", "H2", "H3"), result.headings.map { it.title })
+        assertEquals(3, result.headings.size)
+    }
+
+    @Test
+    fun scan_setextHeadingAlsoCountsAgainstLimit() {
+        val text = "One\n===\nTwo\n---\nThree\n===\n"
+
+        val result = scanWithJob(Job(), text, limit = 2).getOrThrow()
+
+        assertTrue(result.hitLimit)
+        assertEquals(listOf("One", "Two"), result.headings.map { it.title })
+    }
+
+    @Test
+    fun scan_underTheLimit_reportsNoHitLimit() {
+        val text = "# One\n# Two\n"
+
+        val result = scanWithJob(Job(), text, limit = 3).getOrThrow()
+
+        assertFalse(result.hitLimit)
+        assertEquals(2, result.headings.size)
+    }
+
+    @Test
+    fun scan_atExactlyTheLimit_reportsHitLimit() {
+        // `limit` is a collection budget, not a cap on the document: a caller that passes
+        // `cap + 1` reads `hitLimit` as "more than `cap` headings exist".
+        val text = "# One\n# Two\n"
+
+        val result = scanWithJob(Job(), text, limit = 2).getOrThrow()
+
+        assertTrue(result.hitLimit)
+        assertEquals(2, result.headings.size)
+    }
+
+    @Test
+    fun scan_nonPositiveLimit_isRejected() {
+        listOf(0, -1).forEach { bad ->
+            val outcome = scanWithJob(Job(), "# H\n", limit = bad)
+            assertTrue(outcome.exceptionOrNull() is IllegalArgumentException)
+        }
     }
 
     @Test
