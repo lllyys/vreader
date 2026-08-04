@@ -1,8 +1,8 @@
 ---
 branch: feat/164-wi-3-vlog-ring
 threadId: 019fcf1e-ee13-7a13-ac87-67573bb65122
-rounds: 3
-final_verdict: block-recommended
+rounds: 4
+final_verdict: follow-up-recommended
 date: 2026-08-05
 ---
 
@@ -102,6 +102,36 @@ measurement: the test runs in **33 ms**.
 
 **LOW — trailing slash on the scan root broke the relative-path strip.** FIXED (`${1%/}`), with a
 self-test asserting an identical finding set either way.
+
+## Round 4 — confirming round (orchestrator-run, 2026-08-05)
+
+The lane correctly escalated rather than certifying its own round-3 fixes (rule 48). Those were
+**real concurrency and lexer code**, not documentation, so this was confirmed by audit rather than
+accepted by argument — the same standard applied to WI-1, where a confirming round found a third
+`CancellationException` site the lane had missed.
+
+Run by the **orchestrator** via `scripts/run-codex.sh` (Codex gpt-5.5/high, read-only), scoped to
+the round-3 fixes in `7f3afd2b` plus a rounds-1–2 regression check.
+
+**`VERDICT: clean` — zero findings at any severity.**
+
+- **The atomic `Installation` fix is complete.** The snapshot is taken once and used consistently
+  throughout `emit`; no remaining read of installation state escapes it, on any path including the
+  uninstalled one. Racing `install()` calls are **whole-object last-writer-wins, not torn.**
+- **The raw-string lexer fix holds** across nested quotes, `//` and `/*` inside a raw string, the
+  literal text `Log.w(` inside a raw string, an unterminated raw string at EOF, a char literal
+  `'"'`, and an escaped quote in a normal string — detecting a genuine reference elsewhere in the
+  same file in each case, without false-positiving on the literal text.
+- **No regression** in rounds 1–2: `emit` still forwards unconditionally including before
+  `install()`, sequence-id monotonicity holds under concurrency, and the gate reports the correct
+  relative path after the `${1%/}` fix.
+
+One caveat the auditor stated itself: it could not execute the full self-test fixture because its
+sandbox is read-only, but read-only `--scan android` and `--scan android/` both returned clean. The
+lane's own run of the suite (23 assertions, `ALL PASS`) and the orchestrator's re-run cover that.
+
+**`final_verdict` is therefore `follow-up-recommended`** — zero open Critical/High/Medium, with the
+three residuals below carried as accepted and recorded in the code rather than closed.
 
 ## Explicitly accepted residuals
 
