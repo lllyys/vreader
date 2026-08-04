@@ -44,6 +44,13 @@ import kotlin.random.Random
  *   breadcrumbs. So the id is `nonce | counter`: the high [NONCE_BITS] carry a random per-launch
  *   value, the low [COUNTER_BITS] an atomic counter. Monotonic within a launch (the nonce is
  *   fixed), and ~1-in-2-million to repeat across two launches instead of guaranteed to.
+ *
+ *   ACCEPTED RESIDUAL (Gate-4 round 3): that ~1-in-2^21 repeat is not eliminated. Making ids
+ *   collision-FREE across launches needs durable state — a counter or epoch persisted to disk and
+ *   read back at start-up — which puts an I/O dependency and a failure mode inside a logging
+ *   facade for a bounded, tiny loss: on a repeat, a handful of prior-launch logcat entries whose
+ *   counters overlap the current ring's are deduped away. That is strictly better than the
+ *   pre-fix behavior, where the same loss happened on EVERY launch.
  * - **A `Throwable` is rendered INTO the message** rather than handed to `Log`'s throwable
  *   overload. Both representations must be byte-identical or the composite would surface two
  *   different-looking copies of one event; passing it to `Log` as well would print the trace twice.
@@ -53,25 +60,28 @@ import kotlin.random.Random
  */
 object VLog {
 
-    @Volatile
-    private var sink: RingBufferDiagnosticsSource? = null
-
-    @Volatile
-    private var clock: () -> Long = System::currentTimeMillis
-
     /**
-     * A nonce and ITS OWN counter, swapped as one immutable unit (Gate-4 round-2 High). Holding
-     * them as two independent fields (`@Volatile` nonce + shared `AtomicLong`) made the pair
-     * non-atomic: an `emit` could read the old nonce, be descheduled while `install` reset the
-     * counter, and then issue `oldNonce|1` — a duplicate of an id the old generation already used,
-     * which the composite would silently collapse into one entry. Each generation owning its own
-     * counter makes that interleaving unrepresentable.
+     * Everything one `emit` needs, published as ONE immutable object (Gate-4 rounds 2 and 3).
+     *
+     * Held as separate fields it was not safe twice over. First, a `@Volatile` nonce beside a
+     * shared `AtomicLong` was not an atomic pair: an emit could read the old nonce, be descheduled
+     * while install reset the counter, then issue `oldNonce|1` — a duplicate of an id already used,
+     * which the composite would silently collapse. Giving each installation its own counter fixed
+     * that. Second, `sink`, `clock` and the counter were still three independent writes, so a
+     * concurrent emit could pair a new counter with the old sink. One reference, one read, no pairs.
      */
-    private class Generation(val nonce: Long) {
+    private class Installation(
+        val sink: RingBufferDiagnosticsSource?,
+        val clock: () -> Long,
+        val nonce: Long,
+    ) {
         val counter = AtomicLong(0L)
     }
 
-    private val generation = AtomicReference(Generation(randomLaunchNonce()))
+    private val installed = AtomicReference(uninstalledState())
+
+    private fun uninstalledState() =
+        Installation(sink = null, clock = System::currentTimeMillis, nonce = randomLaunchNonce())
 
     /**
      * Wire the capture floor. Called once from `VReaderApp.onCreate`.
@@ -84,19 +94,16 @@ object VLog {
         clock: () -> Long = System::currentTimeMillis,
         launchNonce: Long = randomLaunchNonce(),
     ) {
-        this.clock = clock
         // A new nonce IS a new id space, so it arrives with a counter of its own rather than
         // resetting a shared one. This is also what makes a two-launch test faithful inside one
         // JVM: without the restart the second "launch" would keep counting up and could never
         // collide, so the test would pass against the very defect it exists to catch.
-        generation.set(Generation(launchNonce and NONCE_MASK))
-        this.sink = sink
+        installed.set(Installation(sink, clock, launchNonce and NONCE_MASK))
     }
 
     /** Test-only: return to the uninstalled state so a global object cannot leak across tests. */
     internal fun uninstall() {
-        sink = null
-        clock = System::currentTimeMillis
+        installed.set(uninstalledState())
     }
 
     /** Never 0 — a zero nonce would make this launch indistinguishable from a bare counter. */
@@ -123,12 +130,14 @@ object VLog {
         message: String,
         t: Throwable?,
     ) {
-        val sequenceId = nextSequenceId()
+        // ONE snapshot: nonce, counter, sink and clock can never come from different installations.
+        val state = installed.get()
+        val sequenceId = (state.nonce shl COUNTER_BITS) or (state.counter.incrementAndGet() and COUNTER_MASK)
         val body = buildString {
             append('[').append(origin).append("] ").append(message)
             if (t != null) append('\n').append(stackTraceOf(t))
         }
-        sink?.record(level, category.tag, body, clock(), sequenceId)
+        state.sink?.record(level, category.tag, body, state.clock(), sequenceId)
         forward(level, category.tag, VLogMarker.encode(sequenceId) + body)
     }
 
@@ -145,12 +154,6 @@ object VLog {
             DiagnosticsLevel.WARN -> Log.w(tag, payload)
             DiagnosticsLevel.ERROR, DiagnosticsLevel.ASSERT -> Log.e(tag, payload)
         }
-    }
-
-    /** ONE snapshot of the generation, so nonce and counter can never come from different ones. */
-    private fun nextSequenceId(): Long {
-        val current = generation.get()
-        return (current.nonce shl COUNTER_BITS) or (current.counter.incrementAndGet() and COUNTER_MASK)
     }
 
     private fun stackTraceOf(t: Throwable): String {

@@ -200,6 +200,15 @@ class RingBufferDiagnosticsSourceTest {
      * than the whole write burst, so a cold reader reliably takes its first sample after the
      * writers are done. It therefore does warm-up snapshots on the empty ring first and releases
      * the writers only once it is looping hot.
+     *
+     * The design is VALIDATED, not assumed: with `synchronized` removed from the ring this test
+     * failed 4 runs out of 4 (an `ArrayIndexOutOfBoundsException` out of a concurrently-growing
+     * `ArrayDeque`); with it restored it passed 5 runs out of 5. A stricter phased handshake was
+     * considered and rejected — it is what the previous revision did, and it proved strictly LESS
+     * (it forced one partial observation rather than demonstrating sustained interleaving). The
+     * residual is scheduler dependence: on a pathologically starved runner the reader could miss
+     * the whole write burst, which fails the assertion LOUDLY rather than passing vacuously — the
+     * safe direction for a test whose job is to detect an unsynchronised ring.
      */
     @Test
     fun concurrentRecordLosesNothingWhileAReadIsInFlight() {
@@ -215,8 +224,8 @@ class RingBufferDiagnosticsSourceTest {
         val writerFailure = AtomicReference<Throwable?>(null)
 
         val reader = Thread {
-            start.await()
             try {
+                start.await()
                 var reads = 0
                 while (!stopReading.get()) {
                     val size = runBlocking {
@@ -233,9 +242,9 @@ class RingBufferDiagnosticsSourceTest {
         }
         val writers = (0 until threads).map { t ->
             Thread {
-                start.await()
-                readerWarm.await()
                 try {
+                    start.await()
+                    readerWarm.await()
                     repeat(perThread) { i -> ring.put("$t-$i", at = i.toLong()) }
                 } catch (e: Throwable) {
                     writerFailure.set(e)

@@ -70,7 +70,7 @@ EXPECTED_VLOG_CALLS=6
 # Print "file:line: text" for every offending reference in <src-dir>.
 # Exit 0 = clean, 1 = findings, 2 = error.
 scan() {
-    local src="$1" allow="${2:-$DEFAULT_ALLOW}"
+    local src="${1%/}" allow="${2:-$DEFAULT_ALLOW}"   # a trailing slash would break the prefix strip
     if [ ! -d "$src" ]; then
         echo "CHECK-ANDROID-LOG-CONTAINMENT RESULT: ERROR (no such source tree: $src)"
         return 2
@@ -85,12 +85,23 @@ scan() {
         out="$(awk -v f="$file" '
             # Remove comments with a state machine, so neither a block comment sharing a line
             # with code nor a "//" inside a string literal can hide a reference.
+            # inBlock and inRaw persist ACROSS lines (awk runs once per file, so they reset per
+            # file, which is what we want). inStr and esc are per-line: an unterminated ordinary
+            # string is a syntax error, and resetting keeps one odd line from poisoning the rest.
+            # String CONTENT is kept in the output on purpose — that is what catches
+            # Class.forName("android.util.Log"). Only the comment-introducing role of // and /*
+            # is suppressed inside a string.
             function strip(l,   out, i, c, n, inStr, esc) {
                 out = ""; n = length(l); i = 1
                 while (i <= n) {
                     c = substr(l, i, 1)
                     if (inBlock) {                                  # inside /* … */
                         if (substr(l, i, 2) == "*/") { inBlock = 0; i += 2 } else { i++ }
+                        continue
+                    }
+                    if (inRaw) {                                    # inside a """ raw string """
+                        if (substr(l, i, 3) == "\"\"\"") { inRaw = 0; out = out "\"\"\""; i += 3 }
+                        else { out = out c; i++ }
                         continue
                     }
                     if (inStr) {
@@ -101,8 +112,18 @@ scan() {
                         i++
                         continue
                     }
+                    if (substr(l, i, 3) == "\"\"\"") { inRaw = 1; out = out "\"\"\""; i += 3; continue }
                     if (substr(l, i, 2) == "/*") { inBlock = 1; i += 2; continue }
                     if (substr(l, i, 2) == "//") { break }          # rest of the line is a comment
+                    if (c == "\x27") {                              # char literal, e.g. the quote char
+                        out = out c; i++
+                        while (i <= n) {
+                            c = substr(l, i, 1); out = out c; i++
+                            if (c == "\\") { if (i <= n) { out = out substr(l, i, 1); i++ } }
+                            else if (c == "\x27") { break }
+                        }
+                        continue
+                    }
                     if (c == "\"") { inStr = 1 }
                     out = out c
                     i++
@@ -281,6 +302,25 @@ import android.util.Log
 class Generated { fun go() = Log.w("t", "generated") }
 KOTLIN
 
+# 20. RAW STRING evasion (round 3): a """ … """ containing a lone quote and a // used to leave the
+# machine mid-string, so the // on the NEXT construct read as a comment and hid the reference.
+cat > "$SRC/reader/RawString.kt" <<'KOTLIN'
+package com.vreader.app.reader
+class RawString {
+    val harmless = """ " // raw text """
+    fun go() = android.util.Log.w("Reader", "escaped")
+}
+KOTLIN
+
+# 21. CHAR LITERAL holding a double quote — must not put the machine into string state.
+cat > "$SRC/reader/CharLiteral.kt" <<'KOTLIN'
+package com.vreader.app.reader
+class CharLiteral {
+    val quote = '"'
+    fun go() = android.util.Log.w("Reader", "escaped")
+}
+KOTLIN
+
 # 19. a MULTI-LINE block comment whose body has no leading '*' — prose, must NOT be flagged.
 cat > "$SRC/reader/LooseBlockProse.kt" <<'KOTLIN'
 package com.vreader.app.reader
@@ -317,7 +357,7 @@ grep -q "OtherLog\.kt:[0-9]" <<<"$OUT" \
     || ok "short form without the android import ignored"
 
 # Every evasion the two audit rounds named.
-for evasion in Aliased Wildcard SplitCall Reflective InlineBlock SlashInString Sneaky; do
+for evasion in Aliased Wildcard SplitCall Reflective InlineBlock SlashInString Sneaky RawString CharLiteral; do
     grep -q "$evasion\.kt:[0-9]" <<<"$OUT" \
         && ok "evasion caught: $evasion" \
         || fail "EVASION NOT CAUGHT: $evasion"
@@ -353,6 +393,14 @@ if [ "$CRC" -eq 0 ] && [ "$(tail -1 <<<"$CLEAN")" = "CHECK-ANDROID-LOG-CONTAINME
     ok "clean tree exits 0 with RESULT: OK"
 else
     fail "clean run wrong (rc=$CRC last='$(tail -1 <<<"$CLEAN")')"
+fi
+
+# A trailing slash on the scan root must not break the relative-path exclusion.
+SLASHED="$("$0" --scan "$FIX/")"
+if [ "$(grep -c ':' <<<"$SLASHED")" = "$(grep -c ':' <<<"$OUT")" ]; then
+    ok "trailing slash on the scan root gives identical results"
+else
+    fail "trailing slash changed the finding set"
 fi
 
 MISSING="$("$0" --scan "$FIX/nope")"; MRC=$?
