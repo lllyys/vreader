@@ -11,6 +11,7 @@ import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToIndex
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.vreader.app.reader.settings.ReaderTheme
 import java.util.concurrent.atomic.AtomicInteger
@@ -145,6 +146,33 @@ class TocContentsLargeTocTest {
         // … and the jump genuinely happened: the target is composed, the top of the list is not.
         compose.onNodeWithTag("toc-row-$FAR_INDEX", useUnmergedTree = true).assertExists()
         assertEquals("row 0 must be off-screen after jumping to $FAR_INDEX", 0, nodeCount("toc-row-0"))
+    }
+
+    @Test fun everyEntryStaysReachable_scrollingToTheLastRow() {
+        // Gate-4 MEDIUM: the bounds above are necessary but NOT sufficient. A wrong implementation
+        // that renders only a WINDOW of the list — e.g. a bounded Column over
+        // `entries.subList(start, start + 30)` — satisfies every row/read bound and every
+        // current-row assertion above, while silently making the other 1 970 chapters unreachable.
+        // Cheap bounds cannot distinguish "lazy" from "truncated"; only end-to-end reachability can.
+        //
+        // So: scroll to the LAST index and require that row to exist. A truncated implementation
+        // cannot produce it. Reads stay bounded because a lazy list composes a window per scroll
+        // step, not the whole document — laziness and reachability are asserted TOGETHER, since
+        // either one alone is satisfiable by a wrong implementation.
+        val entries = largeToc()
+        compose.setContent {
+            TocContentsSheetContent(theme = ReaderTheme.Paper, bookTitle = "黑暗血时代", entries = entries, currentTocIndex = 0, onJump = { true })
+        }
+        compose.waitForIdle()
+
+        val last = LARGE_COUNT - 1
+        compose.onNodeWithTag("toc-list").performScrollToIndex(last)
+        compose.waitForIdle()
+
+        compose.onNodeWithTag("toc-row-$last", useUnmergedTree = true).assertExists()
+        val rows = composedRowCount()
+        assertTrue("no rows composed — the bound below would pass vacuously", rows >= 1)
+        assertTrue("$rows rows composed at the list end — full composition", rows <= MAX_COMPOSED_ROWS)
     }
 
     @Test fun opensScrolledToCurrentEntry_whenCurrentIsFarDownTheList() {

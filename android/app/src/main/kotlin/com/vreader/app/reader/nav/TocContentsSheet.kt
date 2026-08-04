@@ -149,10 +149,16 @@ fun TocContentsSheetContent(
         // cannot advance behind it, and re-positioning could only yank a user who is browsing the list.
         // A same-book index change therefore moves the highlight, never the viewport.
         //
-        // Identity is the book's contentSHA256 (baked into every WI-1 canonical locator) plus the row
-        // count — O(1). It is NEVER the list itself: `List.equals` is O(n), so keying on a 1 859-entry
-        // list would re-walk it on every recomposition, re-introducing the cost this WI removes.
-        val tocIdentity = entries[0].canonicalLocator.contentSHA256
+        // Identity is the book's fingerprintKey (`format:sha256:byteCount`, baked into every WI-1
+        // canonical locator) plus the row count — O(1). It is NEVER the list itself: `List.equals` is
+        // O(n), so keying on a 1 859-entry list would re-walk it on every recomposition, re-introducing
+        // the cost this WI removes.
+        //
+        // fingerprintKey rather than contentSHA256 alone (Gate-4 Low): the sha is not by itself a book
+        // identity — the same bytes imported under a different format are a DIFFERENT book with a
+        // different TOC, and would otherwise collide and wrongly inherit the previous book's scroll
+        // position. fingerprintKey carries format + byteCount, so it cannot.
+        val tocIdentity = entries[0].canonicalLocator.fingerprintKey
         val listState = key(tocIdentity, entries.size) {
             rememberLazyListState(
                 initialFirstVisibleItemIndex = if (currentTocIndex in entries.indices) currentTocIndex else 0,
