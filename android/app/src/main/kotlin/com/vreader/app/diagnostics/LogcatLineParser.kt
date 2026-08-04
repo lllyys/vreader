@@ -123,12 +123,24 @@ object LogcatLineParser {
 
     private val MARKER = Regex("""^«v(\d+)»""")
 
+    /**
+     * Checked arithmetic on purpose: an absurd but well-formed token (`u99999999999_a1`) must
+     * not WRAP into a value that happens to equal our uid, which would admit another uid's
+     * rows into the export. Anything that overflows, or resolves outside the valid uid range,
+     * simply does not match.
+     */
     private fun uidMatches(token: String, ownUid: Int): Boolean {
         token.toIntOrNull()?.let { return it == ownUid }
         val match = SYMBOLIC_UID.matchEntire(token) ?: return false
         val user = match.groupValues[1].toLongOrNull() ?: return false
         val appId = match.groupValues[2].toLongOrNull() ?: return false
-        return user * PER_USER_RANGE + FIRST_APPLICATION_UID + appId == ownUid.toLong()
+        val resolved = try {
+            Math.addExact(Math.multiplyExact(user, PER_USER_RANGE), Math.addExact(FIRST_APPLICATION_UID, appId))
+        } catch (t: ArithmeticException) {
+            return false
+        }
+        if (resolved < 0L || resolved > Int.MAX_VALUE.toLong()) return false
+        return resolved == ownUid.toLong()
     }
 
     private fun epochMillis(date: String, time: String, zone: String): Long? {

@@ -138,9 +138,34 @@ class LogcatLineParserTest {
 
     @Test
     fun ignoresMalformedSymbolicUidTokens() {
-        listOf("u_a209", "u0_a", "ua209", "u0a209", "u0_a209x", "u0_i209").forEach { token ->
+        listOf(
+            "u_a209", "u0_a", "ua209", "u0a209", "u0_a209x", "u0_i209", "u0_i5",
+            "root", "wifi", "logd", "shell", "radio", "artd", "system",
+        ).forEach { token ->
             assertEquals("token $token must not match", 0, parse(line(uid = token, rest = "T: m")).size)
         }
+    }
+
+    @Test
+    fun anOversizedSymbolicUidCannotWrapIntoOurUid() {
+        // Checked arithmetic: a well-formed but absurd token must never overflow into a value
+        // that equals our uid, which would admit another uid's rows into the export.
+        listOf(
+            "u99999999999999_a1",
+            "u1_a99999999999999",
+            "u9223372036854775807_a9223372036854775807",
+        ).forEach { token ->
+            assertEquals("token $token must not match", 0, parse(line(uid = token, rest = "T: m")).size)
+        }
+    }
+
+    @Test
+    fun aSymbolicUidResolvingBeyondTheUidRangeDoesNotMatch() {
+        // 30000 * 100000 + 10000 + 1 exceeds Int.MAX_VALUE and is not a real uid.
+        val huge = LogcatLineParser.parse(
+            sequenceOf(line(uid = "u30000_a1", rest = "T: m")), ownUid = Int.MAX_VALUE
+        )
+        assertTrue(huge.isEmpty())
     }
 
     // -------------------------------------------------------- tag/message split

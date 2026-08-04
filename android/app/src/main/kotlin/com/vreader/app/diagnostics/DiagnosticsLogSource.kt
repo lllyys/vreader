@@ -18,8 +18,10 @@ interface DiagnosticsLogSource {
      * Up to [limit] entries, oldest -> newest, optionally bounded to entries at or after
      * [sinceMillis].
      *
-     * NEVER throws. A source failure — the reader could not be opened, the platform denied
-     * it, it timed out — is reported as [SourceResult.Unavailable].
+     * NEVER throws to signal a source failure — the reader could not be opened, the platform
+     * denied it, it timed out — all of those are reported as [SourceResult.Unavailable].
+     * `CancellationException` is the one exception that still propagates, as it must:
+     * cancelling the caller is not a source failure and must not be swallowed.
      */
     suspend fun recentEntries(sinceMillis: Long? = null, limit: Int): SourceResult
 }

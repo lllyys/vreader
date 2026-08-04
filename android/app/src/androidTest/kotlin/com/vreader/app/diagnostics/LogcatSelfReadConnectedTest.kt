@@ -56,6 +56,9 @@ class LogcatSelfReadConnectedTest {
         const val GATE_TAG = "VRDIAG164"
         const val POLL_BUDGET_MS = 5_000L
         const val POLL_INTERVAL_MS = 150L
+        const val RAW_READ_BUDGET_MS = 5_000L
+        /** Scheduling slack on top of the source's OWN stated worst case. */
+        const val SCHEDULING_SLACK_MS = 1_500L
         val WELL_FORMED_MARKER = Regex("^«v\\d+»")
     }
 
@@ -213,6 +216,45 @@ class LogcatSelfReadConnectedTest {
         assertEquals(listOf("hello"), result.entries.map { it.message })
     }
 
+    @Test
+    fun deniedLogcatThatStillExitsZero_reportsUnavailable() = runBlocking {
+        // The hole an exit-code-only classifier leaves wide open: redirectErrorStream folds
+        // logcat's own diagnostics into stdout, so a denial that exits 0 would be read as a
+        // quiet buffer and would silently degrade the whole feature with NO error.
+        listOf(
+            "logcat: Unable to open log device '/dev/log/main': Permission denied",
+            "Unable to open log device '/dev/log/main': Permission denied",
+            "couldn't get logger list",
+            "logcat read failure",
+        ).forEach { diagnostic ->
+            val result = fakeSource("$diagnostic\n", exitCode = 0).recentEntries(limit = 100)
+            assertTrue(
+                "a zero-exit denial must be Unavailable, was $result for: $diagnostic",
+                result is SourceResult.Unavailable,
+            )
+        }
+    }
+
+    @Test
+    fun aDiagnosticAlongsideOurOwnRowsStillCountsAsAvailable() = runBlocking {
+        // Parsing even one of our own rows is positive proof the reader worked, so a stray
+        // diagnostic line must not flip a working source to dead.
+        val stdout = "logcat: something noisy\n" + ownLine("hello")
+        val result = fakeSource(stdout, exitCode = 0).recentEntries(limit = 100)
+        result as SourceResult.Available
+        assertEquals(listOf("hello"), result.entries.map { it.message })
+    }
+
+    @Test
+    fun truncatedReadWithOnlyForeignRows_reportsAvailableEmpty() = runBlocking {
+        // A truncated read means logcat produced MORE than we asked for — positive evidence
+        // the reader works — so "none of it was ours" is genuinely Available(empty), not a
+        // denial. Its exit status is meaningless because we killed it mid-write.
+        val stdout = (1..500).joinToString("") { foreignLine("theirs-$it") }
+        val result = fakeSource(stdout, exitCode = 0, maxLines = 10).recentEntries(limit = 100)
+        assertEquals(SourceResult.Available(emptyList<DiagnosticsLogEntry>()), result)
+    }
+
     // ----------------------------------------------------- timeout / reap path
 
     @Test
@@ -231,10 +273,12 @@ class LogcatSelfReadConnectedTest {
         val elapsedMs = (System.nanoTime() - startedAt) / 1_000_000
 
         assertTrue("a timeout must be Unavailable, was $result", result is SourceResult.Unavailable)
+        // Asserted against the source's OWN stated worst case, not an arbitrary slack.
+        val bound = timeoutMs + LogcatDiagnosticsSource.CLEANUP_BUDGET_MS + SCHEDULING_SLACK_MS
         assertTrue(
-            "the call must return within its own budget even when the child ignores destroy() " +
-                "(elapsed=${elapsedMs}ms, budget=${timeoutMs}ms)",
-            elapsedMs < timeoutMs + 4_000,
+            "the call must return within its stated bound even when the child ignores " +
+                "destroy() (elapsed=${elapsedMs}ms, bound=${bound}ms)",
+            elapsedMs <= bound,
         )
         assertTrue("the stream must be closed to unblock the reader", stream.closed.get())
         assertTrue("destroy() must be attempted", process.destroyCalls.get() >= 1)
@@ -250,6 +294,55 @@ class LogcatSelfReadConnectedTest {
         )
     }
 
+    @Test
+    fun aChildThatIgnoresEvenDestroyForcibly_stillReturnsWithinTheStatedBound() = runBlocking {
+        // destroyForcibly() is asynchronous — invoking it is not proof the child died. A
+        // bounded API must report the unconfirmed reap rather than block forever waiting.
+        val stream = BlockingInputStream()
+        val process = FakeProcess(
+            stream,
+            exitCode = 143,
+            aliveUntilKilled = true,
+            ignoreDestroy = true,
+            ignoreDestroyForcibly = true,
+        )
+        val timeoutMs = 500L
+        val source = LogcatDiagnosticsSource(
+            ownUid = 10_209,
+            processTimeoutMs = timeoutMs,
+            exec = { process },
+        )
+
+        val startedAt = System.nanoTime()
+        val result = source.recentEntries(limit = 100)
+        val elapsedMs = (System.nanoTime() - startedAt) / 1_000_000
+
+        assertTrue("an unreapable child must be Unavailable, was $result", result is SourceResult.Unavailable)
+        val bound = timeoutMs + LogcatDiagnosticsSource.CLEANUP_BUDGET_MS + SCHEDULING_SLACK_MS
+        assertTrue(
+            "the call must not block on an unreapable child (elapsed=${elapsedMs}ms, bound=${bound}ms)",
+            elapsedMs <= bound,
+        )
+        assertTrue("destroyForcibly() must still be attempted", process.destroyForciblyCalls.get() >= 1)
+        assertEquals("no reader may be left blocked", 0, stream.blockedReaders.get())
+    }
+
+    @Test
+    fun anUnexpectedFailureStillReapsTheChild() = runBlocking {
+        // The outer finally is the belt-and-braces guarantee: even a throw from inside the
+        // read path may not leave a logcat child behind.
+        val process = FakeProcess(
+            ThrowingInputStream(),
+            exitCode = 0,
+            aliveUntilKilled = true,
+        )
+        val result = LogcatDiagnosticsSource(ownUid = 10_209, exec = { process })
+            .recentEntries(limit = 10)
+        assertTrue("a read failure must be Unavailable, was $result", result is SourceResult.Unavailable)
+        assertTrue("the child must be reaped", process.waitForCalls.get() >= 1)
+        assertTrue("the child must not be left alive", !process.isAlive)
+    }
+
     // --------------------------------------------------------- bounds + limit
 
     @Test
@@ -261,13 +354,29 @@ class LogcatSelfReadConnectedTest {
     }
 
     @Test
-    fun neverRetainsMoreThanMaxBytes() = runBlocking {
-        val stdout = (1..500).joinToString("") { ownLine("x".repeat(200)) }
-        val result = fakeSource(stdout, exitCode = 0, maxBytes = 4_096).recentEntries(limit = 10_000)
+    fun neverRetainsMoreThanMaxBytesOfRawInput() = runBlocking {
+        // Accounted on the RAW retained line, not on the parsed message: a message-only sum
+        // excludes the timestamp/uid/pid/tid/tag columns and so could not detect an overrun.
+        val raw = ownLine("x".repeat(200))
+        val rawLineBytes = raw.toByteArray(StandardCharsets.UTF_8).size
+        val stdout = raw.repeat(500)
+        val maxBytes = 4_096
+        val result = fakeSource(stdout, exitCode = 0, maxBytes = maxBytes).recentEntries(limit = 10_000)
         result as SourceResult.Available
-        val bytes = result.entries.sumOf { it.message.toByteArray(StandardCharsets.UTF_8).size }
-        assertTrue("retained $bytes bytes for maxBytes=4096", bytes <= 4_096)
+        val retained = result.entries.size * rawLineBytes
+        assertTrue(
+            "retained $retained raw bytes (${result.entries.size} lines x $rawLineBytes) for maxBytes=$maxBytes",
+            retained <= maxBytes,
+        )
         assertTrue("a bounded read is still a successful read", result.entries.isNotEmpty())
+    }
+
+    @Test
+    fun aSingleLineLargerThanTheWholeBudgetIsNotRetained() = runBlocking {
+        // The bound is HARD: the line that would cross it is not retained at all, so one
+        // oversized line cannot blow past maxBytes.
+        val result = fakeSource(ownLine("hello"), exitCode = 0, maxBytes = 10).recentEntries(limit = 100)
+        assertEquals(SourceResult.Available(emptyList<DiagnosticsLogEntry>()), result)
     }
 
     @Test
@@ -355,14 +464,35 @@ class LogcatSelfReadConnectedTest {
     private fun foreignLine(message: String) =
         "2026-08-04 19:26:12.114 +0000  1000  572  718 W System: $message\n"
 
-    /** Runs the SAME argv the source runs, in this process, and returns raw stdout lines. */
+    /**
+     * Runs the SAME argv the source runs, in this process, and returns raw stdout lines.
+     *
+     * The read is BOUNDED by its own watchdog. An unbounded `readLines()` followed by a timed
+     * `waitFor` is not a timeout at all: if the pipe stalls, the wait is never reached and the
+     * nominal 5 s gate hangs forever after the real source has already answered.
+     */
     private fun readRawLogcatInThisProcess(): List<String> = try {
         val process = ProcessBuilder(LogcatDiagnosticsSource.command())
             .redirectErrorStream(true)
             .start()
-        val lines = process.inputStream.bufferedReader(StandardCharsets.UTF_8).use { it.readLines() }
-        process.waitFor(2, TimeUnit.SECONDS)
+        val stream = process.inputStream
+        val finished = CountDownLatch(1)
+        val watchdog = Thread({
+            if (!finished.await(RAW_READ_BUDGET_MS, TimeUnit.MILLISECONDS)) {
+                runCatching { stream.close() }
+                runCatching { process.destroyForcibly() }
+            }
+        }).apply { isDaemon = true; start() }
+        val lines = try {
+            stream.bufferedReader(StandardCharsets.UTF_8).use { it.readLines() }
+        } catch (t: Throwable) {
+            emptyList()
+        } finally {
+            finished.countDown()
+            watchdog.join(500)
+        }
         process.destroyForcibly()
+        process.waitFor(2, TimeUnit.SECONDS)
         lines
     } catch (t: Throwable) {
         emptyList()
@@ -379,6 +509,7 @@ class LogcatSelfReadConnectedTest {
         private val exitCode: Int,
         aliveUntilKilled: Boolean,
         private val ignoreDestroy: Boolean = false,
+        private val ignoreDestroyForcibly: Boolean = false,
     ) : Process() {
         val destroyCalls = AtomicInteger()
         val destroyForciblyCalls = AtomicInteger()
@@ -411,9 +542,10 @@ class LogcatSelfReadConnectedTest {
             if (!ignoreDestroy) dead.countDown()
         }
 
+        /** Deliberately a no-op when [ignoreDestroyForcibly] — the unreapable child. */
         override fun destroyForcibly(): Process {
             destroyForciblyCalls.incrementAndGet()
-            dead.countDown()
+            if (!ignoreDestroyForcibly) dead.countDown()
             return this
         }
 
@@ -441,6 +573,11 @@ class LogcatSelfReadConnectedTest {
             closed.set(true)
             gate.countDown()
         }
+    }
+
+    /** Fails the read outright — the "unexpected failure" path the outer finally must survive. */
+    private class ThrowingInputStream : InputStream() {
+        override fun read(): Int = throw IOException("pipe exploded")
     }
 
     private class ThreadRecordingInputStream(
