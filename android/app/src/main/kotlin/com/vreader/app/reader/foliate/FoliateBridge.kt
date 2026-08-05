@@ -56,9 +56,14 @@ class FoliateBridge(
     )
 
     /**
-     * Await a jump to [target], resolving only after foliate's `view.goTo(...)` relocate settles (or a
+     * Await a jump to [target], resolving only after foliate's `view.goTo(...)` promise settles (or a
      * timeout). The request id + target are JSON-escaped ([jsString]) into the shell shim call. A
      * superseding goTo cancels the prior. Main-thread only (WebView is).
+     *
+     * **[Azw3GoToResult.Succeeded] means "foliate settled without rejecting", NOT "the reader moved".**
+     * `view.goTo` catches a failed resolution internally and returns undefined instead of rejecting, so
+     * an unresolvable cfi/href still acks `ok:true`. Actual motion is only observable in a connected
+     * WebView test (feature #140 WI-7) — no JVM test may assert movement from an ack.
      */
     suspend fun goTo(target: FoliateGoToTarget, timeoutMs: Long = DEFAULT_GOTO_TIMEOUT_MS): Azw3GoToResult =
         goToDispatcher.goTo(target, timeoutMs)

@@ -53,6 +53,12 @@ foliate-view { display: block; width: 100vw; height: 100vh; height: 100dvh; }
         // promise and, AFTER foliate's relocate settles, post `{name:'goto-ack', id, ok, cfi?, fraction?}`
         // over the SAME `vreaderHost` channel (never addJavascriptInterface). The id is echoed back so
         // the host resolves the matching CompletableDeferred; a reject → ok:false so the sheet stays open.
+        //
+        // ACK ≠ MOTION (be precise about what ok:true proves). Only a REJECTED promise yields ok:false.
+        // foliate's `view.goTo` CATCHES a failed resolution internally and returns undefined rather than
+        // rejecting, so an unresolvable cfi/href still lands here as a fulfilled promise → ok:true with
+        // nothing moved. Never treat an ack (or a Succeeded result) as evidence the reader relocated;
+        // that is what feature #140 WI-7's connected real-book round-trip is for.
         window.__vreaderGoTo = function (id, target) {
             function ack(ok, cfi, fraction) {
                 send('goto-ack', { id: id, ok: !!ok, cfi: cfi == null ? null : cfi, fraction: (typeof fraction === 'number' && isFinite(fraction)) ? fraction : null });
@@ -63,8 +69,11 @@ foliate-view { display: block; width: 100vw; height: 100vh; height: 100dvh; }
                 if (target.cfi != null) { p = window.readerAPI.goTo(target.cfi); }
                 // feature #140 WI-3: the TOC leg. readerAPI.goTo takes an href too (view.goTo ->
                 // resolveNavigation -> book.resolveHref). Ordered BEFORE fraction so the host's
-                // cfi -> href -> fraction precedence also holds here.
-                else if (target.href != null) { p = window.readerAPI.goTo(target.href); }
+                // cfi -> href -> fraction precedence also holds here. `typeof === 'string'` (not
+                // `!= null`) so a malformed/mixed target can never let a non-string or an INHERITED
+                // href outrank a legitimate fraction — Kotlin only ever emits one own string key,
+                // this is the belt for anything else.
+                else if (Object.prototype.hasOwnProperty.call(target, 'href') && typeof target.href === 'string' && target.href !== '') { p = window.readerAPI.goTo(target.href); }
                 else if (target.fraction != null) { p = window.readerAPI.goToFraction(target.fraction); }
                 else { ack(false, null, null); return; }
                 Promise.resolve(p).then(function () {

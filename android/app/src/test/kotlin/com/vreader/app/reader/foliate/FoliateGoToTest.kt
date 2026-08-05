@@ -303,6 +303,50 @@ class FoliateGoToTest {
     }
 
     @Test
+    fun from_persistedAzw3LocatorShapes_resolveExactlyAsTheyDidBeforeTheHrefLeg() {
+        // Gate-4 R1 High. The audit correctly rejected the blanket claim "existing AZW3 locators never
+        // carry an href": iOS's FoliateReaderViewModel.currentLocator() DOES set href = lastTOCHref
+        // (vreader/ViewModels/FoliateReaderViewModel.swift:147-155), and such a bookmark can reach
+        // Android through a backup restore. Prose is the wrong place for that invariant, so pin the
+        // ACTUAL persisted shapes here instead. The only shape whose resolution the new href leg can
+        // flip is (no cfi) + (non-blank href) + (finite `progression`) — and no producer emits it:
+        //
+        //   Azw3LocatorBridge.toEnvelope  -> progression + cfi, NEVER href      (Android, verified)
+        //   FoliateReaderViewModel        -> href + cfi + totalProgression      (iOS; `guard let cfi`
+        //                                    means cfi is ALWAYS present, and it sets totalProgression,
+        //                                    which `from()` does not read)
+        //   FoliateSpikeView bookmark     -> every position field nil           (iOS)
+        //
+        // If a future producer starts emitting the flip-shape, the last case below fails and forces
+        // the decision to be made deliberately rather than inherited.
+        val androidRelocate = locator(cfi = "/6/4!/4/2", progression = 0.37, href = null)
+        assertEquals(FoliateGoToTarget.Cfi("/6/4!/4/2"), FoliateGoToTarget.from(androidRelocate))
+        val androidNoCfi = locator(cfi = null, progression = 0.37, href = null)
+        assertEquals(FoliateGoToTarget.Fraction(0.37), FoliateGoToTarget.from(androidNoCfi))
+
+        // iOS bookmark: href + cfi + totalProgression. The cfi wins, exactly as before the href leg.
+        val iosBookmark = Locator(
+            contentSHA256 = "a".repeat(64), fileByteCount = 1024, format = "azw3",
+            href = "ch04.xhtml", totalProgression = 0.5, cfi = "epubcfi(/6/8!/4/2)",
+        )
+        assertEquals(
+            "an href-BEARING iOS AZW3 bookmark still resolves by cfi — the href leg must not preempt it",
+            FoliateGoToTarget.Cfi("epubcfi(/6/8!/4/2)"),
+            FoliateGoToTarget.from(iosBookmark),
+        )
+        // …and with the cfi hypothetically absent it is STILL not a Fraction, because that producer
+        // sets totalProgression, not progression — so this shape never resolved to a Fraction either.
+        assertEquals(
+            FoliateGoToTarget.Href("ch04.xhtml"),
+            FoliateGoToTarget.from(iosBookmark.copy(cfi = null)),
+        )
+        assertNull(FoliateGoToTarget.from(iosBookmark.copy(cfi = null, href = null)))
+
+        // iOS FoliateSpikeView bookmark: all position fields nil — unjumpable before AND after.
+        assertNull(FoliateGoToTarget.from(locator(cfi = null, progression = null, href = null)))
+    }
+
+    @Test
     fun gotoJs_hrefIsJsonEscaped_quotesBackslashesScriptTagsNeutralized() = runTest {
         val h = Harness(backgroundScope)
         // A hostile book-derived href: a quote + a backslash + a newline + a script-tag close, i.e.
@@ -311,18 +355,52 @@ class FoliateGoToTest {
         val job = async { h.dispatcher.goTo(FoliateGoToTarget.Href(hostile), timeoutMs = 60_000) }
         runCurrent()
         val js = h.sent.single()
-        // The load-bearing property: the href is ONE well-formed JSON string literal whose decoded
-        // value is byte-for-byte the original. If any character broke out of the literal, the tail
-        // would no longer parse and this call throws.
+        // WHAT THIS PROVES — and what it does NOT (Gate-4 R1 Low: the name overclaims otherwise).
+        // Proven: the href is ONE well-formed JSON string literal whose decoded value is the
+        // original, so no character terminated the literal early or truncated the payload.
+        // NOT proven: that the generated JS is safe to *execute*. The script-tag close survives
+        // VERBATIM (asserted below) and is harmless only because this string reaches
+        // evaluateJavascript, which does no HTML parsing and never interpolates it into an inline
+        // script element. Executing the generated expression is WI-7's connected WebView probe.
         assertEquals("hostile href must survive escaping intact inside its literal", hostile, decodedHrefArgument(js))
         // The raw un-escaped payload never appears verbatim, and no raw control char leaks.
         assertFalse("raw un-escaped hostile href leaked into injected JS", js.contains(hostile))
         assertFalse("literal newline leaked into injected JS", js.contains("\n"))
         assertTrue("hostile quote must be JSON-escaped to \\\"", js.contains("\\\""))
         assertTrue("backslash must be JSON-escaped to \\\\", js.contains("\\\\"))
+        // The DOCUMENTED, DELIBERATE residual: the JSON seam does NOT escape a script-tag close.
+        // Asserted rather than assumed, so a future host that embeds this JS in HTML (where it WOULD
+        // matter) trips this test instead of silently inheriting the assumption.
+        assertTrue("residual: the script-tag close is NOT escaped by the JSON seam", js.contains("</script>"))
         // Routed through the shell shim, never addJavascriptInterface — and never a raw eval sink.
         assertTrue("goTo JS must call the shell shim entry", js.contains("__vreaderGoTo"))
         assertFalse("must never use addJavascriptInterface", js.contains("addJavascriptInterface"))
+        job.cancel()
+    }
+
+    @Test
+    fun gotoJs_jsLineTerminatorsAndControlChars_surviveTheLiteralIntact() = runTest {
+        // Gate-4 R1 Low: the hostile-href case covered a newline but neither JS line terminator.
+        // U+2028/U+2029 terminate a string literal in pre-ES2019 engines and kotlinx JSON emits them
+        // RAW; Chromium has accepted them in string literals since ES2019, so the shipped WebView is
+        // fine — but the href must still round-trip intact, which is what the seam owes us. Built
+        // with Char(...) rather than escapes so the fixture cannot be mangled by source escaping.
+        val ls = Char(0x2028)   // LINE SEPARATOR
+        val ps = Char(0x2029)   // PARAGRAPH SEPARATOR
+        val cr = Char(0x000D)   // CARRIAGE RETURN
+        val lf = Char(0x000A)   // LINE FEED
+        val tab = Char(0x0009)
+        val nul = Char(0x0000)
+        val bom = Char(0xFEFF)
+        val hostile = "ch$ls$ps$cr$lf$tab$nul$bom.xhtml#frag"
+        val h = Harness(backgroundScope)
+        val job = async { h.dispatcher.goTo(FoliateGoToTarget.Href(hostile), timeoutMs = 60_000) }
+        runCurrent()
+        val js = h.sent.single()
+        assertEquals("every terminator/control char must round-trip through the literal", hostile, decodedHrefArgument(js))
+        // The characters that would END a JS statement if left raw must be escaped away.
+        assertFalse("a raw LF must never reach the injected JS", js.contains(lf))
+        assertFalse("a raw CR must never reach the injected JS", js.contains(cr))
         job.cancel()
     }
 
@@ -387,30 +465,46 @@ class FoliateGoToTest {
         job.cancel()
 
         // Shell half: the shim's href branch calls readerAPI.goTo (which resolves an href through
-        // book.resolveHref), NOT goToFraction. Statically asserted against the SHIPPED asset.
-        val html = readerHtml()
-        val hrefBranch = Regex("""else\s+if\s*\(\s*target\.href\s*!=\s*null\s*\)\s*\{([^}]*)}""")
-            .find(html)?.groupValues?.get(1)
-            ?: error("reader.html has no `else if (target.href != null)` branch in __vreaderGoTo")
+        // book.resolveHref), NOT goToFraction. Statically asserted against the SHIPPED asset, with
+        // JS comments STRIPPED FIRST (Gate-4 R1: otherwise a commented-out or dead line could
+        // satisfy every match below while the live code did the wrong thing).
+        val code = executableJsOf(readerHtml())
+        val hrefBranch = code.lines().firstOrNull { it.contains("else if") && it.contains("target.href") }
+            ?: error("reader.html has no live `else if (... target.href ...)` branch in __vreaderGoTo")
         assertTrue(
             "the shim's href branch must call readerAPI.goTo(target.href); got: $hrefBranch",
             Regex("""readerAPI\.goTo\(\s*target\.href\s*\)""").containsMatchIn(hrefBranch),
         )
         assertFalse("the href branch must NOT call goToFraction", hrefBranch.contains("goToFraction"))
+        // The guard is deliberately stricter than `!= null` (Gate-4 R1 Low): an OWN, non-empty STRING
+        // href only — so a non-string, an inherited/prototype-polluted href, or an empty one can never
+        // outrank a legitimate fraction. A regression to a bare null-check fails here.
+        assertTrue("the href guard must require an own property", hrefBranch.contains("hasOwnProperty"))
+        assertTrue("the href guard must require a string", hrefBranch.contains("typeof target.href === 'string'"))
+        assertFalse("the href guard must not be a bare null check", hrefBranch.contains("target.href != null"))
         // The pre-existing branches are untouched and the precedence cfi → href → fraction also
         // holds inside the shim (a target carrying both must never fall to the fraction leg).
-        val cfiAt = html.indexOf("target.cfi != null")
-        val hrefAt = html.indexOf("target.href != null")
-        val fractionAt = html.indexOf("target.fraction != null")
+        val cfiAt = code.indexOf("target.cfi")
+        val hrefAt = code.indexOf("target.href")
+        val fractionAt = code.indexOf("target.fraction")
         assertTrue("shim must still branch on target.cfi first", cfiAt in 0 until hrefAt)
         assertTrue("shim must branch on target.href before target.fraction", hrefAt in 0 until fractionAt)
         assertTrue(
             "the cfi branch must still call readerAPI.goTo(target.cfi)",
-            Regex("""readerAPI\.goTo\(\s*target\.cfi\s*\)""").containsMatchIn(html),
+            Regex("""readerAPI\.goTo\(\s*target\.cfi\s*\)""").containsMatchIn(code),
         )
         assertTrue(
             "the fraction branch must still call readerAPI.goToFraction(target.fraction)",
-            Regex("""readerAPI\.goToFraction\(\s*target\.fraction\s*\)""").containsMatchIn(html),
+            Regex("""readerAPI\.goToFraction\(\s*target\.fraction\s*\)""").containsMatchIn(code),
+        )
+        // The cfi branch's own condition is byte-for-byte what it was before WI-3 touched the file.
+        assertTrue(
+            "the cfi branch condition must be unchanged",
+            code.contains("if (target.cfi != null) { p = window.readerAPI.goTo(target.cfi); }"),
+        )
+        assertTrue(
+            "the fraction branch condition must be unchanged",
+            code.contains("else if (target.fraction != null) { p = window.readerAPI.goToFraction(target.fraction); }"),
         )
     }
 
@@ -444,8 +538,13 @@ class FoliateGoToTest {
 
     @Test
     fun hrefGoTo_ackFalse_resolvesFailed_andTimeoutStillApplies() = runTest {
-        // An unresolvable href acks ok:false → Failed, so the caller keeps the sheet open rather
-        // than pretending the jump landed.
+        // SCOPE (Gate-4 R1 Medium corrected a false premise here): this is DISPATCHER MAPPING only —
+        // given an ok:false ack, an Href request maps to Failed, and a silent shim maps to Timeout.
+        // It deliberately does NOT claim that an unresolvable href produces ok:false in production:
+        // it does NOT. foliate's `view.goTo` catches a failed resolution and returns without
+        // rejecting, so the shim's fulfilled-promise path acks ok:TRUE with nothing moved. The
+        // bogus-href negative control therefore belongs to WI-7's connected real-book test, which
+        // can observe position; no JVM test can.
         val h = Harness(backgroundScope)
         val failed = async { h.dispatcher.goTo(FoliateGoToTarget.Href("nope.html"), timeoutMs = 60_000) }
         runCurrent()
@@ -492,6 +591,18 @@ class FoliateGoToTest {
         val literal = js.substringAfter(marker).substringBeforeLast("})}catch(e){}")
         return Json.decodeFromString(String.serializer(), literal)
     }
+
+    /**
+     * [html] with JS comments removed, so a static assertion about the shim can only be satisfied by
+     * LIVE code. Strips block comments first, then any line whose remainder starts with `//` — the
+     * shim's own explanatory comments name `target.href` / `readerAPI.goTo`, so without this every
+     * match below could pass against commented-out or deleted behavior.
+     */
+    private fun executableJsOf(html: String): String =
+        html.replace(Regex("""/\*.*?\*/""", RegexOption.DOT_MATCHES_ALL), "")
+            .lines()
+            .filterNot { it.trimStart().startsWith("//") }
+            .joinToString("\n")
 
     /** The SHIPPED shell page (not the androidTest spike copy, which has diverged). */
     private fun readerHtml(): String {
