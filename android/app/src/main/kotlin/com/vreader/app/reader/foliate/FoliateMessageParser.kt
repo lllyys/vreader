@@ -40,6 +40,12 @@ object FoliateMessageParser {
                 fraction = detail.dbl("fraction"),
                 sectionIndex = detail.int("sectionIndex") ?: 0,
                 sectionTotal = detail.int("sectionTotal") ?: 1,
+                // feature #140 WI-4. Carried VERBATIM — `str` rejects blank/non-string but never
+                // trims, because `foliateTocIndexFor` compares this against the parsed TOC hrefs by
+                // exact string equality, with no normalization on either side (a trimmed,
+                // case-folded, re-encoded or Unicode-normalized href would match the wrong row, or
+                // none at all).
+                tocHref = detail.str("tocHref"),
             )
             "error" -> FoliateMessage.Error(
                 message = detail.str("message") ?: "unknown",
