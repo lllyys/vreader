@@ -170,13 +170,15 @@ class Azw3TocConnectedTest {
         val beforeFraction = requireNotNull(before.fraction) { "no fraction in the pre-jump relocate" }
         Log.i(TAG, "jumping to '${target.title}' href=$targetHref from ${before.pos()}")
 
-        runBlocking { withContext(Dispatchers.Main) { doc.goTo(target.canonicalLocator) } }
+        val (commandSeq, _) = dispatchJump(doc, target.canonicalLocator)
 
-        // ONE relocate event, newer than the settled one, must satisfy ALL THREE predicates together.
+        // ONE relocate event, newer than THE JUMP ITSELF, must satisfy ALL THREE predicates together.
         // Split across two events they would be satisfiable by drift-somewhere-else followed by a
-        // later report of the target chapter (Gate-4 R1 #1); bound to one event they are not.
+        // later report of the target chapter (Gate-4 R1 #1); dated from the settled sample rather than
+        // from the dispatch, a relocate that arrived in the gap BEFORE the jump would qualify
+        // (Gate-4 R2 #1). Bound to one event, strictly after the tap, neither is possible.
         val after = awaitReport(
-            since = settled.seq,
+            since = commandSeq,
             timeoutMs = RELOCATE_TIMEOUT_MS,
             what = "ONE relocate that moved, moved FORWARD, and reports the tapped chapter ($targetHref)",
         ) { r ->
@@ -224,7 +226,7 @@ class Azw3TocConnectedTest {
             href = "vreader-no-such-chapter-$NONCE.xhtml#nowhere",
         )
 
-        val result = runBlocking { withContext(Dispatchers.Main) { doc.goTo(bogus) } }
+        val (_, result) = dispatchJump(doc, bogus)
         // Deliberately NOT asserted: foliate answers an unresolvable target with a fulfilled promise,
         // so the ack is a lie either way. Logged so the evidence file can quote what it actually said.
         Log.i(TAG, "bogus-href goTo acked $result (an ack is not motion — never assert on it)")
@@ -243,9 +245,9 @@ class Azw3TocConnectedTest {
         // window above was long enough and the no-change verdict was earned rather than under-observed.
         val target = pickMiddleRow(rows, avoidHref = before.tocHref)
         val targetHref = requireNotNull(target.canonicalLocator.href)
-        runBlocking { withContext(Dispatchers.Main) { doc.goTo(target.canonicalLocator) } }
+        val (liveSeq, _) = dispatchJump(doc, target.canonicalLocator)
         awaitReport(
-            since = settled.seq,
+            since = liveSeq,
             timeoutMs = OBSERVE_WINDOW_MS,
             what = "a REAL chapter jump to land within the same ${OBSERVE_WINDOW_MS}ms the bogus href " +
                 "was observed for (control liveness)",
@@ -261,10 +263,10 @@ class Azw3TocConnectedTest {
         val target = pickMiddleRow(rows, avoidHref = settled.relocate.tocHref)
         val targetHref = requireNotNull(target.canonicalLocator.href)
 
-        runBlocking { withContext(Dispatchers.Main) { doc.goTo(target.canonicalLocator) } }
+        val (commandSeq, _) = dispatchJump(doc, target.canonicalLocator)
 
         val after = awaitReport(
-            since = settled.seq,
+            since = commandSeq,
             timeoutMs = RELOCATE_TIMEOUT_MS,
             what = "a relocate whose tocHref is the tapped entry's ($targetHref)",
         ) { r -> r.tocHref == targetHref }
@@ -289,10 +291,12 @@ class Azw3TocConnectedTest {
      * thread, so the parse is re-timed THERE over a payload rebuilt from — and asserted equal to —
      * the real book's own tree. The flatten is timed on the provider's injected dispatcher.
      *
-     * Timed in MICROseconds over [COST_SAMPLES] iterations, because a millisecond clock reports this
-     * work as `0` and any ceiling against `0` is decoration (Gate-4 R1 #7). The ceiling is the ONE
-     * principled number available: [MAIN_THREAD_BUDGET_US], ~3 dropped frames at 60 Hz — past that,
-     * a book-ready parse is visible jank on the thread that paints.
+     * Sampled in MICROseconds over [COST_SAMPLES] iterations, because an integer millisecond clock
+     * reports this work as `0` and any ceiling against `0` is decoration (Gate-4 R1 #7). The elapsed
+     * MILLISECONDS the test's name promises are logged too, as the fractional value the microsecond
+     * samples actually yield (Gate-4 R2 #2 — the name must not outrun the measurement). The ceiling
+     * is the ONE principled number available: [MAIN_THREAD_BUDGET_US], ~3 dropped frames at 60 Hz —
+     * past that, a book-ready parse is visible jank on the thread that paints.
      */
     @Test
     fun realBook_tocParseAndFlatten_areLogged_withElapsedMs() {
@@ -324,7 +328,8 @@ class Azw3TocConnectedTest {
         Log.i(
             TAG,
             "TIMINGS (mean of $COST_SAMPLES): rows=${rows.size} payloadBytes=${raw.length} " +
-                "parseUs=$parseUs flattenUs=$flattenUs (main-thread budget ${MAIN_THREAD_BUDGET_US}us)",
+                "parseMs=${parseUs / 1000.0} flattenMs=${flattenUs / 1000.0} " +
+                "(parseUs=$parseUs flattenUs=$flattenUs, main-thread budget ${MAIN_THREAD_BUDGET_US}us)",
         )
         assertTrue(
             "the on-device book-ready parse of the real TOC took ${parseUs}us — past the " +
@@ -486,6 +491,22 @@ class Azw3TocConnectedTest {
                 "(last=${reported?.relocate?.pos()})",
         )
     }
+
+    /**
+     * Issue a jump and return the report sequence AS IT STOOD AT THE INSTANT OF DISPATCH, so a
+     * caller can demand a relocate that is strictly newer than the tap. The read and the dispatch
+     * share one main-thread continuation — `onRelocate` runs on Main too, and `goTo` injects its JS
+     * before its first suspension point — so no relocate can slip between them and be mistaken for
+     * the jump's own (Gate-4 R2 #1). The [Azw3GoToResult] is returned for LOGGING ONLY; no assertion
+     * in this file may treat it as evidence of motion.
+     */
+    private fun dispatchJump(doc: Azw3Document, target: Locator): Pair<Long, Azw3GoToResult> =
+        runBlocking {
+            withContext(Dispatchers.Main) {
+                val seq = reported?.seq ?: 0L
+                seq to doc.goTo(target)
+            }
+        }
 
     /**
      * Await ONE relocate EVENT newer than [since] that satisfies [predicate], and return it. Binding
