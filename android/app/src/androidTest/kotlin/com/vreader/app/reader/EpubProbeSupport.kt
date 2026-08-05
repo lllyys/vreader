@@ -89,12 +89,13 @@ object EpubFixtures {
         val chapter = """<?xml version="1.0" encoding="UTF-8"?>
 <html xmlns="http://www.w3.org/1999/xhtml"><head><title>Alignment</title><style>
 h1{font-size:3em}h2{font-size:2em}h3{font-size:1.9em}h4{font-size:1.8em}
+h5{font-size:1.75em}h6{font-size:1.72em}
 p.tiny{font-size:0.75em}small{font-size:1.7em}sub{font-size:1.6em}sup{font-size:1.55em}
 p.pub-center{text-align:center}blockquote.pub-right{text-align:right}
 p.pub-lastjustify{text-align:justify;text-align-last:justify}
 </style></head>
 <body><h1>Publisher alignment of a heading long enough to wrap onto a second line</h1><h2>Second level</h2>
-<h3>Third level</h3><h4>Fourth level</h4>
+<h3>Third level</h3><h4>Fourth level</h4><h5>Fifth level</h5><h6>Sixth level</h6>
 <p class="plain">$PROSE</p>
 <p class="pub-center">$PROSE</p>
 <blockquote class="pub-right"><p>$PROSE</p></blockquote>
