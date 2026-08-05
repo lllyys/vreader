@@ -31,9 +31,10 @@ import androidx.compose.ui.unit.dp
  * Key decisions:
  * - **The 28dp circle is the VISUAL, not the touch target.** The design draws a 28×28 button, which
  *   is well under Android's 48dp minimum tap size. The glyph and its wash keep the designed 28dp
- *   while an invisible 44dp box carries the click (the `BookDetailsSheet` header-action precedent),
- *   so the affordance looks like the artboard and is still reachable with a thumb. Changing the
- *   visual diameter would be a design change; changing the touch box is not.
+ *   while an invisible 48dp box carries the click, so the affordance looks like the artboard and is
+ *   still reachable with a thumb. Changing the visual diameter would be a design change; changing
+ *   the touch box is not. The nav bar pins its own designed height, so this larger target does not
+ *   push the bar taller than the artboard (see `DiagnosticsNavShell`).
  * - **The glyph is transcribed from the bundle**, not taken from material-icons-extended — the same
  *   call `DiagnosticsIcons` (WI-6a) made for the pulse and copy glyphs, so every diagnostics icon
  *   traces to committed design.
@@ -54,8 +55,8 @@ const val DIAGNOSTICS_SHARE_LABEL: String = "Share log"
 /** The design's 28×28 visual (`:189`). */
 private val SHARE_DIAMETER = 28.dp
 
-/** Android's minimum tap target — invisible, centered on the visual. */
-private val SHARE_TOUCH_TARGET = 44.dp
+/** Android's minimum interactive size — invisible, centered on the 28dp visual. */
+val DIAGNOSTICS_MIN_TOUCH_TARGET = 48.dp
 
 /** `Icons.Share size={15}` (`:194`). */
 private val SHARE_GLYPH_SIZE = 15.dp
@@ -71,7 +72,7 @@ fun DiagnosticsShareButton(onShare: () -> Unit, modifier: Modifier = Modifier) {
     val wash = if (tokens.isDark) Color(0x14FFFFFF) else Color(0x0F000000)
     Box(
         modifier
-            .size(SHARE_TOUCH_TARGET)
+            .size(DIAGNOSTICS_MIN_TOUCH_TARGET)
             .clip(CircleShape)
             .clickable(onClick = onShare)
             .testTag(DiagnosticsShareTags.BUTTON)

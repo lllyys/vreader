@@ -11,6 +11,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.vreader.app.diagnostics.DiagnosticsCategoryBounding
 import com.vreader.app.diagnostics.DiagnosticsDaySection
@@ -20,6 +21,7 @@ import com.vreader.app.diagnostics.DiagnosticsLogEntry
 import com.vreader.app.diagnostics.DiagnosticsLogStore
 import com.vreader.app.diagnostics.DiagnosticsUiState
 import com.vreader.app.diagnostics.IdentifiedDiagnosticsEntry
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -208,6 +210,23 @@ class DiagnosticsStatesTest {
             .assertIsDisplayed()
         compose.onNodeWithText("null", substring = true, useUnmergedTree = true).assertDoesNotExist()
         compose.onNodeWithTag(DiagnosticsStateTags.CLEAR_FILTERS).assertDoesNotExist()
+    }
+
+    /**
+     * The designed pill is ~30dp tall — under Android's 48dp interactive minimum — so the clickable
+     * box around it is grown. Asserted because every other test clicks the node's center, which
+     * succeeds at any size and would never notice the target shrinking back.
+     */
+    @Test fun theClearFiltersControlMeetsTheMinimumInteractiveSize() {
+        content(filteredEmptyState())
+
+        val minPx = with(compose.density) { 48.dp.toPx() }
+        val target = compose.onNodeWithTag(DiagnosticsStateTags.CLEAR_FILTERS).fetchSemanticsNode()
+
+        assertTrue(
+            "the Clear filters target is ${target.size.height}px tall, under $minPx px",
+            target.size.height >= minPx - 1f,
+        )
     }
 
     /**

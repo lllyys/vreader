@@ -10,6 +10,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToIndex
+import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.vreader.app.diagnostics.DiagnosticsCategoryBounding
 import com.vreader.app.diagnostics.DiagnosticsDaySection
@@ -35,8 +36,11 @@ import java.util.concurrent.atomic.AtomicInteger
  *
  * 1. **Back parity.** The design has no system-back concept, so "Android back does the same thing
  *    as the leading control" cannot be read off the bundle — it is the §6.5 adjudication, and two
- *    divergent dismissal paths would be a defect. The test drives both and asserts they land in the
- *    same action.
+ *    divergent dismissal paths would be a defect. The primary invariant is the SHAPE of the API:
+ *    `DiagnosticsNavShell` takes one `onBack`, so a caller cannot supply divergent actions. The test
+ *    below drives both paths against one callback and asserts both reach it; it would not catch a
+ *    hypothetical `BackHandler { onBack(); somethingElse() }`, which the single-parameter API is
+ *    what actually rules out.
  * 2. **Virtualization.** Asserted with a COMPOSITION COUNTER ([CountingRowProbe]) that tracks how
  *    many rows are alive in the composition at once, never by the scroll merely completing (which
  *    an eager `Column` of 2000 rows also does) and never by naming the widget (which would make the
@@ -90,6 +94,39 @@ class DiagnosticsScreenTest {
         )
     }
 
+    /**
+     * The designed visuals (a 28dp share circle, a 19dp chevron beside 15sp text) are far under
+     * Android's 48dp interactive minimum, so both controls carry a grown INVISIBLE target. Asserted
+     * because a target that silently shrinks back to the designed visual is invisible to every other
+     * test here — they all click the node's center, which works at any size.
+     */
+    @Test fun theBarsControlsMeetTheMinimumInteractiveSizeWithoutInflatingTheBar() {
+        compose.setContent { screen(entriesState()) }
+
+        val density = compose.density
+        val minPx = with(density) { 48.dp.toPx() }
+        val share = compose.onNodeWithTag(DiagnosticsShareTags.BUTTON).fetchSemanticsNode()
+        val back = compose.onNodeWithTag(DiagnosticsNavTags.BACK).fetchSemanticsNode()
+
+        assertTrue(
+            "the share target is ${share.size.height}px tall, under the 48dp minimum ($minPx px)",
+            share.size.height >= minPx - 1f && share.size.width >= minPx - 1f,
+        )
+        assertTrue(
+            "the back target is ${back.size.height}px tall, under the 48dp minimum ($minPx px)",
+            back.size.height >= minPx - 1f,
+        )
+        // …and the bar still holds its designed height (13 + 28 + 12), rather than being pushed
+        // taller by the enlarged targets.
+        val bar = compose.onNodeWithTag(DiagnosticsNavTags.BAR, useUnmergedTree = true)
+            .fetchSemanticsNode()
+        val designedBarPx = with(density) { 53.dp.toPx() }
+        assertTrue(
+            "the nav bar is ${bar.size.height}px tall, not the designed $designedBarPx px",
+            kotlin.math.abs(bar.size.height - designedBarPx) <= 2f,
+        )
+    }
+
     // ---------------------------------------------------------------- one dismissal path (§6.5)
 
     @Test fun theLeadingBackControlInvokesTheDismissAction() {
@@ -103,8 +140,10 @@ class DiagnosticsScreenTest {
     }
 
     /**
-     * Android system back must invoke the SAME action, not a second one. Both paths are driven in
-     * one test so the assertion is about their equality, not about each in isolation.
+     * Android system back must reach the SAME action, not a second one. Both paths are driven in one
+     * test against one callback, so a regression that wired system back to a different action (or to
+     * nothing) fails here. Strict side-effect identity rests on the shell's single-`onBack` API — see
+     * this class's header.
      */
     @Test fun androidSystemBackInvokesTheSameDismissActionAsTheLeadingControl() {
         val dismissals = AtomicInteger(0)

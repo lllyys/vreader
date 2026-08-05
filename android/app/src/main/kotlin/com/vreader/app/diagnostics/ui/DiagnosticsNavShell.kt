@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
@@ -23,6 +24,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
@@ -79,7 +81,17 @@ object DiagnosticsNavStrings {
 }
 
 /** `height={740}` inside the 768pt artboard (`diagnostics-artboards.jsx:13`/`:93`). */
-private const val SHEET_HEIGHT_FRACTION = 0.96f
+private const val SHEET_HEIGHT_FRACTION = 740f / 768f
+
+/**
+ * The nav bar's designed height: `padding: '13px 16px 12px'` around the tallest designed element,
+ * the 28dp share button (`:159`, `:189`) — 13 + 28 + 12.
+ *
+ * It is PINNED rather than derived from the content so the 48dp accessibility touch targets inside
+ * it (which exceed every designed visual) cannot push the bar taller than the artboard. 48 < 53, so
+ * both fit; the controls are centered in the bar.
+ */
+private val NAV_BAR_HEIGHT = 53.dp
 
 /**
  * The diagnostics sheet frame. [onBack] is the ONE dismissal action — the leading control and
@@ -111,6 +123,14 @@ fun DiagnosticsNavShell(
             Modifier
                 .fillMaxWidth()
                 .fillMaxHeight(SHEET_HEIGHT_FRACTION)
+                // `boxShadow: '0 -8px 28px rgba(0,0,0,0.25)'` (:148). Compose elevation casts a
+                // symmetric shadow rather than a directional one; 14dp is the house translation of
+                // this exact bundle shadow (`ReaderAiProvidersList`, the shipped NavSheet).
+                // Ordered BEFORE the clip so the shadow is not clipped away with the corners.
+                .shadow(
+                    elevation = 14.dp,
+                    shape = RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp),
+                )
                 .clip(RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp))
                 .background(tokens.sheetBg)
                 .systemBarsPadding()
@@ -157,7 +177,8 @@ private fun NavBar(
         Box(
             Modifier
                 .fillMaxWidth()
-                .padding(start = 16.dp, end = 16.dp, top = 13.dp, bottom = 12.dp)
+                .height(NAV_BAR_HEIGHT)
+                .padding(horizontal = 16.dp)
                 .testTag(DiagnosticsNavTags.BAR),
         ) {
             // The centered title, drawn FIRST so the interactive controls sit above it. It takes no
@@ -177,9 +198,13 @@ private fun NavBar(
             Row(
                 Modifier
                     .align(Alignment.CenterStart)
+                    // The designed control is a 19dp chevron beside 15sp text — far under the 48dp
+                    // interactive minimum, so the CLICKABLE box is grown to 48dp while the glyph and
+                    // label keep their designed size and position.
+                    .heightIn(min = DIAGNOSTICS_MIN_TOUCH_TARGET)
                     .clip(RoundedCornerShape(8.dp))
                     .clickable(onClickLabel = backLabel, onClick = onBack)
-                    .padding(vertical = 6.dp, horizontal = 2.dp)
+                    .padding(horizontal = 2.dp)
                     .testTag(DiagnosticsNavTags.BACK),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(1.dp),

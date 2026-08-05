@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -205,21 +206,31 @@ fun DiagnosticsEmptyState(
             textAlign = TextAlign.Center,
         )
         if (filtered) {
-            Text(
-                DiagnosticsStateStrings.CLEAR_FILTERS,
-                modifier = Modifier
+            // The designed pill is ~30dp tall (`padding: '6px 14px'`, :377), under the 48dp
+            // interactive minimum — so the CLICKABLE box is grown to 48dp around an unchanged pill
+            // rather than the pill itself being inflated, which would be a design change.
+            Box(
+                Modifier
                     .padding(top = 14.dp)
+                    .heightIn(min = DIAGNOSTICS_MIN_TOUCH_TARGET)
                     .clip(RoundedCornerShape(percent = 50))
                     .clickable(onClick = onClearFilters)
-                    // `background: ${t.accent}18` (:378) — the accent at 0x18 alpha.
-                    .background(tokens.accent.copy(alpha = 0x18 / 255f))
-                    .padding(horizontal = 14.dp, vertical = 6.dp)
                     .testTag(DiagnosticsStateTags.CLEAR_FILTERS),
-                color = tokens.accent,
-                fontFamily = DiagnosticsFonts.Sans,
-                fontSize = 12.5.sp,
-                fontWeight = FontWeight.SemiBold,
-            )
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    DiagnosticsStateStrings.CLEAR_FILTERS,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(percent = 50))
+                        // `background: ${t.accent}18` (:378) — the accent at 0x18 alpha.
+                        .background(tokens.accent.copy(alpha = 0x18 / 255f))
+                        .padding(horizontal = 14.dp, vertical = 6.dp),
+                    color = tokens.accent,
+                    fontFamily = DiagnosticsFonts.Sans,
+                    fontSize = 12.5.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
         }
     }
 }
