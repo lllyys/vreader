@@ -173,6 +173,16 @@ class ImportFilterResolutionConnectedTest {
     }
 
     @Test
+    fun typelessView_doesNotFallForSuffixTraps() {
+        // A pathPattern must match the WHOLE path, so a book extension that is not the
+        // LAST segment must not resolve — otherwise `.epub.bak` backups and directory-ish
+        // paths would drag VReader in.
+        assertFalse(resolves(typelessView("content://com.example.provider/docs/book.epub.bak")))
+        assertFalse(resolves(typelessView("content://com.example.provider/docs/book.epub/trailing")))
+        assertFalse(resolves(typelessView("content://com.example.provider/docs/epub")))
+    }
+
+    @Test
     fun typelessView_overFileSchemeDoesNotMatch() {
         // Documents the M1 correction: file:// has an EMPTY authority, so host="*" can
         // never match it — which is why filter B is content-only.

@@ -135,6 +135,30 @@ class ImportActivityUriExtractionTest {
     }
 
     @Test
+    fun aUriLessClipItemDoesNotDiscardTheValidOnesAroundIt() {
+        // Per-item resilience: one unusable entry skips itself, it does not poison the batch.
+        val clip = ClipData.newRawUri("books", uri(12)).apply {
+            addItem(ClipData.Item("interleaved text"))
+            addItem(ClipData.Item(uri(13)))
+            addItem(ClipData.Item("more text"))
+            addItem(ClipData.Item(uri(14)))
+        }
+        val intent = Intent(Intent.ACTION_SEND_MULTIPLE).apply { clipData = clip }
+        assertEquals(listOf(uri(12), uri(13), uri(14)), ImportActivity.urisFrom(intent))
+    }
+
+    @Test
+    fun sendMultiple_withAMixedTypeListKeepsOnlyTheUris() {
+        // A sender may put other Parcelables alongside the streams; those are dropped,
+        // not fatal, and the behaviour must not depend on the API level's IntentCompat
+        // implementation.
+        val payload = arrayListOf<android.os.Parcelable>(uri(15), Intent("noise"), uri(16))
+        val intent = Intent(Intent.ACTION_SEND_MULTIPLE)
+            .putParcelableArrayListExtra(Intent.EXTRA_STREAM, payload)
+        assertEquals(listOf(uri(15), uri(16)), ImportActivity.urisFrom(intent))
+    }
+
+    @Test
     fun unknownActionAndNullIntentReturnEmpty() {
         assertEquals(emptyList<Uri>(), ImportActivity.urisFrom(null))
         assertEquals(emptyList<Uri>(), ImportActivity.urisFrom(Intent(Intent.ACTION_MAIN, uri(12))))
@@ -145,5 +169,39 @@ class ImportActivityUriExtractionTest {
     fun maxBatchIsTwenty() {
         assertEquals(20, ImportActivity.MAX_BATCH)
         assertTrue(ImportActivity.MAX_BATCH > 0)
+        // The scan bound must leave real headroom over the collection bound, or a mixed
+        // share would lose books.
+        assertTrue(ImportActivity.MAX_SCANNED_ITEMS > ImportActivity.MAX_BATCH)
+    }
+
+    @Test
+    fun aSparseListPayloadIsBoundedByTheScanCap() {
+        // MAX_BATCH alone cannot bound this: none of the noise is a Uri, so a naive
+        // extractor would walk every entry a hostile sender cared to send.
+        val payload = ArrayList<android.os.Parcelable>()
+        repeat(ImportActivity.MAX_SCANNED_ITEMS + 5) { payload.add(Intent("noise")) }
+        payload.add(uri(19))
+        val intent = Intent(Intent.ACTION_SEND_MULTIPLE)
+            .putParcelableArrayListExtra(Intent.EXTRA_STREAM, payload)
+        assertEquals(emptyList<Uri>(), ImportActivity.urisFrom(intent))
+    }
+
+    @Test
+    fun aUriJustInsideTheScanCapIsStillFound() {
+        val payload = ArrayList<android.os.Parcelable>()
+        repeat(ImportActivity.MAX_SCANNED_ITEMS - 1) { payload.add(Intent("noise")) }
+        payload.add(uri(20))
+        val intent = Intent(Intent.ACTION_SEND_MULTIPLE)
+            .putParcelableArrayListExtra(Intent.EXTRA_STREAM, payload)
+        assertEquals(listOf(uri(20)), ImportActivity.urisFrom(intent))
+    }
+
+    @Test
+    fun aSparseClipDataPayloadIsBoundedByTheScanCap() {
+        val clip = ClipData.newPlainText("label", "text 0")
+        repeat(ImportActivity.MAX_SCANNED_ITEMS + 5) { clip.addItem(ClipData.Item("text")) }
+        clip.addItem(ClipData.Item(uri(21)))
+        val intent = Intent(Intent.ACTION_SEND).apply { clipData = clip }
+        assertEquals(emptyList<Uri>(), ImportActivity.urisFrom(intent))
     }
 }

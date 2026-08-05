@@ -20,6 +20,7 @@ package com.vreader.app.imports
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.os.Parcelable
 import androidx.activity.ComponentActivity
 import androidx.core.content.IntentCompat
 
@@ -35,10 +36,23 @@ class ImportActivity : ComponentActivity() {
     companion object {
         /**
          * The most URIs a single inbound intent may contribute. A share sheet can hand
-         * over an arbitrarily large selection; the cap bounds the work an untrusted
-         * sender can queue.
+         * over an arbitrarily large selection; every extractor below stops COLLECTING at
+         * this many rather than materialising the sender's whole payload and truncating
+         * afterwards, so a hostile batch costs at most 20 references.
          */
         const val MAX_BATCH = 20
+
+        /**
+         * The most payload entries any extractor will LOOK AT, whether or not they turn
+         * out to be URIs.
+         *
+         * [MAX_BATCH] alone bounds a dense payload but not a sparse one: 100 000
+         * URI-less `ClipData` items would still be walked one by one. This is the
+         * separate work bound for that case. It is 10x [MAX_BATCH] so a legitimately
+         * mixed share (URIs interleaved with text items) still finds its books, while a
+         * hostile sender's cost stays constant.
+         */
+        const val MAX_SCANNED_ITEMS = 200
 
         /**
          * Every URI an inbound intent carries, in sender order, capped at [MAX_BATCH].
@@ -51,13 +65,12 @@ class ImportActivity : ComponentActivity() {
          */
         fun urisFrom(intent: Intent?): List<Uri> {
             if (intent == null) return emptyList()
-            val found = when (intent.action) {
+            return when (intent.action) {
                 Intent.ACTION_VIEW -> listOfNotNull(intent.data)
                 Intent.ACTION_SEND -> singleStreamUri(intent)?.let { listOf(it) } ?: clipUris(intent)
                 Intent.ACTION_SEND_MULTIPLE -> multiStreamUris(intent).ifEmpty { clipUris(intent) }
                 else -> emptyList()
             }
-            return found.take(MAX_BATCH)
         }
 
         /** `EXTRA_STREAM` as a single Uri; null when absent OR present with another type. */
@@ -65,17 +78,46 @@ class ImportActivity : ComponentActivity() {
             IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)
         }.getOrNull()
 
-        /** `EXTRA_STREAM` as a list; non-Uri members are dropped rather than fatal. */
-        private fun multiStreamUris(intent: Intent): List<Uri> = runCatching {
-            IntentCompat.getParcelableArrayListExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)
-                ?.filterIsInstance<Uri>()
-                .orEmpty()
-        }.getOrElse { emptyList() }
+        /**
+         * `EXTRA_STREAM` as a list of at most [MAX_BATCH] URIs.
+         *
+         * The list is requested as `Parcelable`, not `Uri`, on purpose: `IntentCompat`
+         * has two implementations (a plain unchecked cast below API 34, the type-checked
+         * platform call above it), and asking for `Uri` lets the newer one reject a
+         * mixed-type list wholesale. Asking for the base type makes both behave alike and
+         * leaves the per-element filtering here, where a stray member is skipped rather
+         * than fatal. Iterating as `Any?` also avoids a per-element checked cast.
+         */
+        private fun multiStreamUris(intent: Intent): List<Uri> {
+            val raw: List<Any?> = runCatching {
+                IntentCompat.getParcelableArrayListExtra(intent, Intent.EXTRA_STREAM, Parcelable::class.java)
+            }.getOrNull() ?: return emptyList()
+            val out = ArrayList<Uri>()
+            var scanned = 0
+            for (item in raw) {
+                if (out.size >= MAX_BATCH || scanned >= MAX_SCANNED_ITEMS) break
+                scanned++
+                if (item is Uri) out.add(item)
+            }
+            return out
+        }
 
-        /** ClipData items that actually carry a Uri (a text item contributes nothing). */
-        private fun clipUris(intent: Intent): List<Uri> = runCatching {
-            val clip = intent.clipData ?: return@runCatching emptyList()
-            (0 until clip.itemCount).mapNotNull { clip.getItemAt(it)?.uri }
-        }.getOrElse { emptyList() }
+        /**
+         * ClipData items that actually carry a Uri (a text item contributes nothing).
+         *
+         * Each item is read under its own guard so one malformed entry skips itself
+         * instead of discarding the valid URIs around it.
+         */
+        private fun clipUris(intent: Intent): List<Uri> {
+            val clip = runCatching { intent.clipData }.getOrNull() ?: return emptyList()
+            val count = runCatching { clip.itemCount }.getOrNull() ?: return emptyList()
+            val out = ArrayList<Uri>()
+            var index = 0
+            while (index < count && index < MAX_SCANNED_ITEMS && out.size < MAX_BATCH) {
+                runCatching { clip.getItemAt(index)?.uri }.getOrNull()?.let { out.add(it) }
+                index++
+            }
+            return out
+        }
     }
 }
