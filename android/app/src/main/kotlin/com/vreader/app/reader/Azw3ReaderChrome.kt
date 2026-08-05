@@ -54,11 +54,15 @@ import vreader.contracts.Locator
 
 /**
  * feature #135 WI-7 — map an awaited [Azw3GoToResult] (the settled outcome of [Azw3Document.goTo]) to the
- * sheet's [JumpResult]. [Azw3GoToResult.Succeeded] landed → [JumpResult.Succeeded]; Timeout / Failed
- * (unresolvable target or dead bundle) / Superseded (a newer jump replaced this one) are all NON-landings
- * → [JumpResult.Failed] (no invented error surface — rule 51). Pure/JVM-testable. Used to surface the
- * awaited landing outcome off the background jump (the SYNCHRONOUS sheet-dismiss decision is
+ * sheet's [JumpResult]. [Azw3GoToResult.Succeeded] — the bundle ACKNOWLEDGED the jump — →
+ * [JumpResult.Succeeded]; Timeout / Failed (unresolvable target or dead bundle) / Superseded (a newer jump
+ * replaced this one) all → [JumpResult.Failed] (no invented error surface — rule 51). Pure/JVM-testable.
+ * Used to surface the awaited outcome off the background jump (the SYNCHRONOUS sheet-dismiss decision is
  * [azw3JumpDecision], since the awaited goTo cannot run on the tap thread).
+ *
+ * A `Succeeded` here means ACKNOWLEDGED, NOT MOVED (Gate-4 R1): foliate's `view.goTo` catches a failed
+ * resolution and settles anyway, so the shim can ack `ok:true` on a jump that changed nothing. Only an
+ * observed change in a later relocate's reported position proves motion — see WI-7's connected round-trip.
  */
 fun azw3JumpResult(result: Azw3GoToResult): JumpResult = when (result) {
     is Azw3GoToResult.Succeeded -> JumpResult.Succeeded
@@ -71,7 +75,8 @@ fun azw3JumpResult(result: Azw3GoToResult): JumpResult = when (result) {
  * sheet decides dismiss-vs-stay up front from target validity: a null document (nothing loaded) OR a
  * canonical with no jumpable target (no cfi + no finite progression, per [FoliateGoToTarget.from]) →
  * [JumpResult.Failed] (the sheet stays open — rule 51); an otherwise-jumpable target → [JumpResult.Succeeded]
- * (dismiss; the awaited goTo then lands the position off-thread, re-issued once on render death).
+ * (dismiss; the awaited goTo is then ISSUED off-thread, and re-issued once on render death). "Jumpable"
+ * means a target could be DERIVED — not that the reader will move; see [azw3JumpResult].
  * Pure/JVM-testable ([document] is only null-checked).
  */
 fun azw3JumpDecision(document: Azw3Document?, canonical: Locator): JumpResult {
@@ -81,6 +86,27 @@ fun azw3JumpDecision(document: Azw3Document?, canonical: Locator): JumpResult {
     } else {
         JumpResult.Failed
     }
+}
+
+/**
+ * feature #140 WI-6 — the SYNCHRONOUS dismiss decision for a tapped Contents row, i.e. [azw3JumpDecision]
+ * with the row-selection boundary folded in. [JumpResult.Failed] (the sheet stays open — rule 51) when:
+ *  - [index] is outside [entries] (a stale tap against a TOC that has since changed), or
+ *  - [document] is null — the window right after a render-process death, before the replacement document
+ *    is hoisted back up. The rows themselves stay on screen (the host never clears them), so the user can
+ *    simply tap again once the reader has recovered.
+ * Otherwise it delegates to [azw3JumpDecision], which reports Succeeded iff the row's canonical locator
+ * yields a jump target at all.
+ *
+ * It decides only whether to DISMISS THE SHEET. It is not, and must not be read as, evidence that the
+ * reader moved: foliate's `view.goTo` swallows a failed resolution and acks anyway, so even the awaited
+ * result that follows proves only that the round-trip completed. Actual motion is observed by WI-7's
+ * real-book connected round-trip, against the position a later relocate reports. Pure/JVM-testable
+ * ([document] is only null-checked).
+ */
+fun azw3TocJumpDecision(document: Azw3Document?, entries: List<TocEntry>, index: Int): JumpResult {
+    val entry = entries.getOrNull(index) ?: return JumpResult.Failed
+    return azw3JumpDecision(document, entry.canonicalLocator)
 }
 
 /**

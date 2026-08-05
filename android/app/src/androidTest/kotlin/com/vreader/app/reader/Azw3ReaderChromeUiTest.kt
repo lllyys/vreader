@@ -26,6 +26,7 @@ import com.vreader.app.annotations.HighlightRecord
 import com.vreader.app.annotations.NoteRecord
 import com.vreader.app.reader.chrome.ReaderChromeState
 import com.vreader.app.reader.chrome.ReaderSheet
+import com.vreader.app.reader.nav.JumpResult
 import com.vreader.app.reader.nav.TocEntry
 import com.vreader.app.reader.settings.ReaderTheme
 import vreader.contracts.Locator
@@ -289,6 +290,31 @@ class Azw3ReaderChromeUiTest {
         compose.waitUntil(10_000) { nodeCount("toc-sheet-content") == 0 }
         assertEquals("the tapped row's index reached the host", 2, tapped)
         assertEquals(ReaderSheet.None, state.value.sheet)
+    }
+
+    // ---- the row-jump decision (pure; the host's onJumpToc is one delegation to it) --------------
+
+    /**
+     * Gate-4 R1 (Medium) — the render-process-death window. While the host is recreating the WebView it
+     * holds NO live document, and a row tapped in that window must degrade to [JumpResult.Failed] (the
+     * sheet stays open, no invented error surface) rather than being silently dropped or crashing.
+     *
+     * The other half of that acceptance clause — that the TOC rows stay ON SCREEN across the recreate —
+     * is structural here (the host publishes only on [Azw3DocState.Loaded], so nothing ever clears the
+     * entries) and is observable only against a real render-process kill, which is WI-7's connected slice.
+     */
+    @Test fun tocJumpDecision_withNoLiveDocument_failsSoTheSheetStaysOpen() {
+        assertEquals(JumpResult.Failed, azw3TocJumpDecision(document = null, entries = chapters, index = 0))
+        assertEquals(JumpResult.Failed, azw3TocJumpDecision(document = null, entries = chapters, index = 3))
+    }
+
+    /** A tap against an index the TOC no longer has (a stale sheet) degrades the same way — never an
+     *  IndexOutOfBounds, never a dismiss on a row that does not exist. */
+    @Test fun tocJumpDecision_withAnOutOfRangeIndex_fails() {
+        assertEquals(JumpResult.Failed, azw3TocJumpDecision(null, chapters, -1))
+        assertEquals(JumpResult.Failed, azw3TocJumpDecision(null, chapters, chapters.size))
+        assertEquals(JumpResult.Failed, azw3TocJumpDecision(null, chapters, Int.MAX_VALUE))
+        assertEquals(JumpResult.Failed, azw3TocJumpDecision(null, emptyList(), 0))
     }
 
     // ---- unchanged #132 behaviour ---------------------------------------------------------------

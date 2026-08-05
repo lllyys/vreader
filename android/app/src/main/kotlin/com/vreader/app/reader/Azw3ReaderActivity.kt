@@ -87,6 +87,7 @@ import com.vreader.app.reader.nav.JumpResult
 import com.vreader.app.reader.nav.TocEntry
 import com.vreader.app.reader.nav.foliateTocIndexFor
 import com.vreader.app.ui.theme.VReaderFonts
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
@@ -146,9 +147,13 @@ class Azw3ReaderActivity : ComponentActivity() {
                         com.vreader.app.reader.details.BookDetailsMapper.map(o.book, collectionNames, pageCount = null)
                     }
 
-                    // feature #135 WI-7 — the bookmark wiring. AZW3 has no reader TOC, so the row projection
-                    // has no chapter/page (the WI-4 EPUB/AZW3 branch degrades to null fields — no crash) — a
-                    // null tocIndex. The current position comes from the relocate-derived canonical Locator;
+                    // feature #135 WI-7 — the bookmark wiring. Bookmark ROWS still project no chapter/page
+                    // label: the row projection needs a bookmark's position mapped onto a chapter, and this
+                    // host's TOC is keyed by href while a bookmark anchors on a cfi/fraction, so there is no
+                    // mapping to feed it — hence a null tocIndex (the WI-4 EPUB/AZW3 branch degrades to null
+                    // fields, no crash) even though the READER now has a TOC (#140 WI-6, below). Projecting
+                    // one would need an href↔position bridge, which is the tracked bookmark-from-TOC
+                    // follow-up. The current position comes from the relocate-derived canonical Locator;
                     // the jump uses Azw3Document.goTo (CFI-first→fraction, render-death carry-across).
                     val bookmarkRecords by container.annotationsRepository.bookmarks(bookKey)
                         .collectAsStateWithLifecycle(initialValue = emptyList())
@@ -181,7 +186,19 @@ class Azw3ReaderActivity : ComponentActivity() {
                         val provider = FoliateTocProvider(
                             items = tocItems, book = o.book, dispatcher = Dispatchers.Default,
                         )
-                        tocEntriesState.value = runCatching { provider.toc() }.getOrDefault(emptyList())
+                        // NOT runCatching (Gate-4 R1 Medium): it swallows CancellationException too, so a
+                        // flatten cancelled by a book change or by this effect leaving composition would
+                        // publish an EMPTY list — blinking the Contents control off, or clobbering the next
+                        // book's rows. Cancellation must propagate; only a genuine failure degrades to "no
+                        // TOC", which is the same hide-the-control signal a book without one produces.
+                        val flattened = try {
+                            provider.toc()
+                        } catch (cancellation: CancellationException) {
+                            throw cancellation
+                        } catch (failure: Exception) {
+                            emptyList()
+                        }
+                        tocEntriesState.value = flattened
                     }
                     val tocEntries = tocEntriesState.value
                     // The highlighted row: foliate's OWN current-chapter answer (relocate.tocHref), matched
@@ -190,23 +207,21 @@ class Azw3ReaderActivity : ComponentActivity() {
                     var currentTocHref by remember(bookKey) { mutableStateOf<String?>(null) }
                     val currentTocIndex = foliateTocIndexFor(currentTocHref, tocHrefs)
                     // A tapped row reuses the EXISTING #135 jump seam verbatim: the synchronous
-                    // azw3JumpDecision (from target validity) drives the sheet's dismiss, while the awaited
-                    // goTo — which blocks on the bundle's relocate ack and so CANNOT run on the tap thread —
-                    // lands the position off the jump scope, carried across a render death by the host.
-                    // An out-of-range row or a document that isn't live yet → false → the sheet stays open
-                    // with no invented error surface (rule 51).
+                    // [azw3TocJumpDecision] drives the sheet's dismiss from target validity, while the
+                    // awaited goTo — which blocks on the bundle's ack and so CANNOT run on the tap thread —
+                    // is ISSUED off the jump scope. Note what the decision does NOT claim: foliate's
+                    // view.goTo swallows a failed resolution and acks anyway, so neither the decision nor
+                    // the ack is evidence the reader moved (WI-7's real-book round-trip is). An
+                    // out-of-range row, or the document-less window right after a render-process death,
+                    // degrades to false → the sheet stays open, no invented error surface (rule 51).
                     val onJumpToc: (Int) -> Boolean = { index ->
-                        val entry = tocEntries.getOrNull(index)
+                        val decision = azw3TocJumpDecision(liveDocument, tocEntries, index)
                         val doc = liveDocument
-                        if (entry == null) {
-                            false
-                        } else {
-                            val decision = azw3JumpDecision(doc, entry.canonicalLocator)
-                            if (decision == JumpResult.Succeeded && doc != null) {
-                                jumpScope.launch { runCatching { doc.goTo(entry.canonicalLocator) } }
-                            }
-                            decision == JumpResult.Succeeded
+                        val entry = tocEntries.getOrNull(index)
+                        if (decision == JumpResult.Succeeded && doc != null && entry != null) {
+                            jumpScope.launch { runCatching { doc.goTo(entry.canonicalLocator) } }
                         }
+                        decision == JumpResult.Succeeded
                     }
 
                     Azw3ReaderChrome(
