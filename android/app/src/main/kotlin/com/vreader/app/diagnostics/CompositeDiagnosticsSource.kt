@@ -23,8 +23,13 @@ import kotlinx.coroutines.CancellationException
  *   bug report.
  * - **The RING copy wins a collision.** Both carry the same text in the normal case, but logd
  *   truncates the tail — so preferring the ring's copy is what keeps the end of a long stack trace.
- * - **No exception escapes** except [CancellationException]: a source failure is data
- *   (`Unavailable`), but cancelling the caller is not a source failure and must not be swallowed.
+ * - **Only an ordinary `Exception` is contained**, as `Unavailable` — a source failure is data.
+ *   [CancellationException] propagates, because cancelling the caller is not a source failure and
+ *   must not be swallowed; an `Error` (OOM, LinkageError) propagates too, because it is not
+ *   containable and reporting a JVM failure as "the platform log is degraded" would blame the wrong
+ *   subsystem in the export. This mirrors `DiagnosticsLogStore.load`, whose own audit narrowed the
+ *   same `catch (Throwable)`; the containment matters more here now that a contained primary
+ *   failure also sets [SourceResult.Available.degradedReason].
  * - **A surviving merge still REPORTS a dead primary**, via
  *   [SourceResult.Available.degradedReason]. Collapsing "logcat denied, ring healthy" into a flat
  *   `Available` is what made `DiagnosticsLogStore` print `capture source: logcat + breadcrumbs`
@@ -115,7 +120,7 @@ class CompositeDiagnosticsSource(
         source.recentEntries(sinceMillis, limit)
     } catch (cancelled: CancellationException) {
         throw cancelled
-    } catch (t: Throwable) {
-        SourceResult.Unavailable("$label threw ${t.javaClass.simpleName}: ${t.message}")
+    } catch (failure: Exception) {
+        SourceResult.Unavailable("$label threw ${failure.javaClass.simpleName}: ${failure.message}")
     }
 }

@@ -332,7 +332,11 @@ class CompositeDiagnosticsSourceTest {
         assertEquals(null, result.degradedReason())
     }
 
-    /** Both legs dead stays `Unavailable` — never a degraded `Available`, which would be a batch. */
+    /**
+     * Both legs dead stays `Unavailable` — never a degraded `Available`, which would assert a batch
+     * that does not exist. The constituent reasons are asserted too: subtype alone would let a
+     * mutation that discarded or corrupted the combined reason survive.
+     */
     @Test
     fun bothUnavailableIsStillUnavailableRatherThanADegradedAvailable() = runTest {
         val result = merge(
@@ -341,21 +345,52 @@ class CompositeDiagnosticsSourceTest {
         )
 
         assertTrue("expected Unavailable, got $result", result is SourceResult.Unavailable)
+        val reason = (result as SourceResult.Unavailable).reason
+        assertTrue(reason, reason.contains("logcat: denied"))
+        assertTrue(reason, reason.contains("ring: absent"))
     }
 
     /**
      * A primary that is ITSELF a degraded composite keeps its provenance: nesting must not launder
-     * the signal back to healthy.
+     * the signal back to healthy. Asserted on the merge branch AND the `limit <= 0` branch, so a
+     * fix that propagated the nested reason through only one of them cannot pass.
      */
     @Test
     fun anAlreadyDegradedPrimaryPropagatesItsReasonOutward() = runTest {
-        val innerlyDegraded = FakeSource(
-            SourceResult.Available(listOf(entry(10, "partial")), degradedReason = "logcat: exec denied"),
+        val innerlyDegraded = SourceResult.Available(
+            listOf(entry(10, "partial")),
+            degradedReason = "logcat: exec denied",
+        )
+        val ring = available(entry(20, "floor", sequenceId = 1L))
+
+        assertEquals(
+            "logcat: exec denied",
+            merge(FakeSource(innerlyDegraded), FakeSource(ring)).degradedReason(),
+        )
+        assertEquals(
+            "logcat: exec denied",
+            merge(FakeSource(innerlyDegraded), FakeSource(ring), limit = 0).degradedReason(),
+        )
+        assertEquals(
+            "logcat: exec denied",
+            merge(FakeSource(innerlyDegraded), FakeSource(ring), limit = -1).degradedReason(),
+        )
+    }
+
+    /**
+     * The primary-only ruling asserted for the THROWN secondary too, not just the explicitly
+     * `Unavailable` one — otherwise an implementation that treated only a thrown secondary as
+     * platform degradation would keep the `Unavailable`-secondary test green.
+     */
+    @Test
+    fun aThrowingSecondaryIsAlsoNotReportedAsPrimaryDegradation() = runTest {
+        val result = merge(
+            FakeSource(available(entry(10, "platform"))),
+            FakeSource(error = IllegalStateException("ring exploded")),
         )
 
-        val result = merge(innerlyDegraded, FakeSource(available(entry(20, "floor", sequenceId = 1L))))
-
-        assertEquals("logcat: exec denied", result.degradedReason())
+        assertEquals(listOf("platform"), result.entries().map { it.message })
+        assertEquals(null, result.degradedReason())
     }
 
     /** A leaf source constructs `Available(entries)` positionally and is undegraded by default. */
@@ -389,6 +424,38 @@ class CompositeDiagnosticsSourceTest {
             FakeSource(error = IOException("b")),
         )
         assertTrue("expected Unavailable, got $result", result is SourceResult.Unavailable)
+    }
+
+    /**
+     * An `Error` is NOT a source failure and must not be laundered into one — containment is
+     * `catch (Exception)`, deliberately not `catch (Throwable)`. This matters more now that a
+     * contained PRIMARY failure also sets `degradedReason`: swallowing an OOM would make the export
+     * blame the platform log for a JVM failure. Asserted on BOTH legs, since either could hide one.
+     */
+    @Test
+    fun anErrorFromThePrimaryPropagatesRatherThanBecomingDegradation() = runTest {
+        try {
+            merge(
+                FakeSource(error = StackOverflowError("fatal")),
+                FakeSource(available(entry(10L, "floor", sequenceId = 1L))),
+            )
+            throw AssertionError("an Error must propagate")
+        } catch (expected: StackOverflowError) {
+            assertEquals("fatal", expected.message)
+        }
+    }
+
+    @Test
+    fun anErrorFromTheSecondaryPropagatesRatherThanBecomingUnavailable() = runTest {
+        try {
+            merge(
+                FakeSource(available(entry(10L, "platform"))),
+                FakeSource(error = StackOverflowError("fatal")),
+            )
+            throw AssertionError("an Error must propagate")
+        } catch (expected: StackOverflowError) {
+            assertEquals("fatal", expected.message)
+        }
     }
 
     /**

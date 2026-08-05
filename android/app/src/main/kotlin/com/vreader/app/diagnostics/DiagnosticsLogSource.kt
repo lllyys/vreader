@@ -32,11 +32,16 @@ sealed interface SourceResult {
      * The source was readable. [entries] may legitimately be empty.
      *
      * [degradedReason] carries PROVENANCE for a result that answered but is less complete than it
-     * should be: non-null means *"these entries are everything I could get, but a source I depend
-     * on was unavailable — here is why"*. It defaults to `null` and a LEAF source always leaves it
-     * there: a single source that could be read produced a complete result by definition, and only
-     * a compositor knows that something is missing. Only [CompositeDiagnosticsSource] sets it, and
-     * only for its PRIMARY (platform-log) leg — see that class for why the asymmetry is deliberate.
+     * should be: non-null means *"these entries are everything I could get, but the PLATFORM LOG —
+     * the primary capture leg — did not answer; here is why"*. It defaults to `null` and a LEAF
+     * source always leaves it there: a single source that could be read produced a complete result
+     * by definition, and only a compositor knows that something is missing.
+     *
+     * The contract is deliberately narrowed to the primary leg rather than to "any contributing
+     * source", because the only consumer — the export header's two-valued `capture source:` line —
+     * has no vocabulary for anything else (plan §6.5; rule 51 fixes the wording). Only
+     * [CompositeDiagnosticsSource] sets it, and that class documents the asymmetry and its cost.
+     * A `null` reason therefore means "the platform log answered", NOT "every source answered".
      *
      * This is deliberately a nullable reason and not a `primaryUnavailable` flag: "primary" is a
      * compositing concept that a leaf source cannot meaningfully answer, whereas a reason string

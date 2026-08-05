@@ -43,10 +43,17 @@ import java.time.Instant
  *   [SourceResult.Available.degradedReason].)
  *
  * Known limitations (accepted, NOT mitigated — do not read these as guarantees):
- * - **The flag is about the PRIMARY (platform log) leg only.** A dead in-process ring under a
- *   healthy logcat reads as NOT degraded, because the export's degraded wording names the platform
- *   log specifically (plan §6.5). That asymmetry is `CompositeDiagnosticsSource`'s deliberate
- *   ruling, documented there; the store just consumes it.
+ * - **The flag is about the PRIMARY (platform log) leg only, so a failed SECONDARY leg is
+ *   INVISIBLE here.** A dead in-process ring under a healthy logcat reads as NOT degraded and the
+ *   export prints [CAPTURE_SOURCE_FULL]. That is not a claim the ring answered — the `capture
+ *   source:` line has exactly two values and the other one names the platform log (plan §6.5, rule
+ *   51 fixes both strings), so reporting a ring failure through it would state the opposite of the
+ *   truth. Surfacing secondary-leg failure honestly needs a THIRD label, i.e. a design/plan change,
+ *   not a code change here. The cost is small in the shipped wiring:
+ *   `RingBufferDiagnosticsSource` has no modelled `Unavailable` path at all and reads an in-memory
+ *   deque, so the only way it fails is by throwing — and an `Error` now propagates rather than
+ *   being contained. The asymmetry is `CompositeDiagnosticsSource`'s ruling, argued there; the
+ *   store just consumes it.
  * - **Loads are expected to be SINGLE-FLIGHT.** [lastLoadDegraded] is `@Volatile`, so there is no
  *   torn read, but it is a store-wide latch rather than a property of one returned batch: if two
  *   loads overlap, the verdict of the one that COMPLETES LAST wins, and an earlier caller reading
@@ -159,7 +166,12 @@ class DiagnosticsLogStore(
          */
         const val CAPTURE_SCOPE_LABEL: String = "recent activity"
 
-        /** `capture source:` value when the last-completing load's whole capture stack answered. */
+        /**
+         * `capture source:` value when the last-completing load found the PLATFORM LOG healthy.
+         * Deliberately not documented as "the whole capture stack answered": this label is also
+         * what a healthy logcat plus a failed in-process ring prints, because the line has only two
+         * values and the other one names the platform log (see the class doc's known limitation).
+         */
         const val CAPTURE_SOURCE_FULL: String = "logcat + breadcrumbs"
 
         /**
