@@ -132,6 +132,63 @@ class Azw3DisplayCssTest {
         assertTrue("descendant reset should include legacy <font>, got:\n$css", css.contains("font { color: inherit !important; }") || css.contains(", font"))
     }
 
+    // ---- feature #156 WI-3: justify-by-default, scoped to guarded paragraphs ----
+
+    @Test
+    fun justifiesParagraphs_withTheIntentionalAlignmentGuards() {
+        val css = ReaderSettings().foliateDisplayCss()
+        assertTrue(
+            "expected a guarded p justify rule, got:\n$css",
+            css.contains(
+                "p:not([style*=text-align]):not([align]):not([class*=center]):not([class*=right]) " +
+                    "{ text-align: justify !important; }",
+            ),
+        )
+    }
+
+    @Test
+    fun justifyRule_isScopedToParagraphs_neverHeadingsOrBody() {
+        // The rule is `p`-scoped ON PURPOSE. iOS #95 rejected `body { text-align: justify }` as too broad,
+        // and WI-2 measured the consequence of the broad shape on EPUB: ReadiumCSS's override targets
+        // `:root`, so headings INHERIT justification (effect E1c). Here headings and body must be untouched
+        // — which is what makes AC-7's "prose justifies while headings do not" achievable at all.
+        val css = ReaderSettings().foliateDisplayCss()
+        val justifyLines = css.lines().filter { it.contains("text-align: justify") }
+        assertEquals("exactly one justify rule expected, got:\n$css", 1, justifyLines.size)
+        val rule = justifyLines.single()
+        assertTrue("the justify rule must be p-scoped, got: $rule", rule.trimStart().startsWith("p:not("))
+        for (h in listOf("h1", "h2", "h3", "h4", "h5", "h6")) {
+            assertFalse("the justify rule must not target $h, got: $rule", rule.contains(h))
+        }
+        assertFalse("the justify rule must not target body, got: $rule", rule.contains("body"))
+        // `text-align-last` is deliberately NOT set: the engine leaves a paragraph's last line
+        // start-aligned by default, which is the no-stretched-final-line behaviour the plan relies on.
+        assertFalse("text-align-last must not be forced, got:\n$css", css.contains("text-align-last"))
+    }
+
+    @Test
+    fun justifyRule_isInvariantAcrossEverySetting() {
+        // Alignment is orthogonal to theme / family / size / spacing / margin (the T8 edge matrix).
+        for (theme in ReaderTheme.entries) {
+            for (family in ReaderFontFamily.entries) {
+                for (size in listOf(ReaderSettings.MIN_FONT_SIZE, 18f, ReaderSettings.MAX_FONT_SIZE)) {
+                    for (spacing in listOf(ReaderSettings.MIN_LINE_SPACING, ReaderSettings.MAX_LINE_SPACING)) {
+                        for (margin in listOf(ReaderSettings.MIN_MARGIN, ReaderSettings.MAX_MARGIN)) {
+                            val css = ReaderSettings(
+                                theme = theme, fontFamily = family, fontSizeSp = size,
+                                lineSpacing = spacing, marginDp = margin,
+                            ).foliateDisplayCss()
+                            assertEquals(
+                                "justify must be emitted exactly once for $theme/$family/$size/$spacing/$margin",
+                                1, css.lines().count { it.contains("text-align: justify") },
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // ---- determinism: same settings → byte-identical CSS (no set ordering / float jitter) ----
 
     @Test

@@ -4,7 +4,8 @@
 // resolve against the calibrated size), a descendant cascade-flatten (Kindle/MOBI carry per-element em
 // font-size + <font color> ink that would otherwise compound / survive a body rule), headings revert,
 // the serif/sans family stack, the theme's bg/ink hex, a descendant `color: inherit` reset for theme
-// parity, and the margin as `body { padding }`. Deterministic (byte-identical for equal settings). The
+// parity, the margin as `body { padding }`, and — feature #156 WI-3 — justify-by-default on guarded
+// paragraphs (`p` only, never body/headings). Deterministic (byte-identical for equal settings). The
 // JS-escape-safe injection wrapper is the SHARED `foliateSetStylesJs` in the foliate package (the same
 // seam FoliateBridge.setStyles runs, so the pinned escaping IS the production escaping).
 // Pure value types (JVM-unit-testable, Azw3DisplayCssTest) — no Android runtime beyond Compose Color.
@@ -66,6 +67,17 @@ fun ReaderSettings.foliateDisplayCss(): String {
         "body { background: $bg !important; }",
         // Horizontal (and matching vertical) reading margin as body padding.
         "body { padding: ${marginPx}px !important; margin: 0 !important; }",
+        // feature #156 WI-3 — justify-by-default (the designed body rendering; no control, no new UI).
+        // Scoped to `p` ON PURPOSE: `body { text-align: justify }` would be inherited by headings and
+        // layout wrappers (iOS #95 rejected it for that reason, and WI-2 MEASURED that outcome on EPUB,
+        // where ReadiumCSS's override targets `:root` and headings duly inherit justification). The
+        // `:not()` guards skip paragraphs the book aligned on purpose — they are the same heuristics iOS
+        // shipped, and they carry iOS's own caveat: verse-as-`<p>`, blockquote inner prose, and
+        // faux-headings with an unusual class are NOT covered. A paragraph's last line stays
+        // start-aligned by the engine's own `text-align-last: auto` default, so nothing forces a
+        // stretched final line.
+        "p:not([style*=text-align]):not([align]):not([class*=center]):not([class*=right]) " +
+            "{ text-align: justify !important; }",
     ).joinToString("\n")
 }
 
