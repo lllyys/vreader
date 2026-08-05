@@ -1048,8 +1048,21 @@ spec: |
               then releases exactly once per Ready item at its TERMINAL outcome (success, failure,
               too-large, or the worker giving up on a stalled item — see WI-4).
               INVARIANT: outstanding permits return to 0 after any batch, however it ends.
-            The permit is acquired BEFORE any stream exists, so concurrent ImportActivity instances
-            cannot collectively exceed MAX_IN_FLIGHT open fds.
+            CORRECTED 2026-08-05 — this block previously ended "The permit is acquired BEFORE any
+            stream exists, so concurrent ImportActivity instances cannot collectively exceed
+            MAX_IN_FLIGHT open fds." That sentence is now FALSE and directly contradicted the
+            acquire-order line above; it survived the D8 amendment because the orchestrator changed
+            the order without deleting the claim the OLD order had justified. (`acquireSlot`'s KDoc
+            still agrees with the old sentence — see bug #365.)
+            WHAT ACTUALLY HOLDS under acquire-after-resolution: at the moment a slot is taken the
+            stream is ALREADY open, so MAX_IN_FLIGHT bounds streams handed to the COORDINATOR, not
+            streams a batch can transiently open. Per-activity, MAX_BATCH = 20 bounds it; across N
+            concurrent activities it does not — which is exactly the gap **bug #365 / GH #2066**
+            tracks, together with the resolver's bounded calls no longer sitting behind any
+            admission check. The TRADE was deliberate and is the right one: acquire-before bounded
+            fds but let a provider stalled in resolution hold a slot indefinitely (the D8 hole);
+            acquire-after closes that and moves the fd question into #365's scope. Do not "fix" the
+            contradiction by reverting the order.
          c. resolver.peek(uri) -> DISPLAY_NAME + SIZE (cursor query, NO stream yet), wrapped in
             try/catch: ANY exception (SecurityException, IllegalStateException, a provider that
             throws on query) -> PreResolved(Unreadable). (r3 H3.)
