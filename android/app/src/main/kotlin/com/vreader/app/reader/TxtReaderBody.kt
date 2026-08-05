@@ -46,6 +46,17 @@
 // classifier on the pager (no two racing recognizers): a long-press starts selection, a fast swipe turns
 // the page, a settled tap navigates (or tap-to-edit an existing highlight).
 //
+// feature #156 WI-1 — the body text is JUSTIFIED by default (the alignment arrives inside [textStyle]
+// from settings/ReaderTextStyles.bodyTextStyle, so it reaches the scroll body, the paged phase-2 render,
+// AND the paged phase-1 measurement through the one `effectiveStyle` merge — no host edit). Alignment is
+// applied AFTER line breaking, so page boundaries are unchanged (proved by TxtPaginatorTest's
+// invariance+sensitivity pair and the connected real-measurer comparison). In SCROLL mode a Markdown
+// heading chunk renders with a natural-alignment variant of the same style (one Text per chunk makes
+// that per-chunk choice possible); PAGED mode cannot do the same — TxtPaginator.renderPage concatenates
+// a page's chunks into ONE AnnotatedString drawn by ONE Text, which carries a single paragraph
+// alignment, so a paged page containing a WRAPPING heading justifies it (a stated known limitation,
+// pinned by a characterisation test rather than left as prose).
+//
 // @coordinates-with: TxtReaderActivity.kt (the host — branches layout==Paged→TxtPagedBody else TxtBody,
 //   owns the TxtPageNavigator + save seam + supplies [onToggleChrome]), paged/TxtPaginator.kt +
 //   TxtPageIndex.kt + TxtPageNavigator.kt + PaginationSession.kt (feature #138 — the windowed lifecycle
@@ -111,6 +122,7 @@ import com.vreader.app.reader.paged.TapZoneHint
 import com.vreader.app.reader.paged.TxtPageNavigator
 import com.vreader.app.reader.paged.TxtPaginator
 import com.vreader.app.reader.paged.pagedTapZones
+import com.vreader.app.reader.settings.chunkTextAlign
 import com.vreader.app.ui.theme.VReaderColors
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.BufferOverflow
@@ -911,6 +923,16 @@ internal fun TxtBody(
     onBilingualSlotBounds: (List<androidx.compose.ui.geometry.Rect>) -> Unit = {},
 ) {
     val isMarkdown = format == BookFormat.md
+    // The EFFECTIVE style — the material default merged with the Display settings' [textStyle] (the
+    // pre-#129 explicit-param behavior, so platform text defaults like letterSpacing are kept). Hoisted
+    // out of the item loop so the #156 heading variant below is derived once, not per chunk.
+    val effectiveStyle = LocalTextStyle.current.merge(textStyle)
+    // feature #156 WI-1 — the SCROLL-mode Markdown heading variant. Scroll renders ONE Text per chunk,
+    // so a chunk that is an ATX heading can carry its own paragraph alignment; a WRAPPING heading would
+    // otherwise be stretched flush on both edges and read as body prose. Derived once per style (a
+    // per-item `copy()` would allocate on every chunk). Paged mode has no equivalent seam — a page
+    // slice spanning several chunks renders as ONE Text with ONE alignment (plan §5.2b).
+    val headingStyle = remember(effectiveStyle) { effectiveStyle.copy(textAlign = chunkTextAlign(isHeadingChunk = true)) }
     val wash = VReaderColors.Accent.copy(alpha = 0.18f)
     val selectionAccent = androidx.compose.ui.graphics.Color(0x575C8FC4)   // design selection bg rgba(92,143,196,0.34)
     val selection by (selectionController?.selection ?: flowOf(null)).collectAsState(null)
@@ -993,9 +1015,11 @@ internal fun TxtBody(
             val selRange = if (selection != null) selectionController?.selectionForChunk(i) else null
             Text(
                 text = text,
-                // merge over the material default (the pre-#129 explicit-param behavior) so platform
-                // text defaults (letterSpacing etc.) are kept — only the Display settings change.
-                style = LocalTextStyle.current.merge(textStyle),
+                // feature #156 WI-1 — an MD heading chunk renders with the natural-alignment variant;
+                // every other chunk uses the justified body style. `isHeadingChunk` is the SAME ATX
+                // predicate MarkdownRenderer took the heading branch on, so alignment and rendering
+                // cannot disagree about what a heading is.
+                style = if (isMarkdown && MarkdownRenderer.isHeadingChunk(raw)) headingStyle else effectiveStyle,
                 onTextLayout = { layout = it },
                 modifier = Modifier
                     .onGloballyPositioned { coords = it }

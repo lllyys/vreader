@@ -1,12 +1,14 @@
 package com.vreader.app.reader.paged
 
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.TextAlign
 import com.vreader.app.reader.TxtDocument
 import com.vreader.app.reader.Utf16Range
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
@@ -438,5 +440,103 @@ class TxtPaginatorTest {
         // dual-affinity preserved through the wrapper: rendered "boldx" [0,5) → source [2,9).
         assertEquals(Utf16Range(2, 9), pageMap.renderedRangeToSource(Utf16Range(0, 5)))
         assertEquals(Utf16Range(8, 9), pageMap.renderedSpanAt(4))   // 'x' dual-affinity
+    }
+
+    // --- feature #156 WI-1: alignment must NOT move a page boundary --------------------------------
+
+    /**
+     * A fake that RECORDS every alignment phase 1 hands it, and whose line breaking reacts to a
+     * genuinely layout-affecting style property (font size). It cannot answer whether ANDROID applies
+     * alignment after line breaking — no fake can; that proof is the real-`ComposeLineMeasurer`
+     * comparison in the connected `TxtJustificationConnectedTest`. What it does prove, and what the
+     * test below claims, is narrower and still worth having: the alignment genuinely REACHES phase 1
+     * (so the invariance assertion is not vacuously true because the style was dropped upstream), and
+     * the paginator DOES react to a layout-affecting style change (so the comparison is capable of
+     * reporting a difference at all).
+     */
+    private class StyleRecordingLineMeasurer(private val lineHeightPx: Float = 10f) : LineMeasurer {
+        val seenAligns = LinkedHashSet<androidx.compose.ui.text.style.TextAlign>()
+
+        override fun measure(text: CharSequence, style: TextStyle, maxWidthPx: Float): List<LineMetric> {
+            seenAligns.add(style.textAlign)
+            val fontSize = style.fontSize.value
+            require(fontSize.isFinite() && fontSize > 0f) { "this measurer needs a concrete font size" }
+            val charsPerLine = (maxWidthPx / fontSize).toInt().coerceAtLeast(1)
+            if (text.isEmpty()) return listOf(LineMetric(0, 0, lineHeightPx))
+            val lines = ArrayList<LineMetric>()
+            var start = 0
+            val n = text.length
+            while (start < n) {
+                var end = (start + charsPerLine).coerceAtMost(n)
+                if (end < n && Character.isHighSurrogate(text[end - 1]) && Character.isLowSurrogate(text[end])) end++
+                lines.add(LineMetric(start, end, lineHeightPx))
+                start = end
+            }
+            return lines
+        }
+    }
+
+    private fun styleAt(
+        fontSizeSp: Float,
+        align: androidx.compose.ui.text.style.TextAlign,
+    ) = TextStyle(fontSize = androidx.compose.ui.unit.TextUnit(fontSizeSp, androidx.compose.ui.unit.TextUnitType.Sp), textAlign = align)
+
+    /**
+     * Feature #156 AC-3 / plan R1, at the PAGINATOR seam: threading an alignment through phase 1 must
+     * leave the paged index byte-identical — same page count, same per-page source ranges. A drift
+     * would move every saved reading position in a paged book. Asserted on the FULL page-start array
+     * (a single-page comparison is worthless), over Latin, CJK and mixed input, for both the TXT and
+     * the Markdown phase-1 paths.
+     *
+     * Scope, stated honestly (Gate-4 round 1, Low): with a fake measurer the arrays match BY
+     * CONSTRUCTION, so this test does NOT prove that Android's `TextAlign.Justify` is applied after
+     * line breaking. It proves the two things a JVM test can: the alignment reaches phase 1 (asserted
+     * from the measurer's recording — otherwise the equality would be vacuous), and the comparison can
+     * detect a real shift (the larger-font sensitivity control). The engine-level proof is
+     * `TxtJustificationConnectedTest.d1_pagedBoundaries_areIdenticalUnderStartAndJustify_realMeasurer`,
+     * which runs the same comparison through the production `ComposeLineMeasurer`.
+     */
+    @Test fun pageBoundaries_areInvariantToTextAlign_andTheComparisonDetectsARealShift() = runTest {
+        val latin = (0 until 40).joinToString("") {
+            "Justification distributes the slack of a line into the spaces between its words $it.\n"
+        }
+        val cjk = (0 until 40).joinToString("") { "黑暗血时代第${it}章，长夜将至，我从今开始守望，至死方休。\n" }
+        val mixed = (0 until 40).joinToString("") { "Chapter $it 第${it}章 mixed script prose 混合文字段落。\n" }
+        val cases = listOf("latin" to latin, "cjk" to cjk, "mixed" to mixed)
+
+        for (isMarkdown in listOf(false, true)) {
+            for ((label, source) in cases) {
+                val doc = TxtDocument.of(source)
+                val p = TxtPaginator(UnconfinedTestDispatcher(testScheduler))
+                val contentBox = box(heightPx = 55f, widthPx = 600f)
+
+                val mStart = StyleRecordingLineMeasurer()
+                val startIdx = p.index(doc, styleAt(18f, TextAlign.Start), contentBox, mStart, PaginationToken(), isMarkdown)
+                val mJustify = StyleRecordingLineMeasurer()
+                val justifyIdx = p.index(doc, styleAt(18f, TextAlign.Justify), contentBox, mJustify, PaginationToken(), isMarkdown)
+
+                val ctx = "md=$isMarkdown case=$label"
+                // The alignment genuinely reached phase 1 — otherwise the equality below is vacuous.
+                assertEquals("$ctx: phase 1 must measure under Start", setOf(TextAlign.Start), mStart.seenAligns)
+                assertEquals("$ctx: phase 1 must measure under Justify", setOf(TextAlign.Justify), mJustify.seenAligns)
+                // Enough pages that the comparison is over a real boundary SET, not one page.
+                assertTrue("$ctx: needs several pages to compare (was ${justifyIdx.pageCount})", justifyIdx.pageCount > 3)
+                assertEquals("$ctx: page count must not change", startIdx.pageCount, justifyIdx.pageCount)
+                assertArrayEquals(
+                    "$ctx: EVERY page boundary must be identical under Justify",
+                    startIdx.pageStartsUtf16, justifyIdx.pageStartsUtf16,
+                )
+                assertEquals("$ctx: doc extent unchanged", startIdx.docEndExclusive, justifyIdx.docEndExclusive)
+
+                // SENSITIVITY CONTROL: a genuinely layout-affecting change MUST move the boundaries,
+                // proving the assertions above can fail.
+                val bigger = p.index(doc, styleAt(26f, TextAlign.Justify), contentBox, StyleRecordingLineMeasurer(), PaginationToken(), isMarkdown)
+                assertFalse(
+                    "$ctx: control — a larger font size must shift the page boundaries, else the " +
+                        "invariance assertion above cannot fail",
+                    bigger.pageStartsUtf16.contentEquals(justifyIdx.pageStartsUtf16),
+                )
+            }
+        }
     }
 }

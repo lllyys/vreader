@@ -19,8 +19,15 @@
 // Pure JVM (value types) so the spans + map are unit-testable. Resume/anchor offsets index the RAW
 // markdown source, not these rendered spans — the map bridges the two for highlighting.
 //
-// @coordinates-with: TxtReaderActivity.kt (renders + maps MD chunks), MarkdownOffsetMap.kt (#125 WI-2
-//   consumes srcStart/srcEnd), TxtDocument.kt (the line-chunk source).
+// feature #156 WI-1: `isHeadingChunk` exposes the SAME ATX predicate the heading branch uses, so the
+// scroll body can leave a wrapping Markdown heading unjustified while body prose justifies. Paged mode
+// cannot use it — TxtPaginator.renderPage concatenates several chunks into ONE AnnotatedString rendered
+// by ONE Text, which carries a single paragraph alignment (plan §5.2b, a stated known limitation).
+//
+// @coordinates-with: TxtReaderActivity.kt (renders + maps MD chunks), TxtReaderBody.kt (the scroll body
+//   reads isHeadingChunk for the #156 alignment branch), MarkdownOffsetMap.kt (#125 WI-2
+//   consumes srcStart/srcEnd), TxtDocument.kt (the line-chunk source),
+//   settings/ReaderTextStyles.kt (chunkTextAlign — the alignment this predicate selects).
 package com.vreader.app.reader
 
 import androidx.compose.ui.text.AnnotatedString
@@ -54,10 +61,32 @@ object MarkdownRenderer {
     /** Render one line-chunk's text (unchanged #112 output). */
     fun render(chunk: String): AnnotatedString = renderWithMap(chunk).text
 
-    /** Render + the per-rendered-char source-span map. */
-    fun renderWithMap(chunk: String): MarkdownRendered {
+    /**
+     * Whether [chunk] is an ATX heading line (feature #156 WI-1) — the predicate the SCROLL body's
+     * alignment branch reads so a WRAPPING heading is not justified like body prose. It shares
+     * [contentEndOf] and [ATX] with [renderWithMap], so the two cannot drift: a chunk this calls a
+     * heading is exactly a chunk the renderer takes down the heading branch (pinned by
+     * `MarkdownRendererTest.isHeadingChunk_agreesWithWhatTheRendererActuallyStyles`).
+     *
+     * `"# "` (no heading text) is ATX-shaped and answers `true`, though the renderer emits no span and
+     * no glyphs for it — with nothing rendered there is nothing to align either way.
+     */
+    fun isHeadingChunk(chunk: String): Boolean {
+        val contentEnd = contentEndOf(chunk)
+        if (contentEnd == 0) return false
+        return ATX.matchEntire(chunk.substring(0, contentEnd)) != null
+    }
+
+    /** The chunk length with its trailing line terminator(s) excluded — the parsed content extent. */
+    private fun contentEndOf(chunk: String): Int {
         var contentEnd = chunk.length
         while (contentEnd > 0 && (chunk[contentEnd - 1] == '\n' || chunk[contentEnd - 1] == '\r')) contentEnd--
+        return contentEnd
+    }
+
+    /** Render + the per-rendered-char source-span map. */
+    fun renderWithMap(chunk: String): MarkdownRendered {
+        val contentEnd = contentEndOf(chunk)
 
         val b = MapBuilder()
         if (contentEnd > 0) {
