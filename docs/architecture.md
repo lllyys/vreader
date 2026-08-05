@@ -587,6 +587,30 @@ language reconcile).
   is behaviour-identical to extension detection, including its
   `UnsupportedFormat` throw, so identity is the same down both paths.
 
+### Diagnostics (`com.vreader.app.diagnostics`) — feature #164
+
+- **`VLog`** is the app's logging seam; `VReaderApp.onCreate` installs `AppContainer.diagnosticsRing`
+  as its sink, so every deliberate log call is recorded **in-process** even where the platform
+  refuses an app its own logcat. `scripts/__tests__/check-android-log-containment.sh` enforces that
+  no production source outside `VLog.kt` references `android.util.Log`.
+- **`CompositeDiagnosticsSource`** merges the platform log (primary — it retains entries across
+  process launches, the pre-crash trail a ring cannot have) with the ring (secondary floor).
+  `SourceResult.Available` carries a defaulted `degradedReason`, so "logcat denied, ring healthy"
+  is reported as *degraded* rather than collapsing into a flat `Available` — the export header must
+  never claim `logcat + breadcrumbs` while the platform log is dead.
+- **`DiagnosticsExportWriter`** promotes the single redacted export into `filesDir/diagnostics`
+  (`.part` + atomic rename, clock-derived filename with no caller-supplied parameter, pruned to at
+  most one file). Every payload goes through `DiagnosticsRedactor` regardless of renderer.
+- **`DiagnosticsFileProvider`** — authority `${applicationId}.diagnosticsprovider`,
+  `exported=false`, `grantUriPermissions=true`, backed by `@xml/diagnostics_paths`
+  (`filesDir/diagnostics` **only**). A **second** provider alongside `BookFileProvider`
+  (`${applicationId}.fileprovider`, `@xml/file_paths`, `filesDir/books` only): each grants exactly
+  one directory, so **neither feature can widen the other's scope** — asserted by a negative
+  connected test, not assumed.
+- **Redaction is at every egress**: the export payload *and* the row's "Copy entry" clipboard write
+  (iOS parity, `DiagnosticsLogView.swift:173`). On-device *display* is deliberately unredacted —
+  display is not egress, and redacting it would make the viewer useless.
+
 ### Inbound documents (`com.vreader.app.imports`) — feature #155
 
 `ImportActivity` is the app's **only exported activity besides the launcher**,
