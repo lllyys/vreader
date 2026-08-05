@@ -52,13 +52,18 @@ foliate-view { display: block; width: 100vw; height: 100vh; height: 100dvh; }
         // JSON-escaped host-side via jsString). We call the returning `readerAPI.goTo`/`goToFraction`
         // promise and, once that promise SETTLES, post `{name:'goto-ack', id, ok, cfi?, fraction?}` over
         // the SAME `vreaderHost` channel (never addJavascriptInterface). The id is echoed back so the
-        // host resolves the matching CompletableDeferred; only a REJECTED promise yields ok:false.
+        // host resolves the matching CompletableDeferred.
         //
-        // ACK ≠ MOTION (be precise about what ok:true proves). Only a REJECTED promise yields ok:false.
-        // foliate's `view.goTo` CATCHES a failed resolution internally and returns undefined rather than
-        // rejecting, so an unresolvable cfi/href still lands here as a fulfilled promise → ok:true with
-        // nothing moved. Never treat an ack (or a Succeeded result) as evidence the reader relocated;
-        // that is what feature #140 WI-7's connected real-book round-trip is for.
+        // THE EXACT ack CONTRACT (Gate-4 R3 — an earlier wording said "only a rejected promise yields
+        // ok:false", which the code below contradicts in three places):
+        //   ok:true  — the goTo/goToFraction promise FULFILLED.
+        //   ok:false — any of: no readerAPI / no target; a target with no recognized field;
+        //              a SYNCHRONOUS throw; or the promise REJECTED.
+        //
+        // ACK ≠ MOTION. foliate's `view.goTo` CATCHES a failed resolution internally and returns
+        // undefined rather than rejecting, so an unresolvable cfi/href still lands here as a FULFILLED
+        // promise → ok:true with nothing moved. Never treat an ack (or a Succeeded result) as evidence
+        // the reader relocated; that is what feature #140 WI-7's connected real-book round-trip is for.
         window.__vreaderGoTo = function (id, target) {
             function ack(ok, cfi, fraction) {
                 send('goto-ack', { id: id, ok: !!ok, cfi: cfi == null ? null : cfi, fraction: (typeof fraction === 'number' && isFinite(fraction)) ? fraction : null });

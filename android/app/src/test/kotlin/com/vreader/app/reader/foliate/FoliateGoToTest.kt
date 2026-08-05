@@ -363,7 +363,8 @@ class FoliateGoToTest {
         // Proven: the href is ONE well-formed JSON string literal whose decoded value is the
         // original, so no character terminated the literal early or truncated the payload.
         // NOT proven: that the generated JS is safe to *execute*. The script-tag close survives
-        // VERBATIM (asserted below) and is harmless only because this string reaches
+        // VERBATIM — deliberately NOT asserted either way (Gate-4 R3: pinning it raw would fail a
+        // safe encoder improvement) — and is harmless only because this string reaches
         // evaluateJavascript, which does no HTML parsing and never interpolates it into an inline
         // script element. Executing the generated expression is WI-7's connected WebView probe.
         assertEquals("hostile href must survive escaping intact inside its literal", hostile, decodedHrefArgument(js))
@@ -485,6 +486,10 @@ class FoliateGoToTest {
         // outrank a legitimate fraction. A regression to a bare null-check fails here.
         assertTrue("the href guard must require an own property", hrefBranch.contains("hasOwnProperty"))
         assertTrue("the href guard must require a string", hrefBranch.contains("typeof target.href === 'string'"))
+        // …and must reject a BLANK href, mirroring Kotlin's isNotBlank — otherwise a whitespace-only
+        // href would shadow a legitimate fraction on the shell side only (Gate-4 R3 Low: the fix was
+        // previously unpinned, so reverting `trim() !== ''` to `!== ''` would have stayed green).
+        assertTrue("the href guard must reject a whitespace-only href", hrefBranch.contains("target.href.trim() !== ''"))
         assertFalse("the href guard must not be a bare null check", hrefBranch.contains("target.href != null"))
         // The pre-existing branches are untouched and the precedence cfi → href → fraction also
         // holds inside the shim (a target carrying both must never fall to the fraction leg).

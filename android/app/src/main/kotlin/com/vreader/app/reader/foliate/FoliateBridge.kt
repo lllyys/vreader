@@ -184,7 +184,8 @@ class FoliateBridge(
 
     companion object {
         const val BRIDGE_NAME = "vreaderHost"
-        /** Wall-clock budget for an awaited goTo — foliate must relocate + ack within this window. */
+        /** Wall-clock budget for an awaited goTo — foliate must ACK within this window (the ack means
+         *  its goTo promise settled, NOT that the reader relocated; see [goTo]). */
         const val DEFAULT_GOTO_TIMEOUT_MS = 3_000L
     }
 }
@@ -199,8 +200,9 @@ sealed interface Azw3GoToResult {
     data class Succeeded(val cfi: String?, val fraction: Double?) : Azw3GoToResult
     /** No ack arrived within the timeout window (dead bundle / wedged renderer). */
     data object Timeout : Azw3GoToResult
-    /** Foliate's goTo promise REJECTED, acked as `ok=false`. Note this does NOT cover every
-     *  unresolvable target — most of those fulfil and report [Succeeded]. */
+    /** The shim acked `ok=false`. That covers a REJECTED promise, a synchronous throw, a missing
+     *  `readerAPI`/target, and a target carrying no recognized field. It does NOT cover every
+     *  unresolvable target — most of those FULFIL and report [Succeeded]. */
     data object Failed : Azw3GoToResult
     /** A later goTo superseded this one before it acked (the caller should ignore this result). */
     data object Superseded : Azw3GoToResult
