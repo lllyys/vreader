@@ -26,6 +26,12 @@ import org.junit.Test
  *     the message entirely, so every redaction assertion also proves the surrounding diagnostic
  *     context — and the entry's timestamp/level/category — survived. Secrets are placed in MORE
  *     than one entry so a redactor applied to only the first (or only the last) is caught.
+ *
+ * On the deliberate overlap with `DiagnosticsCategoryBoundingTest` (WI-3, in `VLogTest.kt`): that
+ * suite proves the bounding rule in isolation. WI-4's acceptance criterion 6 is about the
+ * INTERACTION — that capping the chip row never makes a collapsed entry unreachable, measured on
+ * the same fixture whose raw set this store reports. The two are not substitutes, and asserting
+ * criterion 6 only in a collaborator's suite would leave WI-4's own contract unowned.
  */
 class DiagnosticsLogStoreTest {
 
@@ -53,10 +59,17 @@ class DiagnosticsLogStoreTest {
         }
     }
 
-    /** A source whose result changes between loads, for the degraded-then-recovered sequence. */
-    private class ScriptedSource(private val results: MutableList<SourceResult>) : DiagnosticsLogSource {
+    /**
+     * A source whose behaviour changes between loads, for multi-load sequences. Each step either
+     * yields a [SourceResult] or throws, so one STORE can be driven through
+     * degraded -> recovered -> cancelled without swapping instances.
+     */
+    private class ScriptedSource(private val steps: MutableList<Any>) : DiagnosticsLogSource {
         override suspend fun recentEntries(sinceMillis: Long?, limit: Int): SourceResult =
-            results.removeAt(0)
+            when (val step = steps.removeAt(0)) {
+                is Throwable -> throw step
+                else -> step as SourceResult
+            }
     }
 
     private fun entry(
@@ -127,7 +140,7 @@ class DiagnosticsLogStoreTest {
     fun lastLoadDegradedResetsWhenALaterLoadSucceeds() = runTest {
         val subject = DiagnosticsLogStore(
             ScriptedSource(
-                mutableListOf(
+                mutableListOf<Any>(
                     SourceResult.Unavailable("capture dead"),
                     available(entry(10, "recovered")),
                 ),
@@ -143,34 +156,108 @@ class DiagnosticsLogStoreTest {
 
     @Test
     fun aThrowingSourceIsContainedAsAnUnavailableDegradedLoad() = runTest {
-        val subject = store()
         val throwing = DiagnosticsLogStore(FakeSource(error = IllegalStateException("reader blew up")))
 
         assertEquals(emptyList<DiagnosticsLogEntry>(), throwing.load())
         assertTrue(throwing.lastLoadDegraded)
-        assertFalse(subject.lastLoadDegraded)
     }
 
     /**
      * Cancellation is not a source failure: it must propagate (structured concurrency) and must NOT
-     * fabricate an availability verdict, so the previously-recorded state survives untouched.
+     * fabricate an availability verdict. Driven through ONE store — a degraded load, then a
+     * cancelled one — so an implementation that cleared its own flag before rethrowing is caught.
+     * Asserting against a second, untouched store would be tautological.
      */
     @Test
     fun cancellationPropagatesAndLeavesTheDegradedFlagUntouched() = runTest {
         val subject = DiagnosticsLogStore(
-            ScriptedSource(mutableListOf(SourceResult.Unavailable("capture dead"))),
+            ScriptedSource(
+                mutableListOf<Any>(
+                    SourceResult.Unavailable("capture dead"),
+                    CancellationException("viewer closed"),
+                ),
+            ),
         )
         subject.load()
         assertTrue(subject.lastLoadDegraded)
 
-        val cancelling = DiagnosticsLogStore(FakeSource(error = CancellationException("viewer closed")))
         try {
-            cancelling.load()
+            subject.load()
             throw AssertionError("CancellationException must propagate")
         } catch (expected: CancellationException) {
             assertEquals("viewer closed", expected.message)
         }
-        assertTrue("an unrelated cancelled load must not rewrite state", subject.lastLoadDegraded)
+        assertTrue("a cancelled load must not rewrite the recorded verdict", subject.lastLoadDegraded)
+    }
+
+    /**
+     * The mirror image: a cancelled load must not invent a DEGRADED verdict either, so a store that
+     * was healthy stays healthy.
+     */
+    @Test
+    fun cancellationDoesNotFabricateADegradedVerdict() = runTest {
+        val subject = DiagnosticsLogStore(
+            ScriptedSource(
+                mutableListOf<Any>(
+                    available(entry(10, "healthy")),
+                    CancellationException("viewer closed"),
+                ),
+            ),
+        )
+        subject.load()
+        assertFalse(subject.lastLoadDegraded)
+
+        try {
+            subject.load()
+            throw AssertionError("CancellationException must propagate")
+        } catch (expected: CancellationException) {
+            assertEquals("viewer closed", expected.message)
+        }
+        assertFalse(subject.lastLoadDegraded)
+    }
+
+    /**
+     * An `Error` is NOT a source failure and must not be laundered into a degraded load — the
+     * containment is `catch (Exception)`, deliberately not `catch (Throwable)`.
+     */
+    @Test
+    fun anErrorFromTheSourcePropagatesRatherThanBecomingADegradedLoad() = runTest {
+        val subject = DiagnosticsLogStore(FakeSource(error = StackOverflowError("fatal")))
+
+        try {
+            subject.load()
+            throw AssertionError("an Error must propagate")
+        } catch (expected: StackOverflowError) {
+            assertEquals("fatal", expected.message)
+        }
+        assertFalse("an Error must not be recorded as a degraded capture", subject.lastLoadDegraded)
+    }
+
+    /**
+     * [DiagnosticsLogStore.lastLoadDegraded] is a store-wide latch, not a property of one returned
+     * batch: overlapping loads are LAST-WRITER-WINS. WI-5 serialises loads, which is the
+     * precondition the store documents; pinning the behaviour here keeps it specified rather than
+     * accidental, so a future single-flight guard is a deliberate, test-breaking change.
+     */
+    @Test
+    fun overlappingLoadsAreLastWriterWinsOnTheDegradedLatch() = runTest {
+        val healthy = DiagnosticsLogStore(
+            ScriptedSource(
+                mutableListOf<Any>(SourceResult.Unavailable("dead"), available(entry(10, "ok"))),
+            ),
+        )
+        healthy.load()
+        healthy.load()
+        assertFalse("the later verdict wins", healthy.lastLoadDegraded)
+
+        val degradedLast = DiagnosticsLogStore(
+            ScriptedSource(
+                mutableListOf<Any>(available(entry(10, "ok")), SourceResult.Unavailable("dead")),
+            ),
+        )
+        degradedLast.load()
+        degradedLast.load()
+        assertTrue("the later verdict wins in the other order too", degradedLast.lastLoadDegraded)
     }
 
     // ================================================================ bounds + clamping
@@ -232,9 +319,36 @@ class DiagnosticsLogStoreTest {
 
     @Test
     fun aNonPositiveMaxEntriesIsCoercedToAtLeastOne() = runTest {
-        val subject = store(available(entry(10, "a"), entry(20, "b")), maxEntries = 0)
+        val zero = store(available(entry(10, "a"), entry(20, "b")), maxEntries = 0)
+        val negative = store(available(entry(10, "a"), entry(20, "b")), maxEntries = -50)
 
-        assertEquals(listOf("b"), subject.load().map { it.message })
+        assertEquals(listOf("b"), zero.load().map { it.message })
+        assertEquals(listOf("b"), negative.load().map { it.message })
+    }
+
+    @Test
+    fun aLimitExactlyEqualToMaxEntriesIsHonouredWithoutClamping() = runTest {
+        val source = FakeSource(SourceResult.Available((1..6).map { entry(it.toLong(), "e$it") }))
+        val subject = DiagnosticsLogStore(source, maxEntries = 4)
+
+        assertEquals(listOf("e3", "e4", "e5", "e6"), subject.load(limit = 4).map { it.message })
+        assertEquals(4, source.lastLimit)
+    }
+
+    /** The integer extremes of the clamp — both ends saturate rather than overflow or throw. */
+    @Test
+    fun integerExtremeLimitsSaturateAtTheClampBoundaries() = runTest {
+        val low = FakeSource(available(entry(10, "a"), entry(20, "b")))
+        val high = FakeSource(available(entry(10, "a"), entry(20, "b")))
+
+        assertEquals(emptyList<DiagnosticsLogEntry>(), DiagnosticsLogStore(low, 50).load(limit = Int.MIN_VALUE))
+        assertEquals(0, low.lastLimit)
+
+        assertEquals(
+            listOf("a", "b"),
+            DiagnosticsLogStore(high, 50).load(limit = Int.MAX_VALUE).map { it.message },
+        )
+        assertEquals(50, high.lastLimit)
     }
 
     @Test
@@ -301,7 +415,7 @@ class DiagnosticsLogStoreTest {
     }
 
     @Test
-    fun categoriesDeduplicatesRepeatedTagsAndDropsBlankOnes() {
+    fun categoriesDeduplicatesRepeatedTagsAndDropsEmptyOnes() {
         val categories = store().categories(
             listOf(
                 entry(1, category = "Reader"),
@@ -312,6 +426,19 @@ class DiagnosticsLogStoreTest {
         )
 
         assertEquals(listOf("Library", "Reader"), categories)
+    }
+
+    /**
+     * The contract is NON-EMPTY, not non-blank — pinned so `isNotBlank()` is a deliberate,
+     * test-breaking change rather than a silent one. Unreachable in production (`LogcatLineParser`
+     * trims the tag column, so a whitespace-only tag arrives as `""`), which is exactly why it
+     * needs pinning: nothing else would notice the difference.
+     */
+    @Test
+    fun aWhitespaceOnlyCategoryIsNonEmptyAndSurvivesAsARawCategory() {
+        val categories = store().categories(listOf(entry(1, category = "   "), entry(2, category = "")))
+
+        assertEquals(listOf("   "), categories)
     }
 
     @Test
@@ -528,12 +655,29 @@ class DiagnosticsLogStoreTest {
         assertTrue(export, export.contains("capture source: breadcrumbs only (platform log unavailable)"))
     }
 
+    /**
+     * The header is asserted LITERALLY here — three exact lines — rather than through
+     * `HEADER_LINE_COUNT`. An implementation that added a fourth header line and moved its own
+     * constant would otherwise keep every body-slicing helper in this file green.
+     */
     @Test
     fun exportOfAnEmptyListIsHeaderOnlyNeverAnEmptyString() {
         val export = store().exportText(emptyList(), generatedAt = 1_754_000_000_000L)
 
         assertTrue("header-only must not be empty", export.isNotEmpty())
-        assertEquals(DiagnosticsLogStore.HEADER_LINE_COUNT, export.split("\n").size)
+        assertEquals(
+            listOf(
+                "vreader diagnostics — 0 entries (recent activity)",
+                "generated: 2025-07-31T22:13:20Z",
+                "capture source: logcat + breadcrumbs",
+            ),
+            export.split("\n"),
+        )
+        assertEquals(
+            "the slicing helper must agree with the literal header",
+            DiagnosticsLogStore.HEADER_LINE_COUNT,
+            export.split("\n").size,
+        )
         assertEquals(emptyList<String>(), bodyLines(export))
     }
 
@@ -659,8 +803,9 @@ class DiagnosticsLogStoreTest {
         assertEquals(listOf("2025-07-31T22:13:20Z [INFO] (阅读器) 打开《红楼梦》失败 📕"), body)
     }
 
+    /** Exact output at the epoch-millis extremes — "does not throw" alone would prove nothing. */
     @Test
-    fun exportHandlesExtremeTimestampsWithoutThrowing() {
+    fun exportRendersExtremeTimestampsExactly() {
         val entries = listOf(
             DiagnosticsLogEntry(Long.MIN_VALUE, DiagnosticsLevel.VERBOSE, "Reader", "prehistoric"),
             DiagnosticsLogEntry(-1L, DiagnosticsLevel.VERBOSE, "Reader", "just before the epoch"),
@@ -668,10 +813,31 @@ class DiagnosticsLogStoreTest {
             DiagnosticsLogEntry(Long.MAX_VALUE, DiagnosticsLevel.VERBOSE, "Reader", "far future"),
         )
 
-        val body = bodyLines(store().exportText(entries, generatedAt = Long.MAX_VALUE))
+        val export = store().exportText(entries, generatedAt = Long.MAX_VALUE)
 
-        assertEquals(4, body.size)
-        assertTrue(body[2].startsWith("1970-01-01T00:00:00Z"))
+        assertEquals(
+            listOf(
+                "-292275055-05-16T16:47:04.192Z [VERBOSE] (Reader) prehistoric",
+                "1969-12-31T23:59:59.999Z [VERBOSE] (Reader) just before the epoch",
+                "1970-01-01T00:00:00Z [VERBOSE] (Reader) epoch",
+                "+292278994-08-17T07:12:55.807Z [VERBOSE] (Reader) far future",
+            ),
+            bodyLines(export),
+        )
+        assertTrue(export, export.contains("generated: +292278994-08-17T07:12:55.807Z"))
+    }
+
+    /** RTL text is payload, not layout — it must round-trip byte-for-byte like CJK does. */
+    @Test
+    fun exportPreservesRtlTextVerbatim() {
+        val entries = listOf(
+            DiagnosticsLogEntry(1_754_000_000_000L, DiagnosticsLevel.WARN, "قارئ", "فشل فتح الكتاب"),
+        )
+
+        assertEquals(
+            listOf("2025-07-31T22:13:20Z [WARN] (قارئ) فشل فتح الكتاب"),
+            bodyLines(store().exportText(entries, generatedAt = 0L)),
+        )
     }
 
     @Test

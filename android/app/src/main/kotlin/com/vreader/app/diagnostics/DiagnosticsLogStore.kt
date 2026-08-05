@@ -31,12 +31,21 @@ import java.time.Instant
  *   indistinguishable from the next entry — including a message whose own text mimics an entry
  *   header. Indentation makes "starts at column 0" the entry-line predicate for any reader.
  *
- * Known limitation — [lastLoadDegraded] is a FLAT signal. The store sees only the composite
- * [SourceResult], which carries no per-source provenance, so it cannot distinguish "logcat died but
- * the ring buffer answered" from "everything answered". The flag therefore means "the last load's
- * source reported `Unavailable`", and [CAPTURE_SOURCE_DEGRADED] is worded for that case. Reporting
- * partial degradation would require provenance on `SourceResult` (a `DiagnosticsLogSource` change,
- * out of this WI's scope).
+ * Known limitations (accepted, NOT mitigated — do not read these as guarantees):
+ * - **[lastLoadDegraded] is a FLAT signal.** The store sees only the composite [SourceResult],
+ *   which carries no per-source provenance, so it cannot distinguish "logcat died but the ring
+ *   buffer answered" from "everything answered". The flag means exactly "the last load's source
+ *   reported `Unavailable`". [CAPTURE_SOURCE_FULL] / [CAPTURE_SOURCE_DEGRADED] are therefore the
+ *   plan's two COARSE labels for that one bit, not observed per-source provenance: a composite
+ *   `Available` may in truth have been breadcrumbs-only. Reporting partial degradation needs
+ *   provenance on `SourceResult` — a `DiagnosticsLogSource` change, outside this WI's write-set.
+ * - **Loads are expected to be SINGLE-FLIGHT.** [lastLoadDegraded] is `@Volatile`, so there is no
+ *   torn read, but it is a store-wide latch rather than a property of one returned batch: if two
+ *   loads overlap, the later one's verdict wins and the earlier caller would read it. WI-5's
+ *   ViewModel serialises loads (one `flatMapLatest`-driven refresh at a time), which is the
+ *   precondition this store is written against; the last-writer-wins behaviour is pinned by test
+ *   rather than left accidental. Binding the verdict to the batch would mean returning a compound
+ *   result, which is not the API the plan specifies for WI-5 to consume.
  *
  * @coordinates-with DiagnosticsLogSource.kt, DiagnosticsRedactor.kt, DiagnosticsLogEntry.kt,
  *   DiagnosticsCategoryBounding.kt
@@ -71,20 +80,15 @@ class DiagnosticsLogStore(
             source.recentEntries(sinceMillis, cap)
         } catch (cancelled: CancellationException) {
             throw cancelled
-        } catch (t: Throwable) {
-            SourceResult.Unavailable("source threw ${t.javaClass.simpleName}: ${t.message}")
+        } catch (failure: Exception) {
+            // Defence in depth only: the source CONTRACT already says an operational failure
+            // arrives as `Unavailable`. `Exception`, never `Throwable` — an `Error` (OOM,
+            // LinkageError) is not a source failure and must not be laundered into "degraded".
+            null
         }
-        return when (result) {
-            is SourceResult.Unavailable -> {
-                degraded = true
-                emptyList()
-            }
-
-            is SourceResult.Available -> {
-                degraded = false
-                result.entries.takeLast(cap)
-            }
-        }
+        val available = result as? SourceResult.Available
+        degraded = available == null
+        return available?.entries?.takeLast(cap) ?: emptyList()
     }
 
     /**
@@ -141,10 +145,13 @@ class DiagnosticsLogStore(
          */
         const val CAPTURE_SCOPE_LABEL: String = "recent activity"
 
-        /** `capture source:` value when the last load read the full stack. */
+        /**
+         * `capture source:` value when the last load's source answered. A COARSE label: it does
+         * not prove logcat specifically was readable — see the class doc's flat-signal limitation.
+         */
         const val CAPTURE_SOURCE_FULL: String = "logcat + breadcrumbs"
 
-        /** `capture source:` value when the last load's source was unavailable — see section 6.5. */
+        /** `capture source:` value when the last load's source reported unavailable (section 6.5). */
         const val CAPTURE_SOURCE_DEGRADED: String = "breadcrumbs only (platform log unavailable)"
 
         /** What every continuation line of a multi-line message is prefixed with. */
