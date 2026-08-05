@@ -1,15 +1,23 @@
-// Purpose: feature #165 WI-5 — the presentational sections of the designed annotations-import
-// preview sheet (`dev-docs/designs/vreader-fidelity-v1/project/vreader-annotation-import.jsx`
-// `ImportPreviewSheet`, `:425-558`): the file header + source badge, the error blob, the count
-// chips, the "Preview · first three" sample list and the merge-policy line. Composed by
-// `AnnotationImportPreviewSheet.kt`, which owns the sheet's state and action pair. Every function
-// here is a pure function of ([ReaderTheme], data) — no state, no I/O.
+// Purpose: feature #165 WI-5 — the three sections of the designed annotations-import preview sheet
+// (`dev-docs/designs/vreader-fidelity-v1/project/vreader-annotation-import.jsx` `ImportPreviewSheet`,
+// `:425-558`): the file header + source badge, the error blob, and the count chips + sample list +
+// merge-policy line. Composed by `AnnotationImportPreviewSheet.kt` (which owns the sheet's state and
+// action pair) out of the leaf pieces in `AnnotationImportPreviewParts.kt`. Pure functions of
+// ([ReaderTheme], data) — no state, no I/O.
+//
+// Key decision: the file name is re-sanitized HERE, at the pixel, not only at the reader. It is
+// provider-controlled, and only the `Ready` arm's name has provably been through
+// `AnnotationsImportReader.parse`; a `Failed` state is constructed by the I/O layer from a name the
+// reader may never have seen. `sanitizeDisplayName` is idempotent, so paying it twice costs nothing
+// and removes the "did that caller remember?" question entirely — the reader's own header states
+// this doctrine, and Gate-4 round 1 found the failure arm bypassing it.
 //
 // RULE-51 FIDELITY LEDGER for this surface (absences are recorded, never invented around):
-//  - RENDERED AS DEPICTED: the file header + source badge (`:449-475`), the Highlights / Notes /
-//    Skipped count chips (`:488-492`), the "Preview · first three" sample list (`:495-530`), the
-//    merge-policy line (`:531-533`) and the error blob (`:477-484`). The error branch REPLACES the
-//    chips + sample + merge line exactly as the artboard's ternary does, and the header survives it.
+//  - RENDERED AS DEPICTED: the file header with the artboard's own JSON glyph and source badge
+//    (`:449-475`), the Highlights / Notes / Skipped count chips (`:488-492`), the
+//    "Preview · first three" sample list (`:495-530`), the merge-policy line (`:531-533`) and the
+//    error blob (`:477-484`). The error branch REPLACES the chips + sample + merge line exactly as
+//    the artboard's ternary does, and the header survives it.
 //  - ABSENT (plan §3.3 A-3): the sample row's `<chapter> · p. <page>` meta text. The wire row
 //    carries only `locatorJSON`; chapter titles are not derivable at import time and `page` exists
 //    only for PDF. The depicted color dot is kept; only the un-derivable TEXT is dropped.
@@ -18,16 +26,20 @@
 //    counted in `ImportPreview.importable`, i.e. in the primary button's number — the total the
 //    user approves stays true; only the breakdown is partial. Pinned by
 //    `AnnotationImportPreviewSheetTest.noBookmarksCountChip` so a stray addition goes RED.
-//  - ABSENT (recorded by this WI): a distinct explanatory blob for the zero-importable case. Plan
-//    C-8 describes "the disabled primary plus the designed error blob explaining why", but no
-//    committed artboard and no shipped string supplies that copy, and the artboard's error branch
-//    would HIDE the `Skipped` chip that is the explanation. So a zero-importable OK preview renders
-//    the depicted chips plus the depicted disabled `Import 0 items`; only a file-level
-//    [ImportFailure] renders the blob. This is an absence of TEXT whose source does not exist (the
-//    §3.3 A-1/A-2/A-3 class), not an omitted state — the state itself IS drawn.
+//  - BLOCKED: needs-design (#2099) — the zero-importable state. The artboard's two states are
+//    mutually exclusive on one `error` prop, so "read fine, nothing left to import" (a re-import,
+//    an all-foreign-book file, a valid empty envelope) is a THIRD state it does not draw. Plan C-8
+//    asks for the disabled primary "plus the designed error blob explaining why", but no artboard
+//    and no shipped string supplies that copy, and the blob would HIDE the `Skipped` chip that is
+//    the explanation. Until #2099 lands this renders only depicted elements: the chips, the merge
+//    line and the depicted disabled `Import 0 items` — so the no-op is provably uncommittable and
+//    nothing is invented. The empty sample list's heading + card are omitted for the same reason
+//    (a heading promising three rows above nothing is worse than its absence); both absences are
+//    pinned by tests.
 //
-// @coordinates-with AnnotationImportPreviewSheet (the only caller), AnnotationImportModels
-// (ImportPreview / ImportPreviewRow / ImportFailure), AnnotationColor (the sample dot palette).
+// @coordinates-with AnnotationImportPreviewSheet (the only caller), AnnotationImportPreviewParts
+// (the leaf pieces), AnnotationImportModels (ImportPreview / ImportFailure),
+// IncomingBookResolver.sanitizeDisplayName (the shared, idempotent name sanitizer).
 package com.vreader.app.annotations
 
 import androidx.compose.foundation.background
@@ -36,17 +48,14 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Description
-import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -55,12 +64,12 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.vreader.app.imports.IncomingBookResolver
 import com.vreader.app.reader.settings.ReaderTheme
 import com.vreader.app.ui.theme.VReaderFonts
 
@@ -73,24 +82,13 @@ private val ERROR_INK = Color(0xFFA43A14)
  *  Exactly one format is importable, so the badge is a constant rather than a per-source lookup. */
 private const val SOURCE_BADGE = "VREADER JSON"
 
-/** Secondary text (the design's `t.sub`). */
-internal fun ReaderTheme.sub(): Color = ink.copy(alpha = 0.62f)
-
-/** Hairline rule (the design's `t.rule`). */
-internal fun ReaderTheme.rule(): Color = ink.copy(alpha = 0.10f)
-
-/** Card fill (the design's white-on-light / raised-panel-on-dark). */
-internal fun ReaderTheme.card(): Color = if (isDark) ink.copy(alpha = 0.05f) else Color.White
-
-/** The muted chip's fill (`:565-566`). */
-internal fun ReaderTheme.mutedFill(): Color = ink.copy(alpha = if (isDark) 0.03f else 0.025f)
-
-/** The neutral action-button fill (`:544`), reused as the disabled primary's fill (`:550`). */
-internal fun ReaderTheme.neutralButton(): Color = ink.copy(alpha = if (isDark) 0.07f else 0.06f)
-
-/** The designed file header (`:449-475`): tinted document glyph, title, file name, source badge. */
+/** The designed file header (`:449-475`): tinted JSON glyph, title, file name, source badge. */
 @Composable
 internal fun ImportFileHeader(theme: ReaderTheme, fileName: String) {
+    // Provider-controlled text on its way to a pixel — sanitize regardless of which arm built it.
+    val safeName = remember(fileName) {
+        IncomingBookResolver.sanitizeDisplayName(fileName, format = null)
+    }
     Row(
         Modifier
             .fillMaxWidth()
@@ -104,12 +102,7 @@ internal fun ImportFileHeader(theme: ReaderTheme, fileName: String) {
                 .size(40.dp),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(
-                Icons.Outlined.Description,
-                contentDescription = null,
-                tint = theme.accent,
-                modifier = Modifier.size(20.dp),
-            )
+            ImportJsonFileIcon(tint = theme.accent, size = 20.dp)
         }
         Column(
             Modifier
@@ -124,7 +117,7 @@ internal fun ImportFileHeader(theme: ReaderTheme, fileName: String) {
                 fontWeight = FontWeight.SemiBold,
             )
             Text(
-                fileName,
+                safeName,
                 modifier = Modifier
                     .padding(top = 2.dp)
                     .testTag("annot-import-filename"),
@@ -193,10 +186,13 @@ internal fun ImportPreviewBody(theme: ReaderTheme, preview: ImportPreview) {
             .fillMaxWidth()
             .padding(start = 22.dp, end = 22.dp, bottom = 12.dp),
     ) {
+        // Omitted when there is nothing to preview — see this file's ledger (needs-design #2099).
         if (preview.sample.isNotEmpty()) {
             Text(
                 "PREVIEW · FIRST THREE",
-                modifier = Modifier.padding(bottom = 8.dp),
+                modifier = Modifier
+                    .padding(bottom = 8.dp)
+                    .testTag("annot-import-sample-label"),
                 color = theme.sub(),
                 fontFamily = VReaderFonts.Sans,
                 fontSize = 10.5.sp,
@@ -237,93 +233,6 @@ internal fun ImportPreviewBody(theme: ReaderTheme, preview: ImportPreview) {
             fontFamily = VReaderFonts.Sans,
             fontSize = 11.sp,
             lineHeight = 16.sp,
-        )
-    }
-}
-
-/**
- * One designed sample row (`:504-529`): the color dot, then the quoted text clamped to two lines.
- * The depicted `<chapter> · p. <page>` meta text is ABSENT — see this file's ledger (A-3).
- */
-@Composable
-private fun SampleRow(theme: ReaderTheme, row: ImportPreviewRow) {
-    // The artboard falls back to its default swatch when a row carries no color
-    // (`row.color || '#f0d25a'`); AnnotationColor.DEFAULT is this palette's equivalent, and the
-    // reader has already folded any unknown provider string down to a known key.
-    val color = AnnotationColor.from(row.colorKey) ?: AnnotationColor.DEFAULT
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 14.dp, vertical = 10.dp)
-            .testTag("annot-import-sample-row"),
-    ) {
-        Box(
-            Modifier
-                .padding(bottom = 4.dp)
-                .clip(RoundedCornerShape(2.dp))
-                .background(Color(android.graphics.Color.parseColor(color.dotHex)))
-                .size(8.dp),
-        )
-        Text(
-            "\"" + row.text + "\"",
-            color = theme.ink,
-            fontFamily = VReaderFonts.Serif,
-            fontStyle = FontStyle.Italic,
-            fontSize = 13.sp,
-            lineHeight = 18.sp,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-        )
-    }
-}
-
-/** One designed count chip (`:560-581`). [tag] yields `annot-import-chip-<tag>` (+ `-value`). */
-@Composable
-private fun RowScope.CountChip(
-    theme: ReaderTheme,
-    label: String,
-    value: Int,
-    tag: String,
-    accented: Boolean = false,
-    muted: Boolean = false,
-) {
-    val fill = when {
-        accented -> theme.accent.copy(alpha = 0.08f)
-        muted -> theme.mutedFill()
-        else -> theme.card()
-    }
-    Column(
-        Modifier
-            .weight(1f)
-            .clip(RoundedCornerShape(10.dp))
-            .background(fill)
-            .border(
-                if (accented) 1.dp else 0.5.dp,
-                if (accented) theme.accent.copy(alpha = 0.19f) else theme.rule(),
-                RoundedCornerShape(10.dp),
-            )
-            .padding(horizontal = 12.dp, vertical = 10.dp)
-            .testTag("annot-import-chip-$tag"),
-    ) {
-        Text(
-            value.toString(),
-            modifier = Modifier.testTag("annot-import-chip-$tag-value"),
-            color = when {
-                muted -> theme.sub()
-                accented -> theme.accent
-                else -> theme.ink
-            },
-            fontFamily = VReaderFonts.Serif,
-            fontSize = 22.sp,
-            fontWeight = FontWeight.Bold,
-        )
-        Text(
-            label,
-            modifier = Modifier.padding(top = 4.dp),
-            color = theme.sub(),
-            fontFamily = VReaderFonts.Sans,
-            fontSize = 10.5.sp,
-            fontWeight = FontWeight.SemiBold,
         )
     }
 }

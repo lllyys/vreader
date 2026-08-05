@@ -10,13 +10,21 @@
 // Pure function of state (rule 50 §4); [ReaderTheme] tokens, same map as the reader chrome.
 //
 // Key decisions:
-//  - EVERY count rendered here comes from the [ImportPreview] the reader produced — the collapsed,
-//    validated, already-present-filtered envelope (§6.4). Nothing is re-derived from anything on
-//    screen, and `onConfirm` hands the SAME `ImportPreview` object back, so the caller applies the
-//    object whose numbers the user approved. "The number the user approves must be the number they
-//    get" is an object-identity property here, not an arithmetic coincidence.
+//  - EVERY count rendered here is read off the [ImportPreview] the reader produced — the collapsed,
+//    validated, already-present-filtered envelope (§6.4). The chips render its three stored kind
+//    counts and the primary renders its own `importable` total; this file computes NO count of its
+//    own and has no access to the raw file, so there is nothing here that could disagree with what
+//    apply will insert. (`importable` is a sum of the three stored fields inside `ImportPreview` —
+//    WI-3's contract, asserted equal to the real apply's report by WI-4's A-11 test. The precision
+//    matters: the guarantee is "the sheet adds nothing", not "no addition happens anywhere".)
+//  - `onConfirm` hands the SAME `ImportPreview` object back, so the caller applies the object whose
+//    numbers the user approved rather than rebuilding one from the displayed counts. "The number
+//    the user approves must be the number they get" is an object-identity property here.
 //  - The primary is a real disabled `Button` when `importable == 0` (C-8) — disabled semantics, not
 //    a grey-looking control that still fires.
+//  - The body SCROLLS and the action pair is PINNED (the artboard's `maxHeight: '88%'`, `:440`).
+//    An unbounded `bookTitle` in the merge line must not be able to push Cancel / Import off the
+//    bottom of the sheet — Gate-4 round 1 found that shape.
 //  - No export affordance exists on this surface: that one is `BLOCKED: needs-design (#2085)`.
 //
 // @coordinates-with AnnotationImportPreviewSections (the designed sections it renders),
@@ -30,9 +38,12 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -125,9 +136,19 @@ fun AnnotationImportPreviewSheetContent(
     ) {
         ImportFileHeader(theme, state.fileName)
 
-        when (state) {
-            is AnnotationImportSheetState.Failed -> ImportErrorBlob(theme, state.reason)
-            is AnnotationImportSheetState.Ready -> ImportPreviewBody(theme, state.preview)
+        // The scrolling region. The action pair below it is pinned, so no amount of body content —
+        // a 10 000-character book title in the merge line, a three-row sample of long CJK quotes —
+        // can push Cancel / Import out of reach.
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .heightIn(max = 460.dp)
+                .verticalScroll(rememberScrollState()),
+        ) {
+            when (state) {
+                is AnnotationImportSheetState.Failed -> ImportErrorBlob(theme, state.reason)
+                is AnnotationImportSheetState.Ready -> ImportPreviewBody(theme, state.preview)
+            }
         }
 
         Row(

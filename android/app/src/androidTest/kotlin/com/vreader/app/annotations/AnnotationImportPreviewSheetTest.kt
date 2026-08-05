@@ -3,11 +3,17 @@ package com.vreader.app.annotations
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.graphics.toPixelMap
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertTextEquals
+import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
@@ -274,13 +280,21 @@ class AnnotationImportPreviewSheetTest {
             .assertTextEquals("5")
     }
 
-    @Test fun emptyEnvelope_confirmIsDisabled() {
+    @Test fun emptyEnvelope_confirmIsDisabledAndTheEmptySampleSectionIsOmitted() {
         val preview = previewOf(envelopeJson())
         assertEquals(0, preview.importable)
+        assertEquals(0, preview.sample.size)
         setSheet(AnnotationImportSheetState.Ready(preview))
 
         compose.onNodeWithText("Import 0 items", useUnmergedTree = true).assertExists()
         compose.onNodeWithTag("annot-import-confirm").assertIsNotEnabled()
+        // Recorded absence (needs-design #2099): no "PREVIEW · FIRST THREE" heading over an empty
+        // card. Pinned so the decision is visible rather than incidental.
+        compose.onAllNodesWithTag("annot-import-sample-label", useUnmergedTree = true).assertCountEquals(0)
+        compose.onAllNodesWithTag("annot-import-sample", useUnmergedTree = true).assertCountEquals(0)
+        // The chips and the merge line DO stay — they are what explains the zero.
+        compose.onNodeWithTag("annot-import-chip-skipped-value", useUnmergedTree = true).assertTextEquals("0")
+        compose.onNodeWithTag("annot-import-merge", useUnmergedTree = true).assertExists()
     }
 
     @Test fun populatedPreview_confirmIsEnabled() {
@@ -322,7 +336,7 @@ class AnnotationImportPreviewSheetTest {
         assertNull(confirmed)
     }
 
-    @Test fun failure_hidesTheChipsAndTheSample() {
+    @Test fun failure_hidesTheChipsAndTheSampleAndTheMergeLine() {
         // The design's error branch REPLACES the chips + sample + merge line (`:477-485`).
         setSheet(AnnotationImportSheetState.Failed("annotations.json", ImportFailure.NotJson))
 
@@ -330,8 +344,30 @@ class AnnotationImportPreviewSheetTest {
         compose.onAllNodesWithTag("annot-import-chip-notes", useUnmergedTree = true).assertCountEquals(0)
         compose.onAllNodesWithTag("annot-import-chip-skipped", useUnmergedTree = true).assertCountEquals(0)
         compose.onAllNodesWithTag("annot-import-sample", useUnmergedTree = true).assertCountEquals(0)
-        // The file header survives — the error variant keeps it (`:448-475` is outside the branch).
+        compose.onAllNodesWithTag("annot-import-merge", useUnmergedTree = true).assertCountEquals(0)
+        // The file header and BOTH actions survive — they sit outside the artboard's branch.
         compose.onNodeWithText("annotations.json", useUnmergedTree = true).assertExists()
+        compose.onNodeWithTag("annot-import-cancel").assertIsDisplayed()
+        compose.onNodeWithTag("annot-import-confirm").assertIsDisplayed()
+    }
+
+    @Test fun failureState_sanitizesAProviderSuppliedFileName() {
+        // A `Failed` state is built by the I/O layer from a name the reader may never have seen, so
+        // the sheet sanitizes at the pixel. Traversal + a C0 control + a bidi override, all built
+        // from code points so no raw control byte can end up in this source file.
+        val hostile = "../../etc/anno" + 0x0000.toChar() + "tations" + 0x202E.toChar() + ".json"
+        setSheet(AnnotationImportSheetState.Failed(hostile, ImportFailure.Unreadable))
+
+        compose.onNodeWithTag("annot-import-filename", useUnmergedTree = true)
+            .assertTextEquals("annotations.json")
+        compose.onAllNodesWithText(hostile, useUnmergedTree = true).assertCountEquals(0)
+    }
+
+    @Test fun failureState_survivesAnAllStrippedFileName() {
+        // Nothing usable left → the shared sanitizer's FALLBACK_NAME, not a blank header.
+        setSheet(AnnotationImportSheetState.Failed(0x202E.toChar().toString(), ImportFailure.Busy))
+        compose.onNodeWithTag("annot-import-filename", useUnmergedTree = true)
+            .assertTextEquals("Untitled")
     }
 
     @Test fun populated_hasNoErrorBlob() {
@@ -424,6 +460,23 @@ class AnnotationImportPreviewSheetTest {
         ).assertExists()
     }
 
+    @Test fun theDesignedJsonGlyphActuallyDraws() {
+        // The header glyph is the artboard's own `IconFileJson` path data stroked onto a Canvas.
+        // A typo in the path string, a bad viewport scale, or a zero-size Canvas would all draw
+        // NOTHING and every other assertion in this file would still pass — so assert pixels: a
+        // glyph that drew nothing leaves the capture a single flat colour (the tinted badge).
+        setSheet(AnnotationImportSheetState.Ready(mixedPreview()))
+
+        val pixels = compose.onNodeWithTag("annot-import-file-icon", useUnmergedTree = true)
+            .captureToImage()
+            .toPixelMap()
+        val distinct = HashSet<Int>()
+        for (y in 0 until pixels.height) {
+            for (x in 0 until pixels.width) distinct.add(pixels[x, y].toArgb())
+        }
+        assertTrue("the designed JSON glyph drew nothing (colours=$distinct)", distinct.size > 1)
+    }
+
     // ── absence assertions (rule 51 — what was deliberately NOT drawn) ───────────────────
 
     @Test fun noBookmarksCountChip() {
@@ -437,11 +490,70 @@ class AnnotationImportPreviewSheetTest {
         compose.onAllNodesWithTag("annot-import-chip-bookmarks", useUnmergedTree = true).assertCountEquals(0)
     }
 
-    @Test fun noExportAffordanceOnThisSheet() {
-        // WI-8 / needs-design #2085 — nothing about export exists on the import surface.
+    @Test fun theOnlyTwoActionsAreCancelAndImport() {
+        // WI-8 / needs-design #2085 — nothing about export exists on the import surface. Asserting
+        // the ABSENCE of one tag and one literal string would false-green on an icon-only or
+        // differently-worded affordance, so this enumerates the whole clickable set instead.
         setSheet(AnnotationImportSheetState.Ready(mixedPreview()))
-        compose.onAllNodesWithTag("annot-import-export", useUnmergedTree = true).assertCountEquals(0)
-        compose.onAllNodesWithText("Export", useUnmergedTree = true).assertCountEquals(0)
+
+        val clickable = compose.onAllNodes(hasClickAction()).fetchSemanticsNodes()
+        val tags = clickable.mapNotNull { it.config.getOrNull(SemanticsProperties.TestTag) }.toSet()
+        assertEquals(setOf("annot-import-cancel", "annot-import-confirm"), tags)
+        assertEquals(2, clickable.size)
+    }
+
+    @Test fun aVeryLongTitleCannotPushTheActionsOffTheSheet() {
+        // The merge line interpolates the book title; the body scrolls and the actions are pinned,
+        // so an unbounded title cannot bury the only way out of the sheet.
+        val preview = previewOf(
+            envelopeJson(highlights = (1..5).map { highlight(uuid(it), offset = it * 10) }),
+            bookTitle = "書".repeat(4_000),
+        )
+        var confirmed: ImportPreview? = null
+        setSheet(AnnotationImportSheetState.Ready(preview), onConfirm = { confirmed = it })
+
+        compose.onNodeWithTag("annot-import-cancel").assertIsDisplayed()
+        compose.onNodeWithTag("annot-import-confirm").assertIsDisplayed().assertIsEnabled()
+        compose.onNodeWithTag("annot-import-confirm").performClick()
+        compose.waitForIdle()
+        assertSame(preview, confirmed)
+    }
+
+    @Test fun rtlPayloadRendersAndLeavesTheActionsReachable() {
+        val arabic = "هذا اقتباس من الكتاب"
+        val preview = previewOf(
+            envelopeJson(highlights = listOf(highlight(uuid(1), 10, text = arabic))),
+            bookTitle = arabic,
+        )
+        setSheet(AnnotationImportSheetState.Ready(preview))
+
+        compose.onNodeWithText("\"" + arabic + "\"", useUnmergedTree = true).assertExists()
+        compose.onNodeWithTag("annot-import-confirm").assertIsDisplayed().assertIsEnabled()
+    }
+
+    @Test fun anUnknownWireColorFallsBackInsteadOfDisappearing() {
+        // The reader folds an unknown provider color to AnnotationColor.DEFAULT before it can drive
+        // the dot; the row still renders.
+        val preview = previewOf(
+            envelopeJson(
+                highlights = listOf(
+                    highlight(uuid(1), 10, text = "unknown color").copy(color = "chartreuse"),
+                ),
+            ),
+        )
+        assertEquals(AnnotationColor.DEFAULT.key, preview.sample.single().colorKey)
+        setSheet(AnnotationImportSheetState.Ready(preview))
+        compose.onNodeWithText("\"unknown color\"", useUnmergedTree = true).assertExists()
+    }
+
+    @Test fun aBookmarkWithNoTitleStillProducesARenderableSampleRow() {
+        val preview = previewOf(envelopeJson(bookmarks = listOf(bookmark(uuid(1), 10, title = null))))
+        assertEquals(1, preview.importable)
+        assertEquals("", preview.sample.single().text)
+        setSheet(AnnotationImportSheetState.Ready(preview))
+
+        compose.onAllNodesWithTag("annot-import-sample-row", useUnmergedTree = true).assertCountEquals(1)
+        compose.onNodeWithText("Import 1 items", useUnmergedTree = true).assertExists()
     }
 
     // ── the ModalBottomSheet wrapper ────────────────────────────────────────────────────
