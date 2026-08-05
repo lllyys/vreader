@@ -35,6 +35,8 @@ import android.provider.OpenableColumns
 import androidx.test.core.app.ApplicationProvider
 import com.vreader.app.data.ImportException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -53,6 +55,9 @@ import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.InputStream
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 
 @RunWith(RobolectricTestRunner::class)
 class IncomingBookResolverTest {
@@ -81,6 +86,9 @@ class IncomingBookResolverTest {
 
     /** One code point as a String — the only way invisible characters enter this file. */
     private fun cp(codePoint: Int): String = String(Character.toChars(codePoint))
+
+    /** One UNPAIRED surrogate code unit (malformed UTF-16 that `cp` cannot express). */
+    private fun lone(codeUnit: Int): String = Char(codeUnit).toString()
 
     private class FakeProvider : ContentProvider() {
         var cursorFactory: () -> Cursor? = { null }
@@ -115,6 +123,32 @@ class IncomingBookResolverTest {
             closed = true
             super.close()
         }
+    }
+
+    /** Counts every read, so "the stream was untouched" can be asserted, not inferred. */
+    private class CountingStream(bytes: ByteArray) : ByteArrayInputStream(bytes) {
+        var reads = 0
+            private set
+        var closed = false
+            private set
+
+        override fun read(): Int { reads++; return super.read() }
+        override fun read(b: ByteArray, off: Int, len: Int): Int {
+            reads++
+            return super.read(b, off, len)
+        }
+
+        override fun close() { closed = true; super.close() }
+    }
+
+    /** A stream whose `markSupported()` throws — the leak window between open and wrap. */
+    private class HostileMarkStream : InputStream() {
+        var closed = false
+            private set
+
+        override fun read(): Int = -1
+        override fun markSupported(): Boolean = throw IllegalStateException("hostile provider")
+        override fun close() { closed = true }
     }
 
     /** A stream with no mark support — the resolver must WRAP it, not reject it. */
@@ -343,7 +377,9 @@ class IncomingBookResolverTest {
         provider.mimeType = "application/octet-stream"
         serve(target, pdfBytes())
 
-        assertEquals(BookFormat.pdf, open(target).format)
+        val pending = open(target)
+        assertEquals(BookFormat.pdf, pending.format)
+        pending.stream.close()
     }
 
     @Test
@@ -354,6 +390,11 @@ class IncomingBookResolverTest {
         serve(target, opaqueBytes())
 
         expectUnsupported(target)
+        // Paired positive: the rejection must be about THESE bytes, not a resolver that
+        // rejects everything. Same MIME, same nameless URI, only the bytes differ.
+        val sniffable = uri("mime2/67890")
+        serve(sniffable, pdfBytes())
+        assertEquals(BookFormat.pdf, open(sniffable).also { it.stream.close() }.format)
     }
 
     @Test
@@ -364,6 +405,12 @@ class IncomingBookResolverTest {
             provider.mimeType = mime
             serve(target, opaqueBytes())
             expectUnsupported(target)
+
+            // Paired positive under the SAME uninformative MIME: an epub-named twin still
+            // resolves, so the failure above is discrimination and not blanket rejection.
+            val named = uri("mime3/$index/twin.epub")
+            serve(named, opaqueBytes())
+            assertEquals(BookFormat.epub, open(named).also { it.stream.close() }.format)
         }
     }
 
@@ -419,12 +466,15 @@ class IncomingBookResolverTest {
 
     @Test
     fun theStreamIsUntouchedWhenTheNameAlreadyDecided() = runTest {
+        // "Untouched" means ZERO reads, not merely "ends up at position 0" — sniffing and
+        // then resetting correctly would also satisfy a hash comparison alone.
         val target = uri("sha2/12345")
         val bytes = textBytes()
+        val last = serve(target, bytes) { CountingStream(it) }
         declare("story.txt")
-        serve(target, bytes)
 
         val pending = open(target)
+        assertEquals("the name decided; nothing should have been read", 0, (last() as CountingStream).reads)
         assertEquals(sha(bytes), sha(pending.stream.readBytes()))
         pending.stream.close()
     }
@@ -516,6 +566,75 @@ class IncomingBookResolverTest {
         // "unreadable" from "unsupported".
         val missing = Uri.fromFile(File(temp.newFolder(), "gone.epub"))
         assertNull(subject.resolveAndOpen(missing))
+
+        // Paired positive: a file:// URI that DOES exist resolves, so the null above is
+        // about the refusal and not a resolver that returns null for everything.
+        val present = File(temp.newFolder(), "present.epub").apply { writeBytes(epubBytes()) }
+        val pending = open(Uri.fromFile(present))
+        assertEquals(BookFormat.epub, pending.format)
+        pending.stream.close()
+    }
+
+    @Test
+    fun aStreamWhoseMarkSupportedThrowsIsClosedNotLeaked() = runTest {
+        // The window between `openInputStream` returning and the mark-wrapping decision:
+        // a throw there must not strand the descriptor.
+        val target = uri("leak3/12345")
+        declare("book.epub")
+        val hostile = HostileMarkStream()
+        shadowOf(contentResolver).registerInputStreamSupplier(target) { hostile }
+
+        val error = runCatching { subject.resolveAndOpen(target) }.exceptionOrNull()
+        assertTrue("expected the provider's failure to propagate, got $error", error is IllegalStateException)
+        assertTrue("the stream leaked in the open-to-wrap window", hostile.closed)
+    }
+
+    @Test
+    fun aStreamIsClosedWhenTheCallerIsCancelledDuringTheDispatcherHandoff() {
+        // `withContext` DISCARDS its result if the caller is cancelled after the block
+        // completed but before the value is delivered, and the block's own catch never
+        // sees that cancellation. Without ownership tracking ACROSS the hand-off the
+        // stream would have no owner at all. Driven with real threads and latches because
+        // an immediate dispatcher cannot express the race.
+        val target = uri("cancel1/12345")
+        declare("book.epub")
+        val opened = CountDownLatch(1)
+        val proceed = CountDownLatch(1)
+        val produced = AtomicReference<TrackingStream?>(null)
+        shadowOf(contentResolver).registerInputStreamSupplier(target) {
+            opened.countDown()
+            proceed.await(10, TimeUnit.SECONDS)
+            TrackingStream(epubBytes()).also { produced.set(it) }
+        }
+
+        runBlocking {
+            val job = launch(Dispatchers.Default) { subject.resolveAndOpen(target) }
+            assertTrue("the open was never reached", opened.await(10, TimeUnit.SECONDS))
+            job.cancel()                 // cancel while the blocking open is in flight
+            proceed.countDown()          // let the block finish and try to deliver
+            job.join()
+        }
+
+        val stream = produced.get()
+        assertTrue("no stream was produced, so the race was not exercised", stream != null)
+        assertTrue("the stream leaked across the cancelled hand-off", stream!!.closed)
+    }
+
+    @Test
+    fun aPendingImportCannotCarryAnUncappedSourceUri() {
+        // The cap is a construction invariant, not a convention at one assignment site:
+        // WI-5 re-derives `sourceUri` and must not be able to discard it silently.
+        val error = runCatching {
+            PendingImport(
+                uri = uri("cap2/x.epub"),
+                displayName = "x.epub",
+                format = BookFormat.epub,
+                sourceUri = "z".repeat(IncomingBookResolver.MAX_SOURCE_URI_CHARS + 1),
+                declaredSize = null,
+                stream = ByteArrayInputStream(ByteArray(0)),
+            )
+        }.exceptionOrNull()
+        assertTrue("an uncapped sourceUri was accepted", error is IllegalArgumentException)
     }
 
     // ---- cursor metadata ---------------------------------------------------
@@ -678,9 +797,11 @@ class IncomingBookResolverTest {
 
     @Test
     fun sanitizeCapsLengthWhilePreservingTheExtension() {
+        // Exact, not "<= 200 and ends with .epub" — returning just ".epub" would satisfy
+        // the loose form while throwing the whole name away.
         val cleaned = IncomingBookResolver.sanitizeDisplayName("a".repeat(10_000) + ".epub")
-        assertTrue("length ${cleaned.length}", cleaned.length <= IncomingBookResolver.MAX_NAME_CHARS)
-        assertTrue("extension lost: $cleaned", cleaned.endsWith(".epub"))
+        assertEquals(IncomingBookResolver.MAX_NAME_CHARS, cleaned.length)
+        assertEquals("a".repeat(IncomingBookResolver.MAX_NAME_CHARS - 5) + ".epub", cleaned)
     }
 
     @Test
@@ -703,7 +824,31 @@ class IncomingBookResolverTest {
         val cleaned = IncomingBookResolver.sanitizeDisplayName("x" + cp(0x20B9F).repeat(400))
         assertTrue("the name was not preserved at all: $cleaned", cleaned.startsWith("x" + cp(0x20B9F)))
         assertTrue(cleaned.length <= IncomingBookResolver.MAX_NAME_CHARS)
-        assertTrue("lone high surrogate at the tail", !Character.isHighSurrogate(cleaned.last()))
+        assertNoLoneSurrogate(cleaned)
+    }
+
+    @Test
+    fun sanitizeDropsLoneSurrogatesAlreadyPresentInTheInput() {
+        // Malformed UTF-16 from a hostile provider: a bare high or low surrogate that was
+        // never part of a pair. Truncating safely is not enough if the input arrives broken.
+        assertEquals("a.epub", IncomingBookResolver.sanitizeDisplayName("a" + lone(0xD800) + ".epub"))
+        assertEquals("a.epub", IncomingBookResolver.sanitizeDisplayName("a" + lone(0xDFFF) + ".epub"))
+        assertEquals("Untitled", IncomingBookResolver.sanitizeDisplayName(lone(0xD800)))
+        // A VALID pair is not a lone surrogate and must survive intact.
+        assertEquals(cp(0x20B9F) + ".epub", IncomingBookResolver.sanitizeDisplayName(cp(0x20B9F) + ".epub"))
+    }
+
+    /** No unpaired surrogate anywhere in the string, not merely at the tail. */
+    private fun assertNoLoneSurrogate(value: String) {
+        var index = 0
+        while (index < value.length) {
+            val codePoint = value.codePointAt(index)
+            assertTrue(
+                "lone surrogate U+%04X at index %d".format(codePoint, index),
+                codePoint !in 0xD800..0xDFFF,
+            )
+            index += Character.charCount(codePoint)
+        }
     }
 
     @Test

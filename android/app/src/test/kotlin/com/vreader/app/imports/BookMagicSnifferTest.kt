@@ -4,17 +4,21 @@
 // boundary, so its three structural properties are asserted on EVERY input this file
 // feeds it, not just on the interesting ones:
 //
-//   1. it reads at most PROBE_BYTES (4096) — proven by a counting stream, which is
-//      also what proves "never inflates": you cannot inflate bytes you never read;
+//   1. it reads at most PROBE_BYTES (4096) — proven by a counting stream;
 //   2. it always rewinds — proven by reading the stream to EOF afterwards and
 //      comparing to the original bytes;
-//   3. it never throws — every malformed shape returns null.
+//   3. it never throws for malformed bytes — every bad shape returns null.
 //
 // `assertSniff` enforces all three; individual tests only state the expected format.
 //
+// NOT proven by the byte budget: "never inflates". 4096 compressed bytes can still
+// expand to gigabytes if handed to a decompressor, so the real proof is STATIC — the
+// production file imports no ZIP/Inflater API at all. The budget assertion bounds the
+// READ, which is a different (also necessary) property.
+//
 // Every negative case ALSO re-asserts that a VALID stored-mimetype EPUB still sniffs
 // as `epub`. Without that pairing a sniffer that threw on everything and caught
-// broadly would pass all seven negatives while silently rejecting real books — the
+// broadly would pass every negative while silently rejecting real books — the
 // negatives must prove DISCRIMINATION, not blanket failure.
 //
 // Fixtures are synthetic by necessity: this is a CI JVM unit test and cannot read the
@@ -87,6 +91,7 @@ class BookMagicSnifferTest {
      */
     private fun zipHeader(
         signature: ByteArray = byteArrayOf(0x50, 0x4B, 0x03, 0x04),
+        flags: Int = 0,
         method: Int = 0,
         compressed: Long = 20,
         uncompressed: Long = 20,
@@ -99,7 +104,7 @@ class BookMagicSnifferTest {
     ): ByteArray = ByteArrayOutputStream().apply {
         write(signature)
         u16(0x0A)                  // @4  version needed
-        u16(0)                     // @6  general purpose flags
+        u16(flags)                 // @6  general purpose flags
         u16(method)                // @8  compression method
         u16(0); u16(0)             // @10 mod time / date
         u32(0)                     // @14 crc32
@@ -148,6 +153,7 @@ class BookMagicSnifferTest {
         // "BOOKMOBI" earlier in a file must not be enough.
         val bytes = "BOOKMOBI".toByteArray(Charsets.US_ASCII) + ByteArray(120) { 0x00 }
         assertNull(assertSniff(bytes))
+        assertAValidEpubStillSniffsAsEpub()
     }
 
     @Test
@@ -273,10 +279,12 @@ class BookMagicSnifferTest {
     }
 
     @Test
-    fun aZipBombShapedInputIsNeverInflated() {
-        // A DEFLATE entry declaring a 4 GiB expansion. The proof that nothing is
-        // inflated is the byte budget assertSniff enforces: the sniffer pulls at most
-        // 4096 bytes and hands them to no decompressor.
+    fun aZipBombShapedInputIsRejectedAndOnlyTheProbeIsRead() {
+        // A DEFLATE entry declaring a 4 GiB expansion. NOTE what this test does and does
+        // not prove: it proves the bomb is rejected and that at most 4096 bytes are
+        // pulled. It does NOT prove "never inflates" — 4096 compressed bytes could still
+        // be expanded. That property is static: the production file imports no ZIP or
+        // Inflater API, so there is nothing to inflate with.
         val bomb = zipHeader(
             method = 8,
             compressed = 1024,
@@ -291,8 +299,60 @@ class BookMagicSnifferTest {
 
     @Test
     fun aWrongZipSignatureIsNotTreatedAsAZip() {
-        // "PK\x05\x06" (end-of-central-directory) and "PK\x07\x08" are not local headers.
-        assertNull(assertSniff(zipHeader(signature = byteArrayOf(0x50, 0x4B, 0x05, 0x06), trailing = ByteArray(64))))
+        // "PK\x05\x06" (end-of-central-directory) and "PK\x07\x08" (data descriptor /
+        // spanning marker) are not local file headers.
+        assertNull(
+            assertSniff(
+                zipHeader(signature = byteArrayOf(0x50, 0x4B, 0x05, 0x06), trailing = ByteArray(64)),
+            ),
+        )
+        assertNull(
+            assertSniff(
+                zipHeader(signature = byteArrayOf(0x50, 0x4B, 0x07, 0x08), trailing = ByteArray(64)),
+            ),
+        )
+        assertAValidEpubStillSniffsAsEpub()
+    }
+
+    @Test
+    fun anEncryptedOrDataDescriptorEntryIsNull() {
+        // OCF requires the mimetype entry to be unencrypted with its sizes inline. Bit 0
+        // (encrypted) with a plaintext-looking payload is the interesting case: without the
+        // flag check, an attacker could declare ciphertext and still be believed.
+        assertNull(assertSniff(zipHeader(flags = 0x0001)))
+        assertNull(assertSniff(zipHeader(flags = 0x0008)))
+        assertAValidEpubStillSniffsAsEpub()
+    }
+
+    @Test
+    fun aTruncatedEncodingAtRealEofIsNotText() {
+        // `C2` is an incomplete two-byte UTF-8 sequence. Tolerating a cut sequence is only
+        // correct at the 4096-byte PROBE boundary; at a real EOF it decodes to nothing at
+        // all, and "no characters" is not text.
+        assertNull(assertSniff(byteArrayOf(0xC2.toByte())))
+        assertNull(assertSniff(byteArrayOf(0xE4.toByte(), 0xB8.toByte())))
+        // A UTF-16LE BOM plus half a code unit.
+        assertNull(assertSniff(byteArrayOf(0xFF.toByte(), 0xFE.toByte(), 0x41)))
+        // A BOM and nothing else decodes to nothing either.
+        assertNull(assertSniff(byteArrayOf(0xFF.toByte(), 0xFE.toByte())))
+        assertNull(assertSniff(byteArrayOf(0xEF.toByte(), 0xBB.toByte(), 0xBF.toByte())))
+
+        // The DISCRIMINATING fixtures: a truncated sequence AFTER valid text. The cases
+        // above decode to nothing and would be rejected by the "no characters" rule alone,
+        // so they cannot tell whether the end-of-input distinction is really made. These
+        // decode to real characters first and are rejected only because EOF — not the
+        // 4096-byte probe boundary — is what cut the last one short.
+        assertNull(assertSniff("hello".toByteArray() + byteArrayOf(0xC2.toByte())))
+        assertNull(
+            assertSniff(byteArrayOf(0xFF.toByte(), 0xFE.toByte(), 0x41, 0x00, 0x42)),
+        )
+        // ...and the same shapes WITHOUT the truncation are still text, so the rule
+        // discriminates rather than rejecting anything with a high byte in it.
+        assertEquals(BookFormat.txt, assertSniff("hello".toByteArray()))
+        assertEquals(
+            BookFormat.txt,
+            assertSniff(byteArrayOf(0xFF.toByte(), 0xFE.toByte(), 0x41, 0x00, 0x42, 0x00)),
+        )
         assertAValidEpubStillSniffsAsEpub()
     }
 
@@ -333,6 +393,60 @@ class BookMagicSnifferTest {
         assertNull(BookMagicSniffer.sniff(source))
         assertEquals(0, source.reads)
     }
+
+    @Test
+    fun aStreamWhoseMarkSupportedThrowsIsRefusedWithoutConsumingAByte() {
+        val source = object : InputStream() {
+            var reads = 0
+            override fun read(): Int { reads++; return -1 }
+            override fun markSupported(): Boolean = throw IllegalStateException("hostile")
+        }
+        assertNull(BookMagicSniffer.sniff(source))
+        assertEquals(0, source.reads)
+    }
+
+    @Test
+    fun aStreamWhoseReadThrowsYieldsNullRatherThanPropagating() {
+        val source = object : ByteArrayInputStream(validEpub()) {
+            override fun read(b: ByteArray, off: Int, len: Int): Int =
+                throw java.io.IOException("provider died mid-probe")
+        }
+        assertNull(BookMagicSniffer.sniff(source))
+    }
+
+    @Test
+    fun aStreamWhoseMarkThrowsYieldsNull() {
+        val source = object : ByteArrayInputStream(validEpub()) {
+            override fun mark(readAheadLimit: Int) = throw IllegalStateException("no marking")
+        }
+        assertNull(BookMagicSniffer.sniff(source))
+    }
+
+    @Test
+    fun aFailedRewindVetoesAnOtherwiseValidVerdict() {
+        // The bytes ARE a PDF, but a stream we could not restore is one the caller must
+        // not go on to hash — the verdict is withheld rather than handed over.
+        val source = object : ByteArrayInputStream(pdfBytesForRewindTest()) {
+            override fun reset() = throw java.io.IOException("cannot rewind")
+        }
+        assertNull(BookMagicSniffer.sniff(source))
+    }
+
+    @Test
+    fun aStreamThatAlwaysReturnsZeroTerminatesAndIsNotText() {
+        // A contract-violating stream: read() keeps returning 0 without ever reaching EOF.
+        // It must neither spin forever nor be given the probe-boundary benefit of the doubt.
+        val source = object : InputStream() {
+            override fun read(): Int = 0
+            override fun read(b: ByteArray, off: Int, len: Int): Int = 0
+            override fun markSupported(): Boolean = true
+            override fun mark(readAheadLimit: Int) = Unit
+            override fun reset() = Unit
+        }
+        assertNull(BookMagicSniffer.sniff(source))
+    }
+
+    private fun pdfBytesForRewindTest(): ByteArray = "%PDF-1.7 body".toByteArray(Charsets.US_ASCII)
 
     @Test
     fun theProbeBudgetIsFourKilobytes() {

@@ -15,10 +15,18 @@
 //     may refuse the second open or hand back different bytes.
 //   * `peek` OPENS NOTHING — it is a cursor query, so the caller's size / free-space
 //     preflight (D8) can reject before any file descriptor exists.
-//   * The stream is closed on EVERY throwing path and on no other.
+//   * OWNERSHIP IS EXPLICIT ACROSS THE DISPATCHER HAND-OFF. The stream is closed on every
+//     exit except the one that delivers it, INCLUDING a cancellation that discards
+//     `withContext`'s result after the block already completed.
+//
+// Known limitation (not fixable inside this file): `query` / `openInputStream` / `getType`
+// and the sniffer's probe read are synchronous and uninterruptible, so a provider that
+// blocks forever stalls resolution. Plan D8 puts the stall watchdog in the COORDINATOR,
+// which only sees an item after resolution finished — the gap is a cross-WI design issue,
+// not a defect this file can close.
 //
 // @coordinates-with: BookMagicSniffer (step 4), ImportActivity (WI-5: the caller that owns
-//   the URI grant), BookImporter.importStream (consumes format + displayName + stream)
+//   the URI grant and must close every returned stream), BookImporter.importStream
 package com.vreader.app.imports
 
 import android.content.ContentResolver
@@ -35,6 +43,8 @@ import java.io.BufferedInputStream
 import java.io.FileNotFoundException
 import java.io.InputStream
 import java.text.Normalizer
+import java.util.concurrent.atomic.AtomicReference
+import kotlin.coroutines.cancellation.CancellationException
 
 /** Metadata-only result of the pre-open cursor query (plan D8's preflight input). */
 data class IncomingMetadata(val displayName: String?, val declaredSize: Long?)
@@ -48,12 +58,23 @@ data class PendingImport(
     val uri: Uri,
     val displayName: String,
     val format: BookFormat,
-    /** `uri.toString()` already capped to [IncomingBookResolver.MAX_SOURCE_URI_CHARS]. */
+    /**
+     * `uri.toString()` capped to [IncomingBookResolver.MAX_SOURCE_URI_CHARS]. Enforced as a
+     * construction invariant, not just a convention at the one assignment site, so a caller
+     * that re-derives this from `uri.toString()` (silently discarding the cap) fails loudly
+     * instead of persisting an unbounded attacker-controlled string.
+     */
     val sourceUri: String,
     /** `OpenableColumns.SIZE`; null when absent or negative. */
     val declaredSize: Long?,
     val stream: InputStream,
-)
+) {
+    init {
+        require(sourceUri.length <= IncomingBookResolver.MAX_SOURCE_URI_CHARS) {
+            "sourceUri exceeds ${IncomingBookResolver.MAX_SOURCE_URI_CHARS} chars"
+        }
+    }
+}
 
 class IncomingBookResolver(
     private val resolver: ContentResolver,
@@ -73,25 +94,52 @@ class IncomingBookResolver(
      * [ImportException.UnsupportedFormat] — after closing the stream — when every step
      * fails. Any other provider exception propagates for the caller to map.
      */
-    suspend fun resolveAndOpen(uri: Uri): PendingImport? = withContext(ioDispatcher) {
+    suspend fun resolveAndOpen(uri: Uri): PendingImport? {
+        // `withContext` DISCARDS its result and throws CancellationException if the caller
+        // is cancelled after the block completed but before the value is delivered — the
+        // documented pitfall of returning a closeable from it. The block's own catch never
+        // sees that cancellation, so the stream would end up with no owner at all. This
+        // reference carries ownership across the hand-off; the finally closes anything the
+        // caller never received.
+        val undelivered = AtomicReference<InputStream?>(null)
+        var delivered = false
+        try {
+            val pending = withContext(ioDispatcher) { resolveBlocking(uri, undelivered) }
+            delivered = true
+            return pending
+        } finally {
+            if (!delivered) undelivered.getAndSet(null)?.let { closeQuietly(it) }
+        }
+    }
+
+    /** The blocking body. Owns the stream until it publishes it to [undelivered]. */
+    private fun resolveBlocking(
+        uri: Uri,
+        undelivered: AtomicReference<InputStream?>,
+    ): PendingImport? {
         // A provider may refuse `query` yet allow `openInputStream`. Losing the name costs
         // us step 1; it must not cost us the book, so the later steps still run.
-        val metadata = runCatching { queryMetadata(uri) }.getOrElse { IncomingMetadata(null, null) }
+        val metadata = providerCall { queryMetadata(uri) } ?: IncomingMetadata(null, null)
 
-        val opened = openOrNull(uri) ?: return@withContext null
-        // Sniffing needs mark/reset. Wrapping (never rejecting) keeps providers that hand
-        // back a plain FileInputStream working.
-        val stream = if (opened.markSupported()) {
-            opened
-        } else {
-            BufferedInputStream(opened, BookMagicSniffer.PROBE_BYTES * 2)
-        }
+        val opened = openOrNull(uri) ?: return null
 
+        // From here the stream is OWNED. `owned` starts as the raw stream and only becomes
+        // the wrapper once that wrapper exists, so a hostile `markSupported()` or a failed
+        // allocation cannot strand the open descriptor between the two.
+        var owned: InputStream = opened
         try {
+            // Sniffing needs mark/reset. Wrapping (never rejecting) keeps providers that
+            // hand back a plain FileInputStream working.
+            val stream = if (opened.markSupported()) {
+                opened
+            } else {
+                BufferedInputStream(opened, BookMagicSniffer.PROBE_BYTES * 2).also { owned = it }
+            }
+
             val declaredName = cleanedName(metadata.displayName)
             val nameFormat = declaredName?.let { DocumentFingerprint.formatForFilename(it) }
             val segmentName = if (nameFormat == null) {
-                cleanedName(runCatching { uri.lastPathSegment }.getOrNull())
+                cleanedName(providerCall { uri.lastPathSegment })
             } else {
                 null
             }
@@ -99,13 +147,13 @@ class IncomingBookResolver(
 
             val format = nameFormat                                                  // 1
                 ?: segmentFormat                                                     // 2
-                ?: formatForMimeType(runCatching { resolver.getType(uri) }.getOrNull())   // 3
+                ?: formatForMimeType(providerCall { resolver.getType(uri) })         // 3
                 ?: BookMagicSniffer.sniff(stream)                                    // 4
-                ?: throw ImportException.UnsupportedFormat(                           // 5
+                ?: throw ImportException.UnsupportedFormat(                          // 5
                     declaredName ?: segmentName ?: FALLBACK_NAME,
                 )
 
-            PendingImport(
+            val pending = PendingImport(
                 uri = uri,
                 // The provider's name when it gave one; otherwise the path segment, but
                 // only when THAT is what identified the format — an opaque document id
@@ -118,11 +166,13 @@ class IncomingBookResolver(
                 declaredSize = metadata.declaredSize,
                 stream = stream,
             )
+            // Constructed successfully: hand ownership to the cross-boundary guard.
+            undelivered.set(owned)
+            return pending
         } catch (t: Throwable) {
-            // Every non-returning exit closes the stream: UnsupportedFormat, a hostile
-            // provider's RuntimeException, and cancellation alike. Ownership only
-            // transfers to the caller on the success path.
-            runCatching { stream.close() }
+            // Every non-delivering exit closes: UnsupportedFormat, a hostile provider's
+            // RuntimeException, a failed PendingImport invariant, and cancellation alike.
+            closeQuietly(owned)
             throw t
         }
     }
@@ -156,6 +206,29 @@ class IncomingBookResolver(
         return if (index >= 0 && !isNull(index)) getLong(index) else null
     }
 
+    /**
+     * A step that consults the (attacker-influenced) provider. An ordinary failure costs
+     * that step only. Cancellation is RETHROWN — `runCatching` would swallow it and quietly
+     * carry on doing work for a caller that is gone — and JVM errors keep propagating.
+     */
+    private inline fun <T> providerCall(block: () -> T): T? = try {
+        block()
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        null
+    }
+
+    private fun closeQuietly(stream: InputStream) {
+        try {
+            stream.close()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // A provider that fails to release is not something the caller can act on.
+        }
+    }
+
     companion object {
         const val MAX_NAME_CHARS = 200
         const val MAX_SOURCE_URI_CHARS = 2048
@@ -163,6 +236,14 @@ class IncomingBookResolver(
 
         /** Longest tail (dot included) still treated as an extension worth preserving. */
         private const val MAX_EXTENSION_CHARS = 16
+
+        /**
+         * Defensive bound applied to the RAW provider name before any normalization. The
+         * 200-char cap alone is applied too late: NFC normalization, the filtering
+         * StringBuilder and the whitespace regex would each allocate an attacker-sized
+         * copy first. Generous enough that no real name is affected before the real cap.
+         */
+        private const val MAX_RAW_NAME_CHARS = 8192
 
         /**
          * The FULL Unicode Bidi_Control set. Enumerated rather than "strip category Cf",
@@ -175,6 +256,8 @@ class IncomingBookResolver(
             0x202A, 0x202B, 0x202C, 0x202D, 0x202E,      // LRE, RLE, PDF, LRO, RLO
             0x2066, 0x2067, 0x2068, 0x2069,              // LRI, RLI, FSI, PDI
         )
+
+        private val SPACE_RUN = Regex(" {2,}")
 
         /**
          * Plan D4's MIME map. An octet-stream type, a wildcard type, and null all carry no
@@ -196,10 +279,10 @@ class IncomingBookResolver(
         }
 
         /**
-         * A provider-supplied name made safe to show and to derive a title from: NFC
-         * normalized, control and bidi-control characters removed, reduced to its last
-         * path component, whitespace runs collapsed, trimmed, and capped at
-         * [MAX_NAME_CHARS] with the extension preserved.
+         * A provider-supplied name made safe to show and to derive a title from: reduced to
+         * its last path component, NFC normalized, control / bidi-control / lone-surrogate
+         * code points removed, whitespace runs collapsed, trimmed, and capped at
+         * [MAX_NAME_CHARS] with the extension preserved and no surrogate pair split.
          *
          * CJK and RTL LETTERS survive untouched — only control characters are removed. When
          * nothing usable remains the result is [FALLBACK_NAME] plus [format]'s extension.
@@ -210,8 +293,16 @@ class IncomingBookResolver(
         /** The sanitized name, or null when nothing usable is left. */
         private fun cleanedName(raw: String?): String? {
             if (raw.isNullOrEmpty()) return null
-            val normalized = runCatching { Normalizer.normalize(raw, Normalizer.Form.NFC) }
-                .getOrDefault(raw)
+
+            // Leaf first, then a raw bound: only the last path component can ever become a
+            // title, so "../../etc/passwd" reduces to "passwd" and no traversal survives —
+            // and everything downstream works on a bounded string. NFC never introduces or
+            // removes an ASCII separator, so splitting before normalizing is equivalent.
+            val leaf = raw.substringAfterLast('/').substringAfterLast('\\')
+            val bounded = capLength(leaf, MAX_RAW_NAME_CHARS)
+
+            val normalized = runCatching { Normalizer.normalize(bounded, Normalizer.Form.NFC) }
+                .getOrDefault(bounded)
 
             val stripped = buildString(normalized.length) {
                 var index = 0
@@ -222,6 +313,9 @@ class IncomingBookResolver(
                         // Cc covers NUL, CR, LF, TAB, DEL and NEL: removed outright.
                         Character.getType(codePoint) == Character.CONTROL.toInt() -> Unit
                         codePoint in BIDI_CONTROLS -> Unit
+                        // An UNPAIRED surrogate; a valid pair arrives as one astral code
+                        // point and is kept. Malformed UTF-16 must not reach a title.
+                        codePoint in 0xD800..0xDFFF -> Unit
                         Character.isWhitespace(codePoint) || Character.isSpaceChar(codePoint) ->
                             append(' ')
                         else -> appendCodePoint(codePoint)
@@ -229,25 +323,20 @@ class IncomingBookResolver(
                 }
             }
 
-            // Only the last path component can ever become a title, so "../../etc/passwd"
-            // reduces to "passwd" and no traversal can survive into a name.
-            val leaf = stripped.substringAfterLast('/').substringAfterLast('\\')
-            val collapsed = leaf.replace(SPACE_RUN, " ").trim()
+            val collapsed = stripped.replace(SPACE_RUN, " ").trim()
             if (collapsed.isEmpty() || collapsed.all { it == '.' }) return null
-            return capLength(collapsed)
+            return capLength(collapsed, MAX_NAME_CHARS)
         }
 
-        private val SPACE_RUN = Regex(" {2,}")
-
-        private fun capLength(name: String): String {
-            if (name.length <= MAX_NAME_CHARS) return name
+        private fun capLength(name: String, limit: Int): String {
+            if (name.length <= limit) return name
             val dot = name.lastIndexOf('.')
             val extension = if (dot > 0 && name.length - dot in 2..MAX_EXTENSION_CHARS) {
                 name.substring(dot)
             } else {
                 ""
             }
-            return truncateWholeCharacters(name, MAX_NAME_CHARS - extension.length) + extension
+            return truncateWholeCharacters(name, limit - extension.length) + extension
         }
 
         /** Truncates without ever leaving a lone high surrogate (astral CJK, emoji). */
