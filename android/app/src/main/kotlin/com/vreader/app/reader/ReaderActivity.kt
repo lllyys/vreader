@@ -115,10 +115,13 @@ class ReaderActivity : AppCompatActivity() {
 
     private val annotations: AnnotationsRepository get() = container.annotationsRepository
 
-    // feature #165 WI-7 — the annotation import/export SAF boundary for THIS activity: this activity's
-    // ContentResolver behind the app-wide BoundedCallGate (never a fresh gate — one abandoned-call
-    // ledger, plan section 8.5). Built lazily so a reader that never opens the Details sheet pays nothing.
-    private val annotationsIo by lazy { container.annotationsIoController(contentResolver) }
+    // feature #165 WI-7 — the annotation import/export SAF boundary, behind the app-wide
+    // BoundedCallGate (never a fresh gate — one abandoned-call ledger, plan section 8.5). The
+    // APPLICATION resolver, not this Activity's: the approved merge runs on `container.appScope` and
+    // a bounded provider call can outlive the reader, so an Activity-bound resolver would keep a
+    // finished Activity alive for the length of an untrusted provider's park (Gate-4 round 2,
+    // Medium). Lazy so a reader that never opens the Details sheet pays nothing.
+    private val annotationsIo by lazy { container.annotationsIoController(applicationContext.contentResolver) }
 
     private var containerId: Int = 0
     private var navigator: EpubNavigatorFragment? = null

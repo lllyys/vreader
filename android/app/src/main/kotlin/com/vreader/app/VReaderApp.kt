@@ -126,10 +126,15 @@ class AppContainer(
     }
 
     /**
-     * The per-activity SAF boundary for annotation import/export.
+     * The SAF boundary for annotation import/export.
      *
-     * NOT a lazy: it binds an activity's own [android.content.ContentResolver]. The
-     * `BoundedCallGate` it receives is the SHIPPED app-wide one
+     * Callers pass the **application** [android.content.ContentResolver], never an Activity's: an
+     * approved merge runs on [appScope] and a bounded provider call can outlive the reader, so an
+     * Activity-bound resolver would keep a finished Activity alive for as long as an untrusted
+     * provider parks (Gate-4 round 2, Medium). It stays a FUNCTION rather than a lazy so a test can
+     * hand in its own resolver.
+     *
+     * The `BoundedCallGate` it receives is the SHIPPED app-wide one
      * ([incomingImportCoordinator]`.boundedCalls`) — never a fresh instance. A second gate would
      * carry a second `MAX_ABANDONED_CALLS` budget, i.e. DOUBLE the ceiling on simultaneously
      * parked provider threads (plan section 8.5, R-3b).

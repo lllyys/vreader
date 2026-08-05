@@ -71,10 +71,12 @@ class PdfReaderActivity : ComponentActivity() {
 
     private val container get() = (application as VReaderApp).container
 
-    // feature #165 WI-7 — the annotation import/export SAF boundary for THIS activity: this activity's
-    // ContentResolver behind the app-wide BoundedCallGate (never a fresh gate — one abandoned-call
-    // ledger, plan section 8.5).
-    private val annotationsIo by lazy { container.annotationsIoController(contentResolver) }
+    // feature #165 WI-7 — the annotation import/export SAF boundary, behind the app-wide
+    // BoundedCallGate (never a fresh gate — one abandoned-call ledger, plan section 8.5). The
+    // APPLICATION resolver, not this Activity's: the approved merge runs on `container.appScope` and
+    // a bounded provider call can outlive the reader, so an Activity-bound resolver would keep a
+    // finished Activity alive for the length of an untrusted provider's park (Gate-4 round 2, Medium).
+    private val annotationsIo by lazy { container.annotationsIoController(applicationContext.contentResolver) }
 
     // Hoisted so onStop can flush the latest page synchronously (mirrors TxtReaderActivity).
     private var flushPosition: (() -> Unit)? = null

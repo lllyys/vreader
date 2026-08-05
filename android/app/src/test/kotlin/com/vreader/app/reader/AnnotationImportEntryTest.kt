@@ -268,6 +268,62 @@ class AnnotationImportEntryTest {
         assertFalse("a cancelled scope must not run the merge", applied)
     }
 
+    // ---- 5. one pick at a time: a late answer may not write over a newer one -------------------
+
+    @Test
+    fun session_aLateAnswerFromAnAbandonedPick_isNotCurrent() {
+        // Pick A, its preview parks, the user picks B. Whichever parse returns LAST would otherwise
+        // win, and the sheet would show A's counts for B's file.
+        val session = AnnotationImportSession()
+        val a = session.begin()
+        val b = session.begin()
+        assertFalse("A's late parse must not write the sheet", session.isCurrent(a))
+        assertTrue("B owns the sheet", session.isCurrent(b))
+    }
+
+    @Test
+    fun session_dismissAlsoTakesAToken_soAClosedSheetIsNotResurrected() {
+        val session = AnnotationImportSession()
+        val pick = session.begin()
+        session.begin()   // the Cancel / swipe / scrim path
+        assertFalse("a dismissed sheet must not be reopened by a parse that returns later", session.isCurrent(pick))
+    }
+
+    @Test
+    fun session_secondConfirmWhileTheFirstMergeRuns_isRefused() {
+        val session = AnnotationImportSession()
+        session.begin()
+        val first = session.tryBeginApply()
+        assertEquals(session.current, first)
+        assertNull("a double tap on `Import N items` must not queue a second apply", session.tryBeginApply())
+    }
+
+    @Test
+    fun session_afterAMergeSettles_thePickCanBeConfirmedAgain() {
+        val session = AnnotationImportSession()
+        session.begin()
+        val token = requireNotNull(session.tryBeginApply())
+        session.endApply(token)
+        assertEquals(
+            "once the merge settled the claim is released",
+            session.current, session.tryBeginApply(),
+        )
+    }
+
+    @Test
+    fun session_aNewPickReleasesAStuckClaim_andTheOldMergeCannotSettleOverIt() {
+        // The user confirms, then dismisses and picks a new file while the first merge is still in
+        // flight. The new pick must be confirmable, and the OLD merge's settle must not touch it.
+        val session = AnnotationImportSession()
+        session.begin()
+        val stale = requireNotNull(session.tryBeginApply())
+        val fresh = session.begin()
+        assertEquals("the new pick can be confirmed", fresh, session.tryBeginApply())
+        session.endApply(stale)
+        assertTrue("…and the stale settle must not release the new pick's claim", session.isCurrent(fresh))
+        assertNull("the new pick's merge is still claimed", session.tryBeginApply())
+    }
+
     @Test
     fun applyFailure_neverEchoesTheThrowableText() {
         // rule 50 section 6 — the user-facing string is fixed; a message that leaked a path or a

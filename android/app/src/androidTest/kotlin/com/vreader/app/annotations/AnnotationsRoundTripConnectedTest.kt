@@ -22,7 +22,7 @@ import com.vreader.app.annotations.AnnotationImportProductionPath.nodeCount
 import com.vreader.app.annotations.AnnotationImportProductionPath.openThroughLibrary
 import com.vreader.app.annotations.AnnotationImportProductionPath.requireRealFile
 import com.vreader.app.annotations.AnnotationImportProductionPath.tapImportRowThroughMoreMenu
-import com.vreader.app.annotations.AnnotationsRoundTripFixtures.atWirePrecision
+import com.vreader.app.annotations.AnnotationsRoundTripFixtures.assertRoundTripEquality
 import com.vreader.app.annotations.AnnotationsRoundTripFixtures.awaitStore
 import com.vreader.app.annotations.AnnotationsRoundTripFixtures.exportToProviderFile
 import com.vreader.app.annotations.AnnotationsRoundTripFixtures.exportedText
@@ -120,48 +120,9 @@ class AnnotationsRoundTripConnectedTest {
         val after = snapshot(book.fingerprintKey)
         assertEquals("every row came back", 7, after.total)
 
-        // The discriminating assertion: LOCATOR equality, kind by kind. A merge that landed all seven
-        // rows at a default or reconstructed position passes a count check and fails right here.
-        assertEquals(
-            "highlight locators must be the ones exported",
-            before.highlights.map { it.locator }.toSet(),
-            after.highlights.map { it.locator }.toSet(),
-        )
-        assertEquals(
-            "note locators must be the ones exported",
-            before.notes.map { it.locator }.toSet(),
-            after.notes.map { it.locator }.toSet(),
-        )
-        assertEquals(
-            "bookmark locators must be the ones exported",
-            before.bookmarks.map { it.locator }.toSet(),
-            after.bookmarks.map { it.locator }.toSet(),
-        )
-
-        // …and then the WHOLE row, so colour / text / note / UUID / both timestamps are pinned too.
-        // TWO normalisations are applied to the EXPECTED side, and both are contract behaviour this
-        // run OBSERVED rather than assumptions written in advance:
-        //  - `anchor` is dropped: the backup wire carries no anchor field at all (K-5), asserted on
-        //    its own below rather than hidden here;
-        //  - timestamps are truncated to the SECOND (see `secondPrecision`'s KDoc). Expressed as the
-        //    exact expected TRANSFORM, not by dropping the fields — a regression that zeroed the
-        //    timestamps or re-minted them at `now()` still fails here.
-        assertEquals(
-            before.highlights.map { it.copy(anchor = null).atWirePrecision() }.toSet(),
-            after.highlights.map { it.copy(anchor = null) }.toSet(),
-        )
-        assertEquals(
-            before.notes.map { it.copy(anchor = null).atWirePrecision() }.toSet(),
-            after.notes.map { it.copy(anchor = null) }.toSet(),
-        )
-        assertEquals(
-            before.bookmarks.map { it.atWirePrecision() }.toSet(),
-            after.bookmarks.toSet(),
-        )
-        assertTrue(
-            "the seeded timestamps must actually carry milliseconds, or the check above proves nothing",
-            before.highlights.any { it.createdAt % 1000L != 0L },
-        )
+        // The discriminating assertions — locators first, then whole rows (see the helper's KDoc for
+        // what each normalisation pins and why it is not hiding anything).
+        assertRoundTripEquality(before, after)
 
         // K-5, OBSERVED not assumed: the seeded row carried a text anchor; the restored one cannot,
         // so it re-anchors by locator. Identical to what a WebDAV restore already does.
@@ -309,18 +270,37 @@ class AnnotationsRoundTripConnectedTest {
         wipeAnnotations(book.fingerprintKey)
         val (uri, rows) = writeLargestImportableFile(book, "wi7-teardown-import.json")
 
-        // Deliberately the LARGEST file: the same merge is measured at ~700 ms on this emulator
-        // (see the A-9 test), which is a wide enough window for the `finish()` below to land INSIDE
-        // it. A seven-row import would usually complete before the activity died and the test would
-        // pass for the wrong reason.
+        // Deliberately the LARGEST importable file: the same merge measures ~700 ms on this
+        // emulator (see the A-9 test), which is the window `finish()` has to land inside. A
+        // seven-row import would usually complete first and the test would pass for the wrong
+        // reason. That timing is an ASSUMPTION, so the run OBSERVES it rather than trusting it
+        // (Gate-4 round 2, Medium) — see `rowsWhenDestroyed` below.
+        var rowsWhenDestroyed = -1
         importThroughProductionPath<ReaderActivity>(
             compose, book, ReaderActivity.EXTRA_FINGERPRINT_KEY, uri, expectedImportable = rows,
         ) { reader ->
             // The user taps Import and immediately leaves — a back press, a rotation, a finish. The
             // applier rethrows CancellationException, so an apply on the COMPOSITION scope would be
-            // cancelled here, the transaction would roll back, and nothing would land.
+            // cancelled right here, the transaction would roll back, and nothing would land.
             instrumentation.runOnMainSync { reader.finish() }
+            // Destruction is what cancels the composition scope, so THAT is the moment to sample.
+            assertTrue(
+                "the reader did not reach DESTROYED — the teardown never happened",
+                AnnotationImportProductionPath.awaitNoLiveReaders(timeoutMs = 20_000),
+            )
+            rowsWhenDestroyed = snapshot(book.fingerprintKey).highlights.size
         }
+
+        // The premise, checked: the merge must still have been RUNNING when the composition died.
+        // If it had already finished, this run cannot tell a durable scope from a composition one,
+        // and saying "passed" would be the false green this whole test exists to prevent — so it
+        // fails LOUDLY as inconclusive instead, with the number that says how to widen the window.
+        assertTrue(
+            "INCONCLUSIVE, not a pass: the merge had already applied $rowsWhenDestroyed of $rows rows " +
+                "by the time the reader was DESTROYED, so a composition-scoped apply would have " +
+                "survived too. Widen the window (a larger fixture / a slower device) and re-run.",
+            rowsWhenDestroyed in 0 until rows,
+        )
 
         awaitStore(book.fingerprintKey, timeoutMs = 60_000, message = "the merge did not survive the teardown") {
             it.highlights.size == rows

@@ -197,29 +197,42 @@ object AnnotationImportProductionPath {
     }
 
     /**
-     * Finish every reader activity that is not yet DESTROYED and wait for the stack to drain.
+     * Every reader activity that has not yet reached DESTROYED.
+     *
      * ALL non-terminal stages are included: a reader sitting in CREATED or STOPPED is still on the
-     * stack and would still be found by a later lookup.
+     * stack and would still be found by a later lookup — draining only the visible stages leaves
+     * exactly the leak the drain exists to prevent.
      */
-    fun finishLiveReaders(): Boolean {
-        fun live(): List<Activity> {
-            var found: List<Activity> = emptyList()
-            instrumentation.runOnMainSync {
-                val monitor = ActivityLifecycleMonitorRegistry.getInstance()
-                found = listOf(
-                    Stage.PRE_ON_CREATE, Stage.CREATED, Stage.STARTED,
-                    Stage.RESUMED, Stage.PAUSED, Stage.STOPPED, Stage.RESTARTED,
-                ).flatMap { monitor.getActivitiesInStage(it) }
-                    .filter { it !is MainActivity }
-                    .distinct()
-            }
-            return found
+    fun liveReaders(): List<Activity> {
+        var found: List<Activity> = emptyList()
+        instrumentation.runOnMainSync {
+            val monitor = ActivityLifecycleMonitorRegistry.getInstance()
+            found = listOf(
+                Stage.PRE_ON_CREATE, Stage.CREATED, Stage.STARTED,
+                Stage.RESUMED, Stage.PAUSED, Stage.STOPPED, Stage.RESTARTED,
+            ).flatMap { monitor.getActivitiesInStage(it) }
+                .filter { it !is MainActivity }
+                .distinct()
         }
-        val readers = live()
+        return found
+    }
+
+    /**
+     * Wait until every reader has reached DESTROYED — which is the moment its composition is
+     * disposed and any `rememberCoroutineScope()` is cancelled. Callers that need to observe
+     * something "while the composition is already gone" key off THIS, not off `finish()` returning.
+     */
+    fun awaitNoLiveReaders(timeoutMs: Long): Boolean {
+        val deadline = SystemClock.elapsedRealtime() + timeoutMs
+        while (liveReaders().isNotEmpty() && SystemClock.elapsedRealtime() < deadline) Thread.sleep(25)
+        return liveReaders().isEmpty()
+    }
+
+    /** Finish every live reader and wait for the stack to drain, reporting whether it fully drained. */
+    fun finishLiveReaders(): Boolean {
+        val readers = liveReaders()
         if (readers.isEmpty()) return true
         instrumentation.runOnMainSync { readers.forEach { it.finish() } }
-        val deadline = SystemClock.elapsedRealtime() + 20_000
-        while (live().isNotEmpty() && SystemClock.elapsedRealtime() < deadline) Thread.sleep(50)
-        return live().isEmpty()
+        return awaitNoLiveReaders(timeoutMs = 20_000)
     }
 }

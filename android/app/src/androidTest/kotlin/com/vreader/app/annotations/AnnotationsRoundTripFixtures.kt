@@ -239,6 +239,54 @@ object AnnotationsRoundTripFixtures {
         }
     }
 
+    /**
+     * The whole-row equality of an export -> import round trip, kind by kind.
+     *
+     * LOCATORS first and on their own, so a failure names the POSITION rather than the row — a merge
+     * that landed every row at a default or reconstructed position passes a count check and fails
+     * here. Then the full record, with two normalisations applied to the EXPECTED side, both of them
+     * contract behaviour these runs OBSERVED rather than assumptions written in advance:
+     *  - `anchor` is dropped, because the backup wire carries no anchor field at all (K-5) — the
+     *    caller asserts that separately rather than letting this hide it;
+     *  - timestamps are truncated to the SECOND (see [secondPrecision]). Expressed as the exact
+     *    TRANSFORM, not by dropping the fields, so a regression that zeroed the timestamps or
+     *    re-minted them at `now()` still fails.
+     */
+    fun assertRoundTripEquality(before: Snap, after: Snap) {
+        assertEquals(
+            "highlight locators must be the ones exported",
+            before.highlights.map { it.locator }.toSet(),
+            after.highlights.map { it.locator }.toSet(),
+        )
+        assertEquals(
+            "note locators must be the ones exported",
+            before.notes.map { it.locator }.toSet(),
+            after.notes.map { it.locator }.toSet(),
+        )
+        assertEquals(
+            "bookmark locators must be the ones exported",
+            before.bookmarks.map { it.locator }.toSet(),
+            after.bookmarks.map { it.locator }.toSet(),
+        )
+        assertEquals(
+            before.highlights.map { it.copy(anchor = null).atWirePrecision() }.toSet(),
+            after.highlights.map { it.copy(anchor = null) }.toSet(),
+        )
+        assertEquals(
+            before.notes.map { it.copy(anchor = null).atWirePrecision() }.toSet(),
+            after.notes.map { it.copy(anchor = null) }.toSet(),
+        )
+        assertEquals(
+            before.bookmarks.map { it.atWirePrecision() }.toSet(),
+            after.bookmarks.toSet(),
+        )
+        assertEquals(
+            "the seeded timestamps must actually carry milliseconds, or the truncation check above " +
+                "proves nothing",
+            true, before.highlights.any { it.createdAt % 1000L != 0L },
+        )
+    }
+
     /** Poll the store until [predicate] holds, or fail with [message]. */
     fun awaitStore(bookKey: String, timeoutMs: Long, message: String, predicate: (Snap) -> Boolean) {
         val deadline = System.currentTimeMillis() + timeoutMs

@@ -62,31 +62,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
-import com.vreader.app.annotations.AnnotationImportFailedException
 import com.vreader.app.annotations.AnnotationImportPreviewSheet
 import com.vreader.app.annotations.AnnotationImportSheetState
 import com.vreader.app.annotations.AnnotationsIoController
-import com.vreader.app.annotations.ImportFailure
-import com.vreader.app.annotations.ImportParseResult
 import com.vreader.app.annotations.ImportPreview
-import com.vreader.app.annotations.RestoreAnnotationsReport
-import com.vreader.app.imports.IncomingBookResolver
 import com.vreader.app.reader.settings.ReaderTheme
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-
-/**
- * The MIME hint handed to the system picker.
- *
- * `application/json` first so a well-behaved provider pre-filters, `* / *` alongside it because
- * providers routinely mislabel a `.json` document as `text/plain` or `application/octet-stream` and
- * a strict filter would make a legitimate file unpickable (plan R-7). The declared type is a HINT
- * and never a gate — validation is by content, always (D-4).
- */
-internal val ANNOTATION_IMPORT_MIME_TYPES = arrayOf("application/json", "*/*")
 
 /**
  * What a reader host needs to offer annotation import: the designed sheet's current state (null =
@@ -128,33 +112,44 @@ internal fun rememberAnnotationImportEntry(
 ): AnnotationImportEntry {
     val previewScope = rememberCoroutineScope()
     var sheet by remember(bookKey) { mutableStateOf<AnnotationImportSheetState?>(null) }
+    val session = remember(bookKey) { AnnotationImportSession() }
     // The host callback is read at CALL time, not at registration time: the merge can settle after
     // a recomposition handed us a newer one.
     val latestOnApplied by rememberUpdatedState(onApplied)
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
-        // A cancelled pick is silent — no state, no surface (see this file's header).
+        // A cancelled pick is silent — no state, no surface (see this file's header). The token was
+        // already taken by `launch`, so an in-flight preview from a PREVIOUS pick stays abandoned.
         if (uri == null) return@rememberLauncherForActivityResult
+        val token = session.current
         val fallbackName = importPickerFileName(uri.lastPathSegment)
         previewScope.launch {
-            sheet = importSheetStateFor(controller.preview(uri, bookKey, bookTitle), fallbackName)
+            val next = importSheetStateFor(controller.preview(uri, bookKey, bookTitle), fallbackName)
+            if (session.isCurrent(token)) sheet = next
         }
     }
 
     return AnnotationImportEntry(
         sheet = sheet,
         launch = {
+            session.begin()
             onLaunching()
             picker.launch(ANNOTATION_IMPORT_MIME_TYPES)
         },
-        dismiss = { sheet = null },
-        confirm = { preview ->
+        // Dismissal takes a token too: a sheet the user closed must not be resurrected by a parse
+        // that returns afterwards.
+        dismiss = { session.begin(); sheet = null },
+        confirm = confirm@{ preview ->
+            // A second tap while the first merge is still running is a NO-OP, not a second apply.
+            val token = session.tryBeginApply() ?: return@confirm
             launchAnnotationImportApply(applyScope, preview, controller::apply) { next ->
                 // Back onto the main thread for the state write + the host's refresh. If this
                 // composition is already gone the write lands on an orphaned state (harmless) and
                 // the host's refresh is a no-op on its cancelled lifecycle scope — but the MERGE
                 // itself has already committed, which is the point.
                 withContext(Dispatchers.Main) {
+                    session.endApply(token)
+                    if (!session.isCurrent(token)) return@withContext
                     sheet = next
                     // On success the observable result is the designed annotations list itself
                     // (section 3.2) — no "42 imported!" banner is invented here.
@@ -163,27 +158,6 @@ internal fun rememberAnnotationImportEntry(
             }
         },
     )
-}
-
-/**
- * Run the approved merge on [scope] and hand the sheet's next state to [onSettled] (null = the
- * sheet dismisses; a [AnnotationImportSheetState.Failed] re-renders the designed error blob).
- *
- * Extracted from the composable so the scope choice is a value a test can supply: the whole point
- * of this seam is that the work continues on the scope it was HANDED, whatever happens to the
- * caller's own scope.
- */
-internal fun launchAnnotationImportApply(
-    scope: CoroutineScope,
-    preview: ImportPreview,
-    apply: suspend (ImportPreview) -> Result<RestoreAnnotationsReport>,
-    onSettled: suspend (AnnotationImportSheetState?) -> Unit,
-): Job = scope.launch {
-    val next = apply(preview).fold(
-        onSuccess = { null },
-        onFailure = { error -> importApplyFailureState(error, preview.fileName) },
-    )
-    onSettled(next)
 }
 
 /**
@@ -206,46 +180,6 @@ internal fun AnnotationImportEntry.sheetSlot(theme: ReaderTheme): (@Composable (
     }
 }
 
-// ---- the pure decisions (JVM-testable; see AnnotationImportEntryTest) --------------------------
-
-/**
- * The file name the designed header shows when the boundary refused the document, derived from the
- * picked `Uri`'s last path segment.
- *
- * That segment is provider-controlled text and gets the SAME treatment `DISPLAY_NAME` gets
- * (section 8.4): leaf-only extraction, a pre-normalization bound, NFC, control-character and
- * Bidi_Control removal, unpaired-surrogate removal, and a 200-char cap that never splits a
- * surrogate pair. Null / blank / fully-stripped becomes `Untitled`.
- */
-internal fun importPickerFileName(rawLastPathSegment: String?): String =
-    IncomingBookResolver.sanitizeDisplayName(rawLastPathSegment)
-
-/**
- * The boundary's answer as the designed sheet's state.
- *
- * A readable file keeps the controller's own sanitized `DISPLAY_NAME` (carried on the preview);
- * only a refusal falls back to [fallbackName]. `importable == 0` is `Ready`, not `Failed` — C-8 is
- * a disabled primary, not the error blob.
- */
-internal fun importSheetStateFor(
-    result: ImportParseResult,
-    fallbackName: String,
-): AnnotationImportSheetState = when (result) {
-    is ImportParseResult.Ok -> AnnotationImportSheetState.Ready(result.preview)
-    is ImportParseResult.Failed -> AnnotationImportSheetState.Failed(fallbackName, result.reason)
-}
-
-/**
- * An apply-time failure as the SAME designed error branch (section 3.2), keeping its typed reason.
- *
- * Anything that is not an [AnnotationImportFailedException] never passed through the feature's own
- * taxonomy, so it reports `Unreadable` rather than a guess; the throwable's text is never shown —
- * `ImportFailure.userMessage` is a fixed string (rule 50 section 6).
- */
-internal fun importApplyFailureState(
-    error: Throwable,
-    fileName: String,
-): AnnotationImportSheetState.Failed = AnnotationImportSheetState.Failed(
-    fileName = fileName,
-    reason = (error as? AnnotationImportFailedException)?.reason ?: ImportFailure.Unreadable,
-)
+// The MIME hint, the session token, the merge launcher and the boundary-answer -> sheet-state
+// mappings live in AnnotationImportEntryState.kt — everything here needs a composition, everything
+// there is reachable from a JVM test.
