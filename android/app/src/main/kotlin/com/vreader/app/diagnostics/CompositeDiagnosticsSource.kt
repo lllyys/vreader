@@ -23,10 +23,29 @@ import kotlinx.coroutines.CancellationException
  *   bug report.
  * - **The RING copy wins a collision.** Both carry the same text in the normal case, but logd
  *   truncates the tail — so preferring the ring's copy is what keeps the end of a long stack trace.
- * - **No exception escapes** except [CancellationException]: a source failure is data
- *   (`Unavailable`), but cancelling the caller is not a source failure and must not be swallowed.
+ * - **Only an ordinary `Exception` is contained**, as `Unavailable` — a source failure is data.
+ *   [CancellationException] propagates, because cancelling the caller is not a source failure and
+ *   must not be swallowed; an `Error` (OOM, LinkageError) propagates too, because it is not
+ *   containable and reporting a JVM failure as "the platform log is degraded" would blame the wrong
+ *   subsystem in the export. This mirrors `DiagnosticsLogStore.load`, whose own audit narrowed the
+ *   same `catch (Throwable)`; the containment matters more here now that a contained primary
+ *   failure also sets [SourceResult.Available.degradedReason].
+ * - **A surviving merge still REPORTS a dead primary**, via
+ *   [SourceResult.Available.degradedReason]. Collapsing "logcat denied, ring healthy" into a flat
+ *   `Available` is what made `DiagnosticsLogStore` print `capture source: logcat + breadcrumbs`
+ *   while the platform log was dead — a diagnostics tool lying to the person triaging a bug. This
+ *   composite is the only component that knows which leg is the platform log, so it is the only one
+ *   that can carry that provenance forward.
+ * - **The provenance is PRIMARY-only, deliberately asymmetric.** A dead SECONDARY with a healthy
+ *   primary is NOT reported through this channel. The signal's only consumer is the export header's
+ *   two-valued `capture source:` line, whose degraded wording is plan §6.5's verbatim
+ *   `breadcrumbs only (platform log unavailable)`; emitting that because the RING failed would
+ *   invert the truth, and rule 51 admits no third label. (The asymmetry costs little in practice:
+ *   `RingBufferDiagnosticsSource` has no modelled `Unavailable` path at all, so a secondary-only
+ *   failure means a thrown exception from the in-process floor.)
  *
- * @coordinates-with LogcatDiagnosticsSource.kt, RingBufferDiagnosticsSource.kt, VLog.kt
+ * @coordinates-with LogcatDiagnosticsSource.kt, RingBufferDiagnosticsSource.kt, VLog.kt,
+ *   DiagnosticsLogStore.kt
  */
 class CompositeDiagnosticsSource(
     private val primary: DiagnosticsLogSource,
@@ -46,13 +65,29 @@ class CompositeDiagnosticsSource(
                     (secondaryResult as SourceResult.Unavailable).reason,
             )
         }
-        if (limit <= 0) return SourceResult.Available(emptyList())
+        // Computed ONCE, before the branches, so no return path can forget it.
+        val degradedReason = degradedReasonOf(primaryResult)
+
+        if (limit <= 0) return SourceResult.Available(emptyList(), degradedReason)
 
         val merged = mergeDeduped(
             preferred = secondaryEntries.orEmpty(),
             other = primaryEntries.orEmpty(),
         )
-        return SourceResult.Available(merged.takeLast(limit.coerceAtMost(merged.size)))
+        return SourceResult.Available(merged.takeLast(limit.coerceAtMost(merged.size)), degradedReason)
+    }
+
+    /**
+     * The provenance this composite reports, or `null` when the platform log answered in full.
+     *
+     * Covers both ways the primary can be diminished: an outright [SourceResult.Unavailable] (which
+     * includes a contained exception, since [read] converts one into the other), and an
+     * `Available` that is ITSELF degraded — the nested case, where this composite's primary is
+     * another composite. Reading through both means no arrangement of sources can lose the signal.
+     */
+    private fun degradedReasonOf(primaryResult: SourceResult): String? = when (primaryResult) {
+        is SourceResult.Unavailable -> primaryResult.reason
+        is SourceResult.Available -> primaryResult.degradedReason
     }
 
     /**
@@ -85,7 +120,7 @@ class CompositeDiagnosticsSource(
         source.recentEntries(sinceMillis, limit)
     } catch (cancelled: CancellationException) {
         throw cancelled
-    } catch (t: Throwable) {
-        SourceResult.Unavailable("$label threw ${t.javaClass.simpleName}: ${t.message}")
+    } catch (failure: Exception) {
+        SourceResult.Unavailable("$label threw ${failure.javaClass.simpleName}: ${failure.message}")
     }
 }
