@@ -50,9 +50,9 @@ foliate-view { display: block; width: 100vw; height: 100vh; height: 100dvh; }
         // --- feature #135 WI-2: awaited goTo ack channel --------------------------
         // The native FoliateGoToDispatcher injects `window.__vreaderGoTo(id, target)` (id + target are
         // JSON-escaped host-side via jsString). We call the returning `readerAPI.goTo`/`goToFraction`
-        // promise and, AFTER foliate's relocate settles, post `{name:'goto-ack', id, ok, cfi?, fraction?}`
-        // over the SAME `vreaderHost` channel (never addJavascriptInterface). The id is echoed back so
-        // the host resolves the matching CompletableDeferred; a reject → ok:false so the sheet stays open.
+        // promise and, once that promise SETTLES, post `{name:'goto-ack', id, ok, cfi?, fraction?}` over
+        // the SAME `vreaderHost` channel (never addJavascriptInterface). The id is echoed back so the
+        // host resolves the matching CompletableDeferred; only a REJECTED promise yields ok:false.
         //
         // ACK ≠ MOTION (be precise about what ok:true proves). Only a REJECTED promise yields ok:false.
         // foliate's `view.goTo` CATCHES a failed resolution internally and returns undefined rather than
@@ -73,7 +73,7 @@ foliate-view { display: block; width: 100vw; height: 100vh; height: 100dvh; }
                 // `!= null`) so a malformed/mixed target can never let a non-string or an INHERITED
                 // href outrank a legitimate fraction — Kotlin only ever emits one own string key,
                 // this is the belt for anything else.
-                else if (Object.prototype.hasOwnProperty.call(target, 'href') && typeof target.href === 'string' && target.href !== '') { p = window.readerAPI.goTo(target.href); }
+                else if (Object.prototype.hasOwnProperty.call(target, 'href') && typeof target.href === 'string' && target.href.trim() !== '') { p = window.readerAPI.goTo(target.href); }
                 else if (target.fraction != null) { p = window.readerAPI.goToFraction(target.fraction); }
                 else { ack(false, null, null); return; }
                 Promise.resolve(p).then(function () {

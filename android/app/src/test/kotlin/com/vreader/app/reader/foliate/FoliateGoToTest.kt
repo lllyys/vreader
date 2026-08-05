@@ -317,8 +317,12 @@ class FoliateGoToTest {
         //                                    which `from()` does not read)
         //   FoliateSpikeView bookmark     -> every position field nil           (iOS)
         //
-        // If a future producer starts emitting the flip-shape, the last case below fails and forces
-        // the decision to be made deliberately rather than inherited.
+        // HONEST SCOPE (Gate-4 R2 corrected an overclaim here): these are hand-built fixtures, so they
+        // do NOT automatically fail if a future producer starts emitting the flip-shape — they pin how
+        // `from()` resolves each shape, nothing more. The producer enumeration above is a REVIEW
+        // finding, not something this test enforces; the restore boundary that could admit an
+        // arbitrary decoded locator (AnnotationsRepository) is outside this work item's write-set and
+        // is carried as an open Gate-4 item in the HANDOFF.
         val androidRelocate = locator(cfi = "/6/4!/4/2", progression = 0.37, href = null)
         assertEquals(FoliateGoToTarget.Cfi("/6/4!/4/2"), FoliateGoToTarget.from(androidRelocate))
         val androidNoCfi = locator(cfi = null, progression = 0.37, href = null)
@@ -368,10 +372,10 @@ class FoliateGoToTest {
         assertFalse("literal newline leaked into injected JS", js.contains("\n"))
         assertTrue("hostile quote must be JSON-escaped to \\\"", js.contains("\\\""))
         assertTrue("backslash must be JSON-escaped to \\\\", js.contains("\\\\"))
-        // The DOCUMENTED, DELIBERATE residual: the JSON seam does NOT escape a script-tag close.
-        // Asserted rather than assumed, so a future host that embeds this JS in HTML (where it WOULD
-        // matter) trips this test instead of silently inheriting the assumption.
-        assertTrue("residual: the script-tag close is NOT escaped by the JSON seam", js.contains("</script>"))
+        // NOTE (Gate-4 R2 Low): an earlier revision asserted that the script-tag close stays RAW, to
+        // "pin the residual". That was backwards — it would fail a SAFE encoder improvement while not
+        // catching a transport change that made raw output dangerous. The residual is documented
+        // above and owned by the transport, not frozen by an assertion.
         // Routed through the shell shim, never addJavascriptInterface — and never a raw eval sink.
         assertTrue("goTo JS must call the shell shim entry", js.contains("__vreaderGoTo"))
         assertFalse("must never use addJavascriptInterface", js.contains("addJavascriptInterface"))
@@ -601,7 +605,12 @@ class FoliateGoToTest {
     private fun executableJsOf(html: String): String =
         html.replace(Regex("""/\*.*?\*/""", RegexOption.DOT_MATCHES_ALL), "")
             .lines()
-            .filterNot { it.trimStart().startsWith("//") }
+            // Drop the comment tail of EVERY line, not just fully-commented ones (Gate-4 R2 Low: a
+            // trailing `var p; // else if (…target.href…) { readerAPI.goTo(target.href); }` would
+            // otherwise satisfy the branch assertions). The shim contains no `//` inside a string
+            // literal — the one legitimate `//` shape is a URL scheme, so `://` is not treated as a
+            // comment start.
+            .map { line -> Regex("""(?<!:)//.*$""").replace(line, "") }
             .joinToString("\n")
 
     /** The SHIPPED shell page (not the androidTest spike copy, which has diverged). */

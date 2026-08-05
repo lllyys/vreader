@@ -189,13 +189,18 @@ class FoliateBridge(
     }
 }
 
-/** feature #135 WI-2 — the outcome of an awaited [FoliateBridge.goTo]. */
+/** feature #135 WI-2 — the outcome of an awaited [FoliateBridge.goTo]. Note the deliberately narrow
+ *  meaning of each case: they describe the ACK, not observed reader movement (see [FoliateBridge.goTo]). */
 sealed interface Azw3GoToResult {
-    /** The jump landed; `cfi`/`fraction` are the reached position when the ack reported them. */
+    /** Foliate's goTo promise FULFILLED and acked; `cfi`/`fraction` are what the ack reported.
+     *  This is NOT proof the reader moved — `view.goTo` catches a failed resolution and fulfils
+     *  anyway, so an unresolvable target lands here too. Only a connected WebView test can observe
+     *  motion. */
     data class Succeeded(val cfi: String?, val fraction: Double?) : Azw3GoToResult
     /** No ack arrived within the timeout window (dead bundle / wedged renderer). */
     data object Timeout : Azw3GoToResult
-    /** Foliate acked a FAILED jump (`ok=false`) — an unresolvable target. */
+    /** Foliate's goTo promise REJECTED, acked as `ok=false`. Note this does NOT cover every
+     *  unresolvable target — most of those fulfil and report [Succeeded]. */
     data object Failed : Azw3GoToResult
     /** A later goTo superseded this one before it acked (the caller should ignore this result). */
     data object Superseded : Azw3GoToResult
