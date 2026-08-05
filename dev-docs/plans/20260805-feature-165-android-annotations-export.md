@@ -273,7 +273,20 @@ there.
 
 ### 5.1 New
 
-**`android/app/src/main/kotlin/com/vreader/app/annotations/AnnotationBackupMapper.kt`** (~90 lines)
+**`android/app/src/main/kotlin/com/vreader/app/backup/AnnotationBackupMapper.kt`** (~90 lines)
+
+> **Path and API corrected from WI-1's implementation (2026-08-05).** It lives in `backup/`, not
+> `annotations/`: it maps **to the backup wire contract** and sits beside its only current caller,
+> and the audit confirmed the backup→annotations direction with no reverse dependency. WI-2's writer
+> in `annotations/` imports `com.vreader.app.backup.AnnotationBackupMapper` — same module, `internal`
+> reaches.
+>
+> **The sketch below exposed `toWire(r)` publicly; WI-1 deliberately narrowed that.** The
+> `(bookFingerprintKey, id)` sort **is part of the contract's byte-stability guarantee**, so it must
+> not be separable from the mapping — public per-record mappers would invite exactly the "reassemble
+> it slightly differently" second copy this WI exists to prevent. `envelope(...)` and `json(...)` are
+> the only entry points, and `json()` makes the wire **text** one call, so WI-2 has nothing left to
+> re-derive.
 
 ```kotlin
 internal object AnnotationBackupMapper {

@@ -4,30 +4,24 @@
 // must upload to the shared blob store. Mirrors the iOS BackupDataCollector / WebDAVProvider
 // collect step. Backs up books + positions, plus (when the matching repo/dao is wired) a
 // deterministic collections.json (feature #127) and annotations.json (feature #132 WI-8 —
-// highlights/notes/bookmarks, filtered to the backed-up books, byte-stably sorted, PLAIN-Locator
-// locatorJSON). The remaining iOS-only sections (settings/…) stay valid-empty (absent).
+// highlights/notes/bookmarks filtered to the backed-up books, mapped to the wire shape by the shared
+// AnnotationBackupMapper: byte-stably sorted, PLAIN-Locator locatorJSON). The remaining iOS-only
+// sections (settings/…) stay valid-empty (absent).
 package com.vreader.app.backup
 
 import com.vreader.app.annotations.AnnotationsRepository
-import com.vreader.app.annotations.BookmarkRecord
-import com.vreader.app.annotations.HighlightRecord
-import com.vreader.app.annotations.NoteRecord
 import com.vreader.app.backup.archive.BackupArchiveEntries
 import com.vreader.app.backup.archive.BlobPath
 import com.vreader.app.data.Book
 import com.vreader.app.data.CollectionDao
 import com.vreader.app.data.LibraryRepository
 import vreader.contracts.BookFormat
-import vreader.contracts.backup.BackupAnnotationsEnvelope
-import vreader.contracts.backup.BackupBookmark
 import vreader.contracts.backup.BackupCollection
 import vreader.contracts.backup.BackupCollectionsEnvelope
-import vreader.contracts.backup.BackupHighlight
 import vreader.contracts.backup.BackupJson
 import vreader.contracts.backup.BackupLibraryEntry
 import vreader.contracts.backup.BackupLibraryManifestEnvelope
 import vreader.contracts.backup.BackupMetadata
-import vreader.contracts.backup.BackupNote
 import vreader.contracts.backup.BackupPosition
 import vreader.contracts.backup.BackupPositionsEnvelope
 import vreader.contracts.backup.BackupSchema
@@ -181,62 +175,20 @@ class BackupCollector(
 
     /** A deterministic annotations.json (feature #132 WI-8): every highlight/note/bookmark whose book is
      *  in [collectedKeys] (annotations for a book that isn't backed up are dropped — no dangling backup
-     *  reference; iOS parity), each kind sorted by (bookFingerprintKey, id) so the same logical store
-     *  serializes byte-identically regardless of Room row order (byte-stability). Each row's UUID is
-     *  PRESERVED, and `locatorJSON` is the PLAIN serialized `Locator` (`BackupJson.encode(locator)` —
-     *  matching iOS `encoder.encode(locator)` + the cross-platform vector + WI-6b's plain decode; NOT
-     *  `canonicalJson()`, whose flattened dotted keys are not `Locator`-decodable). `bookmarks` is wired
-     *  even though it is usually empty until #135, so no collector change is needed when bookmark
-     *  creation lands. Null when no annotationsRepository is wired (pre-#132 callers). */
+     *  reference; iOS parity). The record→wire mapping, the (bookFingerprintKey, id) sort and the
+     *  envelope itself belong to [AnnotationBackupMapper] — feature #165 WI-1 extracted them so the
+     *  per-book annotations exporter shares this one copy of the contract mapping instead of growing a
+     *  second that could drift. `bookmarks` is wired even though it is usually empty until #135, so no
+     *  collector change is needed when bookmark creation lands. Null when no annotationsRepository is
+     *  wired (pre-#132 callers). */
     private suspend fun collectAnnotationsJson(collectedKeys: Set<String>): String? {
         val annotations = annotationsRepository ?: return null
-        val highlights = annotations.allHighlights()
-            .filter { it.bookKey in collectedKeys }
-            .sortedWith(compareBy({ it.bookKey }, { it.id }))
-            .map { it.toBackupHighlight() }
-        val notes = annotations.allNotes()
-            .filter { it.bookKey in collectedKeys }
-            .sortedWith(compareBy({ it.bookKey }, { it.id }))
-            .map { it.toBackupNote() }
-        val bookmarks = annotations.allBookmarks()
-            .filter { it.bookKey in collectedKeys }
-            .sortedWith(compareBy({ it.bookKey }, { it.id }))
-            .map { it.toBackupBookmark() }
-        return BackupJson.encode(
-            BackupAnnotationsEnvelope(BackupSchema.CURRENT_SCHEMA_VERSION, highlights, bookmarks, notes)
+        return AnnotationBackupMapper.json(
+            highlights = annotations.allHighlights().filter { it.bookKey in collectedKeys },
+            notes = annotations.allNotes().filter { it.bookKey in collectedKeys },
+            bookmarks = annotations.allBookmarks().filter { it.bookKey in collectedKeys },
         )
     }
-
-    // The on-wire DTO carries the PLAIN Locator (BackupJson.encode) so a restore re-decodes it via the
-    // same plain `BackupJson.decode<Locator>` the positions path + WI-6b's restore seam use.
-    private fun HighlightRecord.toBackupHighlight() = BackupHighlight(
-        highlightId = id,
-        bookFingerprintKey = bookKey,
-        locatorJSON = BackupJson.encode(locator),
-        selectedText = selectedText,
-        color = color.key,
-        note = note,
-        createdAt = Instant.ofEpochMilli(createdAt),
-        updatedAt = Instant.ofEpochMilli(updatedAt),
-    )
-
-    private fun NoteRecord.toBackupNote() = BackupNote(
-        annotationId = id,
-        bookFingerprintKey = bookKey,
-        locatorJSON = BackupJson.encode(locator),
-        content = content,
-        createdAt = Instant.ofEpochMilli(createdAt),
-        updatedAt = Instant.ofEpochMilli(updatedAt),
-    )
-
-    private fun BookmarkRecord.toBackupBookmark() = BackupBookmark(
-        bookmarkId = id,
-        bookFingerprintKey = bookKey,
-        locatorJSON = BackupJson.encode(locator),
-        title = title,
-        createdAt = Instant.ofEpochMilli(createdAt),
-        updatedAt = Instant.ofEpochMilli(updatedAt),
-    )
 
     companion object {
         const val POSITIONS_SECTION = "positions.json"
