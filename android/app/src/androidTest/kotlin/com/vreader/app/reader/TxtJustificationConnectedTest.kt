@@ -639,6 +639,13 @@ class TxtJustificationConnectedTest {
      *
      * Written as a characterisation so the limitation cannot rot in prose: if a future paginator change
      * makes per-paragraph alignment possible, this fails and forces the note to be revisited.
+     *
+     * Gate-4 round 1 (Medium): asserting only `layoutInput.style.textAlign == Justify` here would leave
+     * AC-2b in exactly the false-green class this whole suite exists to avoid — it would stay green if
+     * Compose received `Justify` and moved zero heading glyphs, which is precisely what happens on CJK.
+     * The limitation is therefore evidenced the same way the feature is: the heading's own wrapped lines
+     * are located inside the page, and their `getLineRight` values must MOVE against the `Start` oracle
+     * and collapse onto the page's common justified edge.
      */
     @Test
     fun c2_mdPagedHeading_sharesThePageAlignment_knownLimitation() {
@@ -652,19 +659,63 @@ class TxtJustificationConnectedTest {
                 scenario.onActivity { ready = it.pagedPageCountForTest()?.let { c -> c > 0 } == true }
                 ready
             }
-            val page = awaitLayout("A Deliberately Long Markdown Chapter Heading")
+            val heading = "A Deliberately Long Markdown Chapter Heading"
+            val page = awaitLayout(heading)
+            val pageText = page.layoutInput.text.text
             // The heading and the prose after it are the SAME Text — that is the limitation itself.
             assertTrue(
                 "the page Text must carry BOTH the heading and the following prose (that shared node is " +
                     "what makes per-paragraph alignment impossible here)",
-                page.layoutInput.text.text.contains("Justification is a typographic operation"),
+                pageText.contains("Justification is a typographic operation"),
             )
             assertEquals(
-                "KNOWN LIMITATION (plan §5.2b): a paged page renders as ONE Text with ONE alignment, so " +
-                    "a wrapping heading on that page is justified. If this ever stops holding, the " +
-                    "limitation note and AC-2b must be revisited.",
+                "KNOWN LIMITATION (plan §5.2b): a paged page renders as ONE Text with ONE alignment. If " +
+                    "this ever stops holding, the limitation note and AC-2b must be revisited.",
                 TextAlign.Justify, page.layoutInput.style.textAlign,
             )
+            assertOracleIsFaithful("C2/paged-md-heading", page)
+
+            // Locate the HEADING's own rendered extent inside the page text (markers are stripped, and
+            // the chunk keeps its EOL, so the heading run ends at the next newline).
+            val headingStart = pageText.indexOf(heading)
+            assertTrue("the heading must be present in the page text", headingStart >= 0)
+            val headingEnd = pageText.indexOf('\n', headingStart).let { if (it < 0) pageText.length else it }
+            val headingLines = (0 until page.lineCount).filter { line ->
+                page.getLineStart(line) < headingEnd && page.getLineEnd(line, visibleEnd = false) > headingStart
+            }
+            assertTrue(
+                "the fixture heading must WRAP inside the page (a one-line heading proves nothing — the " +
+                    "last-line rule already leaves it alone); heading lines=$headingLines",
+                headingLines.size >= 2,
+            )
+            val headingJustifiable = expectedJustifiedLines(page).filter { it in headingLines }
+            assertTrue("a wrapping heading must have at least one justifiable line", headingJustifiable.isNotEmpty())
+
+            val justifyRights = lineRights(page)
+            val startRights = lineRights(remeasure(page.layoutInput, TextAlign.Start))
+            val movedHeadingLines = headingJustifiable.filter { abs(startRights[it] - justifyRights[it]) > EPSILON_PX }
+            val headingEdges = headingJustifiable.map { justifyRights[it] }
+            Log.i(
+                TAG,
+                "C2 paged heading lines=$headingLines justifiable=$headingJustifiable moved=$movedHeadingLines " +
+                    "start=${headingJustifiable.map { startRights[it].toInt() }} " +
+                    "justify=${headingEdges.map { it.toInt() }} width=${page.size.width}",
+            )
+            // The GLYPHS moved — the limitation is measured, not inferred from the requested style.
+            assertTrue(
+                "AC-2b must be evidenced by glyph movement, not by the requested alignment: the heading's " +
+                    "justifiable lines $headingJustifiable did not move (start=" +
+                    "${headingJustifiable.map { startRights[it] }}, justify=$headingEdges)",
+                movedHeadingLines.isNotEmpty(),
+            )
+            val pageCommonEdge = expectedJustifiedLines(page).maxOf { justifyRights[it] }
+            for (line in headingJustifiable) {
+                assertTrue(
+                    "heading line $line must sit on the page's common justified edge (${pageCommonEdge}px); " +
+                        "was ${justifyRights[line]}",
+                    abs(justifyRights[line] - pageCommonEdge) <= MAX_JUSTIFIED_EDGE_SPREAD_PX,
+                )
+            }
         }
     }
 

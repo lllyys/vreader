@@ -445,14 +445,16 @@ class TxtPaginatorTest {
     // --- feature #156 WI-1: alignment must NOT move a page boundary --------------------------------
 
     /**
-     * A measurer that is DEMONSTRABLY style-sensitive — chars-per-line derives from the style's font
-     * size, so "the page starts are identical" is a real result rather than an artifact of a
-     * style-blind fake (the [FixedLineMeasurer] above ignores `style` entirely, so an invariance test
-     * built on it would pass on a broken implementation). It also RECORDS every alignment it was
-     * handed, so a test can prove the alignment actually reached phase 1 instead of being dropped
-     * upstream — the other way "identical boundaries" could be vacuously true.
+     * A fake that RECORDS every alignment phase 1 hands it, and whose line breaking reacts to a
+     * genuinely layout-affecting style property (font size). It cannot answer whether ANDROID applies
+     * alignment after line breaking — no fake can; that proof is the real-`ComposeLineMeasurer`
+     * comparison in the connected `TxtJustificationConnectedTest`. What it does prove, and what the
+     * test below claims, is narrower and still worth having: the alignment genuinely REACHES phase 1
+     * (so the invariance assertion is not vacuously true because the style was dropped upstream), and
+     * the paginator DOES react to a layout-affecting style change (so the comparison is capable of
+     * reporting a difference at all).
      */
-    private class StyleSensitiveLineMeasurer(private val lineHeightPx: Float = 10f) : LineMeasurer {
+    private class StyleRecordingLineMeasurer(private val lineHeightPx: Float = 10f) : LineMeasurer {
         val seenAligns = LinkedHashSet<androidx.compose.ui.text.style.TextAlign>()
 
         override fun measure(text: CharSequence, style: TextStyle, maxWidthPx: Float): List<LineMetric> {
@@ -480,15 +482,19 @@ class TxtPaginatorTest {
     ) = TextStyle(fontSize = androidx.compose.ui.unit.TextUnit(fontSizeSp, androidx.compose.ui.unit.TextUnitType.Sp), textAlign = align)
 
     /**
-     * Feature #156 AC-3 / plan R1: `textAlign` is applied AFTER line breaking in both `StaticLayout`
-     * and CSS, so justifying the body must leave the paged index byte-identical — same page count,
-     * same per-page source ranges. A drift here would move every saved reading position in a paged
-     * book. Asserted on the FULL page-start array (a single-page comparison is worthless), over Latin,
-     * CJK, and mixed input, for both the TXT and the Markdown phase-1 paths.
+     * Feature #156 AC-3 / plan R1, at the PAGINATOR seam: threading an alignment through phase 1 must
+     * leave the paged index byte-identical — same page count, same per-page source ranges. A drift
+     * would move every saved reading position in a paged book. Asserted on the FULL page-start array
+     * (a single-page comparison is worthless), over Latin, CJK and mixed input, for both the TXT and
+     * the Markdown phase-1 paths.
      *
-     * The test carries its own SENSITIVITY control: the same comparison at a larger font size must
-     * report a DIFFERENT boundary set. Without it, "the arrays match" could equally mean the
-     * comparison is incapable of detecting a change.
+     * Scope, stated honestly (Gate-4 round 1, Low): with a fake measurer the arrays match BY
+     * CONSTRUCTION, so this test does NOT prove that Android's `TextAlign.Justify` is applied after
+     * line breaking. It proves the two things a JVM test can: the alignment reaches phase 1 (asserted
+     * from the measurer's recording — otherwise the equality would be vacuous), and the comparison can
+     * detect a real shift (the larger-font sensitivity control). The engine-level proof is
+     * `TxtJustificationConnectedTest.d1_pagedBoundaries_areIdenticalUnderStartAndJustify_realMeasurer`,
+     * which runs the same comparison through the production `ComposeLineMeasurer`.
      */
     @Test fun pageBoundaries_areInvariantToTextAlign_andTheComparisonDetectsARealShift() = runTest {
         val latin = (0 until 40).joinToString("") {
@@ -504,9 +510,9 @@ class TxtPaginatorTest {
                 val p = TxtPaginator(UnconfinedTestDispatcher(testScheduler))
                 val contentBox = box(heightPx = 55f, widthPx = 600f)
 
-                val mStart = StyleSensitiveLineMeasurer()
+                val mStart = StyleRecordingLineMeasurer()
                 val startIdx = p.index(doc, styleAt(18f, TextAlign.Start), contentBox, mStart, PaginationToken(), isMarkdown)
-                val mJustify = StyleSensitiveLineMeasurer()
+                val mJustify = StyleRecordingLineMeasurer()
                 val justifyIdx = p.index(doc, styleAt(18f, TextAlign.Justify), contentBox, mJustify, PaginationToken(), isMarkdown)
 
                 val ctx = "md=$isMarkdown case=$label"
@@ -524,7 +530,7 @@ class TxtPaginatorTest {
 
                 // SENSITIVITY CONTROL: a genuinely layout-affecting change MUST move the boundaries,
                 // proving the assertions above can fail.
-                val bigger = p.index(doc, styleAt(26f, TextAlign.Justify), contentBox, StyleSensitiveLineMeasurer(), PaginationToken(), isMarkdown)
+                val bigger = p.index(doc, styleAt(26f, TextAlign.Justify), contentBox, StyleRecordingLineMeasurer(), PaginationToken(), isMarkdown)
                 assertFalse(
                     "$ctx: control — a larger font size must shift the page boundaries, else the " +
                         "invariance assertion above cannot fail",
