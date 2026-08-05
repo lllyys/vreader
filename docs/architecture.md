@@ -581,6 +581,46 @@ language reconcile).
   fingerprints the **LOCAL artifact** (exact-match, converter-independent
   identity), keeping the source URI only as metadata; atomic promote
   (`Files.move` ATOMIC_MOVE/REPLACE_EXISTING) on an injected IO dispatcher.
+- `BookImporter.importStream` takes an optional trailing `format: BookFormat?`
+  that **replaces** extension-derived detection when non-null (feature #155
+  WI-1) — an inbound `content://` URI carries no reliable filename. `null`
+  is behaviour-identical to extension detection, including its
+  `UnsupportedFormat` throw, so identity is the same down both paths.
+
+### Inbound documents (`com.vreader.app.imports`) — feature #155
+
+`ImportActivity` is the app's **only exported activity besides the launcher**,
+and the target of "Open with VReader" / "Share to VReader". It is deliberately
+NOT a filter on `MainActivity`: every activity is launchMode `standard`, so a
+`VIEW` filter there would stack a second `MainActivity` over an open reader.
+
+- **Four SEPARATE `<intent-filter>` elements**, because `<data>` elements merge
+  into a cross-product *within* one filter — MIME matching and `pathPattern`
+  matching must never share a filter. **A** `VIEW` + `DEFAULT`/`BROWSABLE`,
+  schemes `content`+`file`, 12 book MIME types (incl. `application/octet-stream`);
+  **B** `VIEW` typeless, `content` only + `host="*"` (a `file://` URI has an
+  empty authority, so `host="*"` can never match it), 54 `pathPattern`s = 9
+  extensions × lower/UPPER × 1/2/3 `.*\.` repeats (`PATTERN_SIMPLE_GLOB` is not
+  a regex and has no reliable backtracking); **C** `SEND` and **D**
+  `SEND_MULTIPLE`, the same 12 types, type-only and never `BROWSABLE`.
+  `pathSuffix`/`pathAdvancedPattern` are API 31+ and would be silently IGNORED
+  on API 26–30, widening the filter — not used.
+- **Task/theme model**: `taskAffinity=""` + `noHistory` + `excludeFromRecents`
+  keep it out of VReader's task and out of Recents. `Theme.VReader.Import`
+  (`res/values/themes.xml`) is **translucent, never `Theme.NoDisplay`** — a
+  no-display activity must finish before it would become visible, but this one
+  must stay alive long enough to open every incoming stream while its
+  `FLAG_GRANT_READ_URI_PERMISSION` grant is still valid. It declares no label,
+  so the chooser shows the app label.
+- **`ImportActivity.urisFrom(intent)`** is the pure payload boundary: `VIEW`
+  takes `intent.data`; `SEND`/`SEND_MULTIPLE` take `EXTRA_STREAM`, falling back
+  to `ClipData`. It NEVER throws (an exported entry point must survive any
+  malformed extra) and is bounded twice — `MAX_BATCH` = 20 collected URIs,
+  `MAX_SCANNED_ITEMS` = 200 inspected entries, so neither a dense nor a sparse
+  hostile payload is unbounded work.
+- Filter behaviour is proven against the **real** device `PackageManager`
+  (`ImportFilterResolutionConnectedTest`), not Robolectric's shadow resolver,
+  whose `PatternMatcher` need not reproduce platform `pathPattern` semantics.
 
 ### Reader plumbing (`com.vreader.app.reader`)
 

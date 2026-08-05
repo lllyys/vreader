@@ -350,6 +350,17 @@ Hazards that must be **tested**, not assumed:
   legally hand out a `file://` URI at all (`FileUriExposedException`). Filter B is therefore
   **`content`-only**; `file` is retained solely in the MIME filter A for legacy senders, where no host
   or path matching is involved.
+- **An intent typed `*/*` matches ANY filter declaring any MIME type** — AOSP's
+  `IntentFilter.findMimeType` special-cases a *wildcard intent type* against a filter whose type list
+  is non-empty. **Corrected 2026-08-05 from WI-2's connected run against the real device
+  `PackageManager`** (`ImportFilterResolutionConnectedTest`), which contradicted this section's
+  earlier implication that no wildcard matching occurs. This is the **sender** being a wildcard, not
+  our filter being broad: no `*/*` appears anywhere in the manifest, and the proof is that a concrete
+  undeclared type still misses (`send_withAnImageDoesNotResolve`). It is unavoidable without removing
+  every typed filter. Consequence for anyone writing or reading these tests: **filter narrowness is
+  proven by a concrete undeclared type such as `image/jpeg`, never by `*/*`.** WI-5's runtime guard
+  ("no `EXTRA_STREAM` and no `ClipData` URI ⇒ finish without importing") covers the payload-less case
+  a wildcard sender can produce.
 
 ### Filter set (on `ImportActivity`; each a separate `<intent-filter>`)
 
