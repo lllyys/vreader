@@ -4,7 +4,8 @@
 - **iOS parity**: feature #38 (hierarchical/tree TOC display) on the Foliate path —
   `vreader/Services/Foliate/FoliateTOCConverter.swift` + `vreader/Services/Foliate/FoliateNavSeek.swift`
 - **Platform**: `android-app` (rule 40 → bumps `android/version.properties`; rule 47 Gate-5 → emulator lane)
-- **Plan status**: **Gate-1 draft (v1). NOT audited.** Gate 2 is the orchestrator's next step.
+- **Plan status**: **v2 — Gate-2 round 1 applied** (Codex gpt-5.5/high; 1 High, 1 Medium, 3 Low, all
+  closed). Awaiting round 2. Round-1 dispositions in §13.
 - **Closest precedent**: feature #139 (TXT/MD TOC, `VERIFIED` 2026-08-05) — same sheet, same
   scaffold rule, same Gate-5 shape. Plan: `dev-docs/plans/20260804-feature-139-android-txt-md-toc.md`;
   evidence: `dev-docs/verification/feature-139-20260805.md`.
@@ -205,7 +206,8 @@ foliate-js bundle (UNCHANGED, SHA-pinned)
    │  relocate   { cfi, fraction, sectionIndex, sectionTotal, tocHref, … }   ← already emitted today
    ▼
 FoliateMessageParser  (WI-1 + WI-4: stop discarding `toc` and `tocHref`)
-   │      └─ FoliateTocParser.parse(JsonElement) → List<FoliateTocItem>   [depth-capped, node-capped]
+   │      │  reads detail["toc"] itself, then hands the ELEMENT over:
+   │      └─ FoliateTocParser.parse(tocElement: JsonElement?) → List<FoliateTocItem>  [depth/node-capped]
    ▼
 FoliateMessage.BookReady(title, sectionTotal, toc)          FoliateMessage.Relocate(…, tocHref)
    │                                                                   │
@@ -279,9 +281,37 @@ with their bookmarks.
 
 ### 5.4 Hostile / malformed TOC — where each bound lives
 
-`FoliateMessageParser.parse` runs on the **WebView message callback thread, i.e. the main thread**
-(`FoliateBridge.kt:128-134` calls `WebViewCompat.addWebMessageListener` with no handler). Two facts
-constrain the design:
+**The processing of a book's TOC has TWO stages, and this feature only owns the second one.** Gate-2
+round 1 rated the previous version of this section a **High** for blurring them. Stated precisely:
+
+#### Stage 1 — JS, inside the SHA-pinned bundle. **Pre-existing, unchanged by #140, NOT bounded.**
+
+Three *recursive* JS walks over the book's TOC tree run before Kotlin sees anything, all inside
+`readerAPI.open()`:
+
+| # | Where | Line | What |
+| --- | --- | --- | --- |
+| 1 | `assignIDs(toc)` | `foliate-bundle.js:6101-6109` | recursive `assignID` over `item.subitems` |
+| 2 | `flatten(items)` | `foliate-bundle.js:6110` | self-recursive `flatten(item.subitems)` |
+| 3 | `serializeTOC(toc)` | `foliate-bundle.js:7659-7666` | self-recursive `serializeTOC(item.subitems)` |
+
+(1) and (2) run from `TOCProgress.init({ toc: book.toc ?? [] })` at `foliate-bundle.js:6666-6672`,
+reached by `await view.open(url)`; (3) runs when the result is posted at `:7174`. **All three
+already execute on every AZW3 open today**, with `book.toc` fully built, whether or not Kotlin reads
+the field. A TOC pathological enough to blow the JS stack therefore blows it *today* — the failure
+lands in `readerAPI.open`'s `catch`, which posts `error` instead of `book-ready`, and
+`Azw3Document.handle` maps a pre-`book-ready` error to `Azw3DocState.Corrupt`
+(`Azw3Document.kt:129`): **"This book can't be opened."**
+
+**#140 changes this exposure by exactly nothing.** It adds no JS work, no bundle change, no new
+call. But equally: **no Kotlin bound can protect against it**, because the Kotlin bound is
+downstream of the crash. Fixing stage 1 means patching a SHA-pinned bundle — out of scope, named
+follow-up **F6** (§10).
+
+#### Stage 2 — Kotlin, on the WebView message callback thread. **This is what #140 owns and bounds.**
+
+`FoliateMessageParser.parse` runs on the main thread (`FoliateBridge.kt:128-134` calls
+`WebViewCompat.addWebMessageListener` with no handler). Two facts constrain the design:
 
 - **The full JSON payload — TOC included — is ALREADY parsed on that thread today.**
   `FoliateMessageParser.kt:25` does `json.parseToJsonElement(raw).jsonObject` over the entire
@@ -289,8 +319,10 @@ constrain the design:
   `JsonElement` tree**, not a new parse. This is why §9 R5 rates the added main-thread cost low —
   but it is still *measured* (WI-7), because #139's Gate-5 taught that a desktop estimate can be
   100× wrong on device (`dev-docs/verification/feature-139-20260805.md:88-92`).
-- **Recursion is the real hazard.** `serializeTOC` is itself recursive in JS, and a hostile/broken
-  book could nest arbitrarily.
+- **Recursion is the hazard #140 introduces.** The tree walk is new Kotlin code over
+  attacker-shaped input; an unbounded recursive descent is a `StackOverflowError` *in the message
+  callback*, which — same as stage 1 — would leave the book unopenable. This is the one this
+  feature must not get wrong.
 
 Bounds (all `internal const`, each with a boundary test):
 
@@ -314,13 +346,28 @@ internal const val MAX_TOC_ENTRIES = 10_000
 - **The parse is iterative or explicitly depth-limited** — an unbounded recursive descent over
   attacker-controlled nesting is a `StackOverflowError` in the WebView callback. Pinned by
   `FoliateTocParserTest.deeplyNestedToc_doesNotOverflow_andDropsBeyondMaxDepth` built from a
-  200-deep synthetic payload.
+  200-deep synthetic payload, **and re-run on-device** by WI-7's `pathologicalTocPayload_…` probe
+  (ART's stack budget is not the JVM's, so a JVM-only pass is not evidence for the device).
 
 Every other malformed shape degrades to "absent", matching the parser's existing contract
 (`FoliateMessageParser.kt:20-23`): `toc` missing / null / not an array / elements not objects /
-`subitems` not an array ⇒ empty or partial list, never a throw. A throw inside the message callback
-would be worse than a missing TOC: `Azw3Document.handle` maps a pre-`book-ready` error to
-`Azw3DocState.Corrupt` (`Azw3Document.kt:129`), i.e. **the book would refuse to open**.
+`subitems` not an array ⇒ empty or partial list, never a throw.
+
+#### The claim this plan makes — and the one it does NOT
+
+> **CLAIM (stage 2, deliverable):** a `book-ready` message whose `toc` field is malformed, hostile,
+> absurdly deep, or absurdly large is parsed **without throwing and without unbounded recursion or
+> allocation**, so the Kotlin side degrades to "no TOC / partial TOC" and the book opens exactly as
+> it would have before #140. Verified by `FoliateTocParserTest` (JVM) **and** WI-7's on-device
+> injection probe, which drives a 200-deep / over-cap payload through the REAL
+> `addWebMessageListener` → `FoliateMessageParser` path on the emulator's main thread.
+>
+> **NOT CLAIMED:** that a pathological book *file* opens. A TOC pathological enough to break the
+> bundle's own recursive walks (stage 1) prevents `book-ready` from ever being posted, and no
+> Kotlin-side bound can change that. That exposure is **pre-existing and unchanged**; it is
+> characterized, not fixed, here. Follow-up **F6**.
+
+This distinction is the reason §11's acceptance criterion 8 is scoped to the payload, not the book.
 
 ### 5.5 Current-chapter highlight
 
@@ -376,7 +423,7 @@ All Kotlin; Gradle picks up new files by source-set glob (no project regeneratio
 | File | Contents |
 | --- | --- |
 | `…/reader/foliate/FoliateTocItem.kt` | `data class FoliateTocItem(val label: String, val href: String, val subitems: List<FoliateTocItem> = emptyList())` — the wire shape of `serializeTOC` |
-| `…/reader/foliate/FoliateTocParser.kt` | `object FoliateTocParser { internal const val MAX_TOC_DEPTH = 12; internal const val MAX_TOC_ENTRIES = 10_000; fun parse(detail: JsonObject): List<FoliateTocItem> }` — bounded, throw-free |
+| `…/reader/foliate/FoliateTocParser.kt` | `object FoliateTocParser { internal const val MAX_TOC_DEPTH = 12; internal const val MAX_TOC_ENTRIES = 10_000; fun parse(tocElement: JsonElement?): List<FoliateTocItem> }` — bounded, throw-free. **Takes the `toc` ELEMENT, not the `book-ready` envelope** (Gate-2 R1 Low): reading `detail["toc"]` is `FoliateMessageParser`'s job, so this object stays a reusable TOC parser with no knowledge of which message carried the tree. A `null` element (field absent) is a legal input yielding `emptyList()` |
 | `…/reader/nav/FoliateTocProvider.kt` | `class FoliateTocProvider(private val items: List<FoliateTocItem>, private val book: Book, private val dispatcher: CoroutineDispatcher) : TocProvider` — depth-first flatten, skip-but-recurse, entry cap |
 | `…/reader/nav/FoliateTocIndex.kt` | `fun foliateTocIndexFor(currentTocHref: String?, entryHrefs: List<String>): Int` |
 | `…/reader/Azw3ReaderChrome.kt` | WI-5 — the pure move of `Azw3ReaderChrome`, `Azw3NotesBottomChrome`, `azw3JumpResult`, `azw3JumpDecision` out of `Azw3ReaderActivity.kt` (same package ⇒ no import changes anywhere) |
@@ -443,8 +490,8 @@ writes:
 tests:
   - FoliateTocParserTest.flatToc_parsesLabelAndHrefInOrder
   - FoliateTocParserTest.nestedToc_preservesSubitemTree
-  - FoliateTocParserTest.missingToc_yieldsEmptyList
-  - FoliateTocParserTest.tocIsNull_yieldsEmptyList
+  - FoliateTocParserTest.nullElement_yieldsEmptyList            # parse(null) — the field-absent input
+  - FoliateTocParserTest.jsonNullElement_yieldsEmptyList
   - FoliateTocParserTest.tocIsNotAnArray_yieldsEmptyList
   - FoliateTocParserTest.tocElementIsNotAnObject_isSkipped_siblingsSurvive
   - FoliateTocParserTest.subitemsMissingOrNullOrNotAnArray_treatedAsNoChildren
@@ -453,18 +500,24 @@ tests:
   - FoliateTocParserTest.overMaxEntries_rejectsWholeToc_neverTruncates
   - FoliateTocParserTest.exactlyMaxEntries_isKept                                 # boundary
   - FoliateTocParserTest.cjkAndRtlLabels_areByteForBytePreserved
+  - FoliateTocParserTest.hrefWithFragmentQueryOrNonAscii_isPreservedByteForByte  # Gate-2 R1 Low
   - FoliateTocParserTest.labelWithEmbeddedNewline_isPreserved_sheetNormalizesAtRender
   - FoliateMessageParserTest.bookReady_populatesTocTree
   - FoliateMessageParserTest.bookReady_withoutToc_stillParsesTitleAndSections    # back-compat
-  - FoliateMessageParserTest.hostileTocPayload_neverThrows_bookStillOpens
+  - FoliateMessageParserTest.hostileTocPayload_isParsedWithoutThrowing           # scoped: the PAYLOAD
 acceptance: >
   `book-ready` yields the full nested tree; every malformed shape degrades to empty/partial and
-  NEVER throws (a throw in the WebView callback would map to Azw3DocState.Corrupt — the book would
-  refuse to open, Azw3Document.kt:129); MAX_TOC_DEPTH drops deeper subitems while keeping the
-  parent row; MAX_TOC_ENTRIES rejects the whole TOC rather than truncating; a 200-deep synthetic
-  payload does not StackOverflow. Existing FoliateMessageParser behavior is unchanged for every
+  NEVER throws; MAX_TOC_DEPTH drops deeper subitems while keeping the parent row; MAX_TOC_ENTRIES
+  rejects the whole TOC rather than truncating; a 200-deep synthetic payload does not StackOverflow
+  on the JVM (WI-7 re-runs it on ART). Existing FoliateMessageParser behavior is unchanged for every
   message that carries no `toc`.
-pr_size: ~120 impl + ~220 test
+  SCOPE (Gate-2 R1 High): these bounds protect the KOTLIN stage only. They cannot make a
+  pathological BOOK open — foliate's own recursive assignIDs/flatten/serializeTOC
+  (foliate-bundle.js:6101-6110, :7659) run first, inside the SHA-pinned bundle, and a failure there
+  posts `error` instead of `book-ready` → Azw3DocState.Corrupt (Azw3Document.kt:129). That exposure
+  is pre-existing and unchanged by this feature; see §5.4 and follow-up F6. No test here may be
+  named or worded as though it proves the book opens.
+pr_size: ~120 impl + ~230 test
 ```
 
 ---
@@ -491,22 +544,35 @@ tests:
   - FoliateTocProviderTest.entryLocator_formatComesFromBookOriginalFormat_notALiteral
   - FoliateTocProviderTest.pageLabelAndReadiumLocator_areNull
   - FoliateTocProviderTest.emptyTree_yieldsEmptyList_theHideTheControlSignal
-  - FoliateTocProviderTest.everyEmittedRow_hasAJumpableTarget                   # FoliateGoToTarget.from != null (post WI-3)
+  - FoliateTocProviderTest.hrefWithFragmentOrQuery_isPreservedByteForByte      # Gate-2 R1 Low
+  - FoliateTocProviderTest.kf8PosUriHref_isPreservedByteForByte                # kindle:pos:fid:…:off:…
+  - FoliateTocProviderTest.mobi6FileposHref_isPreservedByteForByte             # filepos:NNNN
+  - FoliateTocProviderTest.nonAsciiHref_isPreservedByteForByte                 # decodeURI'd CJK path
   - FoliateTocProviderTest.runsOnTheInjectedDispatcher_notTheCaller
   - FoliateTocProviderTest.cancellation_isCooperative
 acceptance: >
   Depth-first order, iOS #38 semantics exactly (trim, skip-blank-but-recurse); every emitted row
   carries an href-bearing canonical locator with the book identity triple and NO progression; an
-  empty result is the documented "hide the Contents control" signal, not an error. The provider owns
-  its dispatcher hop (rule 50 §12.1). docs/architecture.md gains the FoliateTocProvider row in THIS
-  PR (rule 24), with an explicit "(host wiring lands in WI-6)" parenthetical.
-pr_size: ~110 impl + ~200 test + ~10 docs
+  empty result is the documented "hide the Contents control" signal, not an error. Hrefs are opaque
+  and preserved BYTE-FOR-BYTE — the three real shapes are KF8 `kindle:pos:fid:XXXX:off:YYYYYYYYYY`
+  (foliate-bundle.js:3380), MOBI6 `filepos:NNNN` (:3235) and the EPUB-path relative href, which is
+  `decodeURI`'d (:1753) so it can carry a `#fragment`, a query, or non-ASCII characters. The
+  provider owns its dispatcher hop (rule 50 §12.1). docs/architecture.md gains the FoliateTocProvider
+  row in THIS PR (rule 24), with an explicit "(host wiring lands in WI-6)" parenthetical.
+pr_size: ~110 impl + ~220 test + ~10 docs
 ```
 
-> `everyEmittedRow_hasAJumpableTarget` is deliberately a **cross-WI invariant**: it fails until WI-3
-> teaches `FoliateGoToTarget` about hrefs. Sequence WI-3 before WI-2's PR, or land the assertion in
-> WI-3. (Adjust at dispatch time; do not silently drop it — it is the test that would have caught
-> §5.2.)
+> **Dependency note (Gate-2 R1 Medium).** An earlier draft carried
+> `FoliateTocProviderTest.everyEmittedRow_hasAJumpableTarget` here with a prose instruction to
+> "sequence WI-3 first" — but the machine-readable `depends:` token still said `[WI-1]`, and
+> `scripts/deps-check.sh` reads the token, not the prose, so a dispatcher would have started WI-2
+> straight into a known-red test. **Resolved by moving the assertion, not by adding a dependency**:
+> the target-resolution invariant now lives in **WI-3** (`from_hrefOnlyLocator_yieldsHrefTarget`,
+> which builds its own TOC-shaped locator inline and needs nothing from WI-2), and the *end-to-end*
+> version — real provider rows resolving to real href targets — lives in **WI-6**, which genuinely
+> depends on both. WI-2's `depends: [WI-1]` is therefore correct as written and WI-2 and WI-3 are
+> independent and parallelizable. (Same failure shape as the stale Spec block that nearly shipped
+> into #155 WI-5: a decision recorded in prose while the machine-readable field said the old thing.)
 
 ---
 
@@ -527,7 +593,10 @@ tests:
   - FoliateGoToTest.from_hrefWithProgressionZero_stillYieldsHref    # the exact iOS-shaped locator
   - FoliateGoToTest.from_blankHref_fallsThroughToProgression
   - FoliateGoToTest.from_noCfiNoHrefNoProgression_yieldsNull        # unchanged contract
+  - FoliateGoToTest.from_tocShapedLocator_alwaysResolves            # moved here from WI-2 (R1 Medium)
   - FoliateGoToTest.gotoJs_hrefIsJsonEscaped_quotesBackslashesScriptTagsNeutralized
+  - FoliateGoToTest.gotoJs_hrefWithFragmentQueryOrNonAscii_isPassedThroughUNCHANGED  # R1 Low
+  - FoliateGoToTest.gotoJs_kf8PosUriHref_survivesEscapingByteForByte  # kindle:pos:fid:…:off:…
   - FoliateGoToTest.gotoJs_hrefTarget_callsReaderApiGoTo_notGoToFraction
   - FoliateGoToTest.hrefGoTo_awaitsAck_andSupersedeStillApplies
 acceptance: >
@@ -535,9 +604,14 @@ acceptance: >
   TOC locator (href + progression 0.0) and which asserts Href, NOT Fraction(0.0) — the defect that
   would otherwise send every chapter tap to the start of the book with a green "jump succeeded".
   The href rides the EXISTING jsString/JSON-escaping seam (FoliateBridge.kt:302) — no new escaping
-  code. reader.html gains ONE else-if branch; foliate-bundle.js is untouched and its pinned SHA
-  test still passes. The shim branch itself is not JVM-testable and is covered by WI-7's connected
-  round-trip.
+  code — and is passed to readerAPI.goTo BYTE-FOR-BYTE: no trimming, no normalization, no
+  re-encoding, so a `#fragment`, a query suffix, the KF8 `kindle:pos:…` colon form and a decodeURI'd
+  non-ASCII path all survive (Gate-2 R1 Low). reader.html gains ONE else-if branch;
+  foliate-bundle.js is untouched and its pinned SHA test still passes. The shim branch itself is not
+  JVM-testable and is covered by WI-7's connected round-trip.
+  `from_tocShapedLocator_alwaysResolves` moved here from WI-2 so no WI is dispatchable while a
+  declared test is known-red (Gate-2 R1 Medium); it constructs its own href-only locator inline and
+  depends on nothing from WI-2.
 pr_size: ~40 impl (incl. ~4 lines JS) + ~150 test
 ```
 
@@ -566,8 +640,14 @@ tests:
   - FoliateTocIndexTest.emptyEntries_returnsMinusOne
   - FoliateTocIndexTest.matchIsByteExact_noNormalization_noTrimming
   - FoliateTocIndexTest.cjkHref_matches
+  - FoliateTocIndexTest.hrefsDifferingOnlyByFragment_areDistinctRows      # Gate-2 R1 Low
+  - FoliateTocIndexTest.hrefWithQuerySuffix_matchesOnlyItself
+  - FoliateTocIndexTest.kf8PosUriHrefs_matchOnTheExactOffsetSegment       # kindle:pos:fid:…:off:…
 acceptance: >
   The relocate parser gains one nullable field with every existing field's behavior unchanged.
+  Matching is byte-exact — two entries whose hrefs differ ONLY in their `#fragment` (or query, or
+  the KF8 `:off:` segment) are DISTINCT rows and must not collapse onto one another, which is the
+  whole reason no normalization is applied (Gate-2 R1 Low).
   foliateTocIndexFor's contract matches the two existing index helpers at the edges (-1 only when
   there is no TOC; 0 as the best-effort fallback), and resolves a parent/child href tie to the
   LAST (deepest) row.
@@ -612,9 +692,13 @@ writes:
   - android/app/src/main/kotlin/com/vreader/app/reader/Azw3ReaderActivity.kt
   - android/app/src/main/kotlin/com/vreader/app/reader/Azw3ReaderChrome.kt
   - android/app/src/main/kotlin/com/vreader/app/reader/chrome/ReaderBottomChrome.kt
+  - android/app/src/main/kotlin/com/vreader/app/reader/nav/EmptyTocProvider.kt   # COMMENT-ONLY (rule 22)
+  - android/app/src/main/kotlin/com/vreader/app/reader/nav/TocProvider.kt        # COMMENT-ONLY (rule 22)
   - android/app/src/androidTest/kotlin/com/vreader/app/reader/Azw3ReaderChromeUiTest.kt
+  - android/app/src/test/kotlin/com/vreader/app/reader/nav/FoliateTocProviderTest.kt
   - docs/architecture.md
 tests:
+  - FoliateTocProviderTest.everyEmittedRow_resolvesToAnHrefTarget           # the end-to-end invariant
   - Azw3ReaderChromeUiTest.emptyToc_hidesContents_notesStillPresent          # kept from today
   - Azw3ReaderChromeUiTest.nonEmptyToc_showsContentsControl
   - Azw3ReaderChromeUiTest.tappingContents_opensSheet_listingEveryChapterTitle
@@ -633,8 +717,19 @@ acceptance: >
   — asserting the depth FIELD would pass on a sheet that ignored it. The current-row test uses a
   non-zero index, because index 0 is the fallback and would pass on a helper that always returns 0.
   Render-death mid-session keeps the TOC visible and degrades a jump to Failed (sheet stays open).
+  `everyEmittedRow_resolvesToAnHrefTarget` is the end-to-end form of the invariant WI-3 pins in the
+  abstract: FoliateGoToTarget.from(row.canonicalLocator) is an Href — never null, never a Fraction —
+  for every row a REAL provider emits (Gate-2 R1 Medium: it lives here, where both dependencies are
+  already satisfied, so no WI is ever dispatchable with a known-red test).
   docs/architecture.md: EmptyTocProvider scope corrected to (PDF), the WI-2 parenthetical removed,
   and the stale #139 "host wiring lands in WI-7" sentence at :661-663 fixed.
+  COMMENT-ONLY, rule 22 (Gate-2 R1 Low) — two Purpose headers name AZW3 as a no-TOC format and go
+  wrong the moment this ships. Both are ALREADY stale for TXT/MD since #139 WI-7, so each loses two
+  formats, not one:
+    - TocProvider.kt:3 "…[EmptyTocProvider] is the no-TOC provider for TXT/MD/PDF/AZW3 hosts."
+    - EmptyTocProvider.kt:1-2 "…for reader hosts without a bridged outline (TXT/MD/PDF/AZW3)"
+  Both become "PDF" only, and TocProvider.kt's header names the three real implementations
+  (ReadiumTocProvider / TxtMdTocProvider / FoliateTocProvider). No behavior change in either file.
 gate5a: >
   Slice verification on the emulator through the PRODUCTION path with the real book staged
   (see §9 R7): Library → tap the AZW3 tile → reader → Contents visible → sheet lists real chapter
@@ -659,6 +754,8 @@ tests:
   - Azw3TocConnectedTest.realBook_goToBogusHref_doesNOTChangePosition        # negative control
   - Azw3TocConnectedTest.realBook_goToTocHref_thenRelocateTocHref_matchesThatEntry
   - Azw3TocConnectedTest.realBook_tocParseAndFlatten_areLogged_withElapsedMs # §9 R5
+  - Azw3TocConnectedTest.pathologicalTocPayload_200Deep_isParsedOnDeviceWithoutOverflow   # §5.4 stage 2
+  - Azw3TocConnectedTest.pathologicalTocPayload_overEntryCap_isRejectedOnDevice
 acceptance: >
   Drives a REAL Azw3Document over the real local-only book on the emulator. The load-bearing
   assertion is that the relocate-reported position (cfi/fraction) CHANGES from its pre-jump value
@@ -669,7 +766,22 @@ acceptance: >
   `assertTrue(result is Succeeded || result == Timeout)` passes on total failure. The bogus-href
   negative control proves the positive assertion has teeth. If the fixture is absent the test
   SKIPS (assumeTrue) — so the WI is not done until the run log shows it RAN, not skipped.
-pr_size: ~230 test
+
+  THE PRODUCTION-WEBVIEW HOSTILE-PAYLOAD PROBE (Gate-2 R1 High, §5.4 stage 2). The two
+  `pathologicalTocPayload_*` cases need NO pathological book file — authoring a malformed MOBI is
+  both hard and beside the point, because the JS stage that a bad FILE would break is out of scope.
+  Instead they load the real shell, then `evaluateJavascript` a synthetic message straight down the
+  production channel:
+      window.__vreaderPost('book-ready', { title:'x', sections:1, toc:<200-deep | over-cap tree> })
+  `__vreaderPost` is the shell's own `send()` (reader.html:48), so this rides the REAL
+  addWebMessageListener → FoliateBridgePolicy.isTrustedMessage → FoliateMessageParser path on the
+  REAL main thread of a REAL WebView. That is the only way to evidence the stage-2 bound on ART,
+  whose stack budget is not the JVM's — a green JVM test is not evidence for the device.
+  These cases assert ONLY that the parse returns (bounded, no throw, no overflow) and that the
+  document does not go Corrupt. They do NOT assert, and must not be worded as asserting, that a
+  pathological BOOK opens — see §5.4's CLAIM / NOT CLAIMED block and follow-up F6. They are
+  fixture-independent, so they run even when book.azw3 is absent.
+pr_size: ~300 test
 ```
 
 ---
@@ -730,7 +842,7 @@ completed rather than merely that a control appeared
 | 4 | The jump goes to the right chapter, not the book start | Any "position changed" test where the target chapter happens to be chapter 1; and any test where the TOC locator carries `progression = 0.0` and `from()` resolves `Fraction(0.0)` — position "changes" to 0 and the ack is `ok:true` | Jump to a **middle** chapter (index ≥ 2) and assert the post-jump `tocHref` == that entry's href. Plus the JVM guard `FoliateGoToTest.from_hrefWithProgressionZero_stillYieldsHref` |
 | 5 | Nested entries render indented | Asserting `entry.depth == 1` on the model — passes on a sheet that ignores depth entirely | Measure the on-screen left bound of the depth-1 title node vs the depth-0 title node (`getUnclippedBoundsInRoot()`, unmerged tree) — #139 criterion 7's technique |
 | 6 | Current chapter is highlighted | `onNodeWithTag("toc-current-marker").assertExists()` — passes with `currentTocIndex = 0`, which is both today's hardcoded value (`Azw3ReaderActivity.kt:465`) and the helper's fallback | Navigate to chapter k (k ≥ 2) first, then assert the marker is inside `toc-row-k` |
-| 7 | A malformed TOC doesn't break the reader | A parser test over a well-formed payload | Feed hostile payloads (`toc: 7`, `toc: [null, 3, {}]`, 200-deep nesting, 20 000 entries) and assert **the book still opens** (no `Corrupt`) as well as the TOC shape |
+| 7 | A malformed TOC **payload** is parsed without throwing or overflowing | (a) a parser test over a well-formed payload; (b) **the previous draft's own wording** — "assert the book still opens" — which claims protection the Kotlin bound cannot deliver, since foliate's recursive JS walks run first and a stage-1 failure never posts `book-ready` at all (§5.4) | Feed hostile payloads (`toc: 7`, `toc: [null, 3, {}]`, 200-deep nesting, over-cap entry counts) through the parser (JVM) **and** through the real `addWebMessageListener` path on-device (WI-7), asserting bounded return + no throw + no overflow + document not `Corrupt`. Scope the assertion to the **payload**, never the book file |
 | 8 | Nothing regressed | Running only the new suites | Re-run `Azw3ReaderActivityTest`, `Azw3BookmarkNavTest`, `Azw3GoToSliceTest`, `Azw3ReaderChromeUiTest`, `FoliateBundleProvenanceTest` (the SHA pin proves the bundle was not touched) |
 
 ---
@@ -744,7 +856,8 @@ completed rather than merely that a control appeared
 | **R3** | **The only real AZW3 fixture may have a FLAT TOC**, leaving hierarchical depth — the feature's headline difference from #139 — unexercised on real data. Not yet determined at Gate 1 (a calibre probe of `book.azw3` did not complete within the planning budget). | WI-7 **logs the real depth histogram** — that is the measurement. If it is flat: (a) depth logic stays covered by WI-1/WI-2 unit tests over synthetic nested payloads (a legitimate "real books first" exception: a **CI unit test cannot read the gitignored `test-books/`**, AGENTS.md's stated exception), (b) depth *rendering* is already device-verified through #139 criterion 7 on MD (same rows, same sheet, same `depth` field), and (c) the evidence file records the gap explicitly rather than implying coverage. **Do not synthesize an AZW3 just to make a nested TOC**: `mobi`-format fixtures are hard to author correctly and a hand-built one would prove less than the two existing coverages. |
 | **R4** | Only **one** real AZW3 exists (`test-books/books/azw3/Bei Tao Yan De Yong Qi - Zi Wo.azw3`, 6.3 MB, CJK) — no English, no `.mobi`, no multi-volume sample. Format-quirk coverage is thin. | Accept + state. AZW3 import/render already ships on this single fixture (#126 VERIFIED). The parser's robustness is carried by the hostile-payload unit matrix, not by fixture breadth. |
 | **R5** | **Main-thread cost at `book-ready`**: `FoliateMessageParser.parse` runs on the WebView callback (UI) thread. | The full JSON — TOC included — is **already** parsed there today (`FoliateMessageParser.kt:25`); #140 adds only a bounded walk of an already-built tree, and the flatten runs off-main. Bounds in §5.4. **Measured** in WI-7 and recorded in WI-8's evidence — the #139 lesson (a desktop estimate was ~100× wrong on device) says estimate nothing. |
-| **R6** | **A hostile TOC could make the book unopenable.** A throw inside the message callback → no `book-ready` → `Azw3DocState.Corrupt` (`Azw3Document.kt:129`), i.e. "This book can't be opened." | The parser is total (never throws) — pinned by `hostileTocPayload_neverThrows_bookStillOpens`; depth-bounded, so no `StackOverflowError`. |
+| **R6** | **A hostile TOC payload could make the book unopenable — via the KOTLIN stage.** A throw or `StackOverflowError` inside the message callback → no `book-ready` consumed → `Azw3DocState.Corrupt` (`Azw3Document.kt:129`), i.e. "This book can't be opened." | Closed for stage 2: the parser is total (never throws) and depth-bounded, pinned by `hostileTocPayload_isParsedWithoutThrowing` on the JVM **and** WI-7's on-device injection probe (ART ≠ JVM stack budget). |
+| **R13** | **The SAME failure via the JS stage is NOT closable here.** `assignIDs` (`foliate-bundle.js:6101-6109`), `flatten` (`:6110`) and `serializeTOC` (`:7659-7666`) all recurse over the book's TOC inside `readerAPI.open()`, upstream of every Kotlin bound. A book pathological enough to blow the JS stack fails to open. | **Accept + state, do not pretend to fix.** This is **pre-existing and completely unchanged by #140** — all three walks already run on every AZW3 open today, because `TOCProgress.init` is fed `book.toc` at `view.open` (`:6666-6672`) and `serializeTOC` runs at the `book-ready` post (`:7174`), whether or not Kotlin reads the field. Fixing it means patching a SHA-pinned bundle: follow-up **F6**. §5.4 carries the explicit CLAIM / NOT CLAIMED block, §11 criterion 8 is scoped to the payload, and no test may be named as though it proves a book opens. Gate-2 R1 rated the earlier overclaim **High**. |
 | **R7** | **The fixture is invisible to a lane.** `book.azw3` is gitignored (W14) and absent from any fresh worktree; every AZW3 connected test `assumeTrue`-**skips** without it, so an unstaged lane reports a **green run that tested nothing**. | Every connected-lane brief for WI-6/7/8 must stage it first: `cp "/Users/ll/workspace/vreader/android/app/src/androidTest/assets/foliate-spike/book.azw3" "<worktree>/android/app/src/androidTest/assets/foliate-spike/"` (gitignored ⇒ no contamination). WI-7/WI-8 additionally **assert the test RAN** — a skip is a failure, not a pass. |
 | **R8** | **Emulator flake / contention.** Compose long-press + gesture tests are timing-flaky on a loaded machine, and driving the emulator during an in-flight `connectedAndroidTest` wedges it (rule 52 Cause D). | These are click/render tests, not long-press (the flaky class), so #125's finding does not apply — but still: one test class per connected run, nothing driving the emulator concurrently, `--rerun-tasks` so Gradle can't report up-to-date on an unchanged task. |
 | **R9** | **Duplicate hrefs** (a parent and its first child commonly point at the same anchor) make the current-chapter match ambiguous. | Defined tie-break: **last match wins** (the deepest/most specific row), mirroring `tocIndexFor`'s exact-href rule (`ReaderChromeModel.kt:83-88`). Pinned by `duplicateHrefs_returnsTheLastMatch`. |
@@ -788,6 +901,13 @@ completed rather than merely that a control appeared
 - **F5** — `bookmarkRowItems(..., tocIndex = null, ...)` at `Azw3ReaderActivity.kt:153`: now that
   AZW3 has a TOC, bookmark rows *could* carry a chapter label like EPUB's. Deliberately out of
   scope (the mirror of #139's F3).
+- **F6** — **harden the bundle's own TOC walks** (§5.4 stage 1, §9 R13): make `assignIDs` /
+  `flatten` / `serializeTOC` depth-bounded, and make `view.goTo` report an unresolvable target
+  instead of swallowing it (F2's other half). Both are edits to the SHA-pinned
+  `foliate-bundle.js` and therefore need the patch chain + SHA re-pin +
+  `bundle-patch.md` update that `FoliateBundleProvenanceTest.kt:21-24` documents. **Not a
+  regression introduced by #140** — it is a pre-existing exposure #140 characterized while
+  building on top of it. File as its own row; do not fold it into this feature.
 
 ---
 
@@ -803,7 +923,11 @@ completed rather than merely that a control appeared
 5. After that jump, reopening Contents highlights **that** row (a non-zero index).
 6. A bogus/unresolvable href does **not** move the reader (negative control).
 7. An AZW3 with no usable TOC keeps the control hidden — asserted after `book-ready`.
-8. A malformed/hostile TOC payload never prevents the book from opening.
+8. A malformed/hostile TOC **payload** — wrong type, null elements, 200-deep nesting, over-cap
+   entry count — is parsed without throwing, overflowing, or driving the document to `Corrupt`,
+   proven on-device through the real message channel, not only on the JVM. **Scoped deliberately
+   to the payload**: a book file whose TOC breaks foliate's own recursive walks fails to open
+   today and still would, and #140 neither worsens nor fixes that (§5.4, R13, follow-up F6).
 9. Existing AZW3 behavior is intact: page-turn zones, position save/restore, bookmarks (create,
    list, jump), the Notes review sheet, render-death recovery.
 10. The TOC parse + flatten cost at `book-ready` is measured and recorded (no open-to-first-page
@@ -840,12 +964,35 @@ Verified symbol/signature facts (the class Gate 2 checks first):
 - `BookFormat.azw3` is the routed enum case — `MainActivity.kt:90`. ✔
 - `serializeTOC` shape `{label, href, subitems}` and its `?? ""` defaults — `foliate-bundle.js:7659-7666`. ✔
 
-Open questions the orchestrator must resolve before Gate 2 — see the report accompanying this plan.
+Verified during Gate-2 round 1 (the JS-recursion finding):
+
+- `assignIDs` recurses over `item.subitems` — `foliate-bundle.js:6101-6109`. ✔
+- `flatten` is self-recursive — `foliate-bundle.js:6110`. ✔
+- `TOCProgress.init` calls both, fed `book.toc ?? []` from `view.open` — `:6112-6114`, `:6666-6672`. ✔
+- `serializeTOC` runs at the `book-ready` post, after `bookReady = true` — `:7166-7177`. ✔
+- KF8 TOC hrefs are `kindle:pos:fid:XXXX:off:YYYYYYYYYY` — `makePosURI`, `foliate-bundle.js:3380`, used at `:3491`. ✔
+- MOBI6 TOC hrefs are `filepos:NNNN` — `foliate-bundle.js:3235`. ✔
+- EPUB-path hrefs pass through `decodeURI` — `foliate-bundle.js:1753` — so an href may carry a `#fragment`, a query, or non-ASCII characters. ✔
+- `TocProvider.kt:3` and `EmptyTocProvider.kt:1-2` both name AZW3 (and TXT/MD) as no-TOC formats — already stale since #139 WI-7. ✔
 
 ---
 
-## 13. Revision history
+## 13. Revision history / Gate-2 audit rounds
 
 | Version | Date | Change |
 | --- | --- | --- |
 | v1 | 2026-08-05 | Gate-1 draft. Not audited. |
+| v2 | 2026-08-05 | Gate-2 **round 1** dispositions applied (Codex gpt-5.5/high). Round 1 confirmed the two central claims — the AZW3 host genuinely discards the Contents callback (`Azw3ReaderActivity.kt:473`, so WI-6 aims at the right call site) and the `Fraction(0.0)` progression trap is real, with href-precedence + null-progression the right shape. 1 High, 1 Medium, 3 Low, all closed below. |
+
+### R1 finding dispositions (v1 → v2)
+
+| Sev | Finding | Disposition |
+| --- | --- | --- |
+| **High** | Hostile-TOC safety was **overclaimed**: the Kotlin depth/entry bounds sit downstream of foliate's own recursive `assignIDs` / `flatten` / `serializeTOC`, so a pathological TOC breaks inside the bundle and the Kotlin bound never runs — yet acceptance criterion 8 promised "never prevents the book from opening". | **Fixed by all three remedies the auditor offered.** (1) §5.4 rewritten into an explicit two-stage model with a `CLAIM` / `NOT CLAIMED` block; the JS stage is named, line-cited, and shown to be **pre-existing and unchanged** by #140 (all three walks already run on every open today). (2) Criterion 8, §8 row 7, WI-1's acceptance and the test name (`hostileTocPayload_neverThrows_bookStillOpens` → `…_isParsedWithoutThrowing`) are all narrowed to the **payload**. (3) New risk **R13** + named follow-up **F6** (bundle patch + SHA re-pin). (4) WI-7 gains **production-WebView coverage** for the half we do own: a 200-deep / over-cap payload injected via the shell's own `__vreaderPost` through the real `addWebMessageListener` → `FoliateMessageParser` path on-device, because ART's stack budget is not the JVM's. |
+| **Medium** | The "sequence WI-3 before WI-2" instruction lived only in prose while WI-2's machine-readable `depends: [WI-1]` was unchanged — `scripts/deps-check.sh` reads the token, so a dispatcher could start WI-2 into a known-red test. | **Fixed by moving the test, not by adding a dependency.** `everyEmittedRow_hasAJumpableTarget` is gone from WI-2; the abstract invariant is now `FoliateGoToTest.from_tocShapedLocator_alwaysResolves` in **WI-3** (self-contained), and the end-to-end version is `FoliateTocProviderTest.everyEmittedRow_resolvesToAnHrefTarget` in **WI-6**, which already depends on both. WI-2 and WI-3 are genuinely independent; no WI declares a test that is red at dispatch time. |
+| Low | `EmptyTocProvider.kt` / `TocProvider.kt` Purpose headers list AZW3 as a no-TOC format. | Added to WI-6's write-set as **comment-only** edits (rule 22). Both were **already stale for TXT/MD** since #139 WI-7, so each loses two formats. |
+| Low | `FoliateTocParser`'s signature was inconsistent (`parse(JsonElement)` vs `parse(detail: JsonObject)`) and the latter leaked the `book-ready` envelope into a would-be reusable parser. | Settled as `parse(tocElement: JsonElement?)`; `FoliateMessageParser` reads `detail["toc"]` and hands over the element. §5.1 and §6.1 now agree; a `null` element is a legal input yielding `emptyList()`, pinned by a renamed test. |
+| Low | Href-with-fragment coverage was implicit despite navigation and current-index both depending on byte-exact preservation. | Explicit cases added at all four layers — parser (WI-1), provider (WI-2, incl. the real KF8 `kindle:pos:…` and MOBI6 `filepos:…` shapes), goTo escaping/pass-through (WI-3), and index matching (WI-4, incl. "two hrefs differing only by fragment are distinct rows"). The `decodeURI` at `foliate-bundle.js:1753` is cited as why non-ASCII hrefs are in scope. |
+
+**Coordinator rulings carried forward unchanged**: no `needs-design` for depth indentation (§3.1),
+and fixture staging is mandatory in every connected lane brief (§9 R7).
