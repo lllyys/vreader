@@ -12,3 +12,9 @@
 # Example:
 #   # wired up by feature #NNN WI-3 (entry point not merged yet)
 #   SomeStagedScreen
+
+# #164 pending #171 — the diagnostics viewer (feature #164 WI-6b) ships before
+# the Settings hub that opens it exists. WI-8 wires the Settings row and REMOVES
+# this entry as part of its acceptance; the feature row is capped at DONE (never
+# VERIFIED) until then, per the plan's reachability section.
+DiagnosticsScreen
