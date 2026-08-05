@@ -9,27 +9,18 @@
 // stay alive long enough to open the incoming streams while its read grant is still
 // valid; plan D6). Nothing is ever drawn.
 //
-// Pipeline (WI-5): urisFrom(intent) → per URI { own-authority guard → BOUNDED peek →
-// pre-open size/free-space preflight → BOUNDED resolveAndOpen → in-flight slot } → ONE
-// enqueue on the process-wide coordinator → hand off to MainActivity → finish().
+// Pipeline (WI-5): urisFrom(intent) → per URI { self-targeting guard → BOUNDED peek →
+// pre-open size/free-space preflight → BOUNDED resolveAndOpen → in-flight slot } → enqueue
+// on the process-wide coordinator → hand off to MainActivity → finish().
 //
-// Key decisions:
-//   * EXACTLY ONE IncomingItem PER URI, for any batch that RUNS TO COMPLETION. No branch may
-//     `continue`, `return` or throw out of the loop: an input that yields no item yields no
-//     outcome, and the sender's URI (and the provider behind it) are attacker-controlled, so
-//     the mapping is a CATCH-ALL rather than an enumerated list of throwables. The one
-//     documented exception is a batch cancelled by this activity being destroyed mid-loop: it
-//     is abandoned wholesale — every stream closed, every slot returned, no outcome emitted.
-//   * THE SLOT IS TAKEN LAST (plan D8). Resolution runs BEFORE any admission, so a provider
-//     that parks forever can never occupy one of the app's MAX_IN_FLIGHT slots. The price is
-//     that the slot no longer caps open descriptors by itself — see `admitOne` for the exact
-//     worst case and the follow-up that would make it strict. Ownership is carried by
-//     IncomingItem.Ready and transfers to the coordinator per item, IF AND ONLY IF `enqueue`
-//     accepted it; every other exit closes the stream and releases the slot.
+// Key decisions (each stated where it is enforced; `admit` and `admitOne` carry the detail):
+//   * EXACTLY ONE IncomingItem PER URI — `admit` for the precise scope, `itemFor` for the
+//     catch-all that makes it hold against an attacker-controlled provider.
+//   * THE SLOT IS TAKEN LAST, so a stalled provider can never hold one — `admitOne`, with the
+//     open-descriptor worst case that costs and the follow-up that would make it strict.
 //   * A try/catch DOES NOT BOUND A PROVIDER. `query` / `openInputStream` are synchronous and
-//     uninterruptible, so both resolver calls run through the coordinator's BoundedCallGate —
-//     with a `dispose` hook, because a document produced after the caller gave up owns an fd
-//     nobody else would ever close.
+//     uninterruptible, so both resolver calls run through the coordinator's BoundedCallGate,
+//     with the `dispose` hook that owns a document arriving after we walked away.
 //   * STREAMS ARE OPENED WHILE THIS ACTIVITY IS ALIVE. A FLAG_GRANT_READ_URI_PERMISSION grant
 //     dies when it finishes; an already-open fd survives. Bare URIs never reach the coordinator.
 //
@@ -352,12 +343,20 @@ class ImportActivity : ComponentActivity() {
         return appPrivateRoots().any { root -> target == root || target.startsWith("$root/") }
     }
 
-    /** Internal storage plus the app-private directories on every external volume. */
+    /**
+     * Both internal roots plus the app-private directories on every external volume.
+     *
+     * `deviceProtectedDataDir` (`/data/user_de/<user>/<package>`) is a SECOND, distinct internal
+     * root, not a subdirectory of [ApplicationInfo.dataDir]. Nothing in this app stores there yet;
+     * it is listed so the guard does not quietly stop covering "our own storage" the day something
+     * does.
+     */
     private fun appPrivateRoots(): List<String> = buildList {
         fun add(file: File?) {
             runCatching { file?.canonicalPath }.getOrNull()?.let { add(it) }
         }
         add(File(applicationInfo.dataDir))
+        applicationInfo.deviceProtectedDataDir?.let { add(File(it)) }
         add(filesDir)
         add(cacheDir)
         add(noBackupFilesDir)
