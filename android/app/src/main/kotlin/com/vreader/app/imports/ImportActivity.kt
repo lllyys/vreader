@@ -14,14 +14,18 @@
 // enqueue on the process-wide coordinator → hand off to MainActivity → finish().
 //
 // Key decisions:
-//   * EXACTLY ONE IncomingItem PER URI. No branch may `continue`, `return` or throw out of
-//     the loop: an input that yields no item yields no outcome, and the sender's URI (and
-//     the provider behind it) are attacker-controlled, so the mapping is a CATCH-ALL rather
-//     than an enumerated list of throwables.
+//   * EXACTLY ONE IncomingItem PER URI, for any batch that RUNS TO COMPLETION. No branch may
+//     `continue`, `return` or throw out of the loop: an input that yields no item yields no
+//     outcome, and the sender's URI (and the provider behind it) are attacker-controlled, so
+//     the mapping is a CATCH-ALL rather than an enumerated list of throwables. The one
+//     documented exception is a batch cancelled by this activity being destroyed mid-loop: it
+//     is abandoned wholesale — every stream closed, every slot returned, no outcome emitted.
 //   * THE SLOT IS TAKEN LAST (plan D8). Resolution runs BEFORE any admission, so a provider
-//     that parks forever can never occupy one of the app's MAX_IN_FLIGHT slots. Ownership is
-//     carried by IncomingItem.Ready and transfers to the coordinator IF AND ONLY IF the batch
-//     reaches `enqueue`; every other exit closes the stream and releases the slot.
+//     that parks forever can never occupy one of the app's MAX_IN_FLIGHT slots. The price is
+//     that the slot no longer caps open descriptors by itself — see `admitOne` for the exact
+//     worst case and the follow-up that would make it strict. Ownership is carried by
+//     IncomingItem.Ready and transfers to the coordinator per item, IF AND ONLY IF `enqueue`
+//     accepted it; every other exit closes the stream and releases the slot.
 //   * A try/catch DOES NOT BOUND A PROVIDER. `query` / `openInputStream` are synchronous and
 //     uninterruptible, so both resolver calls run through the coordinator's BoundedCallGate —
 //     with a `dispose` hook, because a document produced after the caller gave up owns an fd
@@ -90,11 +94,16 @@ class ImportActivity : ComponentActivity() {
         }
         val deps = dependencies()
         lifecycleScope.launch {
-            // The loop's only blocking work is our OWN filesystem's free-space check; every
-            // untrusted provider call is relocated (and bounded) by the coordinator's gate.
-            withContext(Dispatchers.IO) { admit(uris, deps) }
-            deps.handoff(handoffIntent())
-            finish()
+            try {
+                // The loop's only blocking work is our OWN filesystem's free-space check; every
+                // untrusted provider call is relocated (and bounded) by the coordinator's gate.
+                withContext(Dispatchers.IO) { admit(uris, deps) }
+                deps.handoff(handoffIntent())
+            } finally {
+                // In a `finally` because a hand-off that throws (an activity-not-found, a wedged
+                // window manager) must not leave this invisible, translucent activity on the stack.
+                finish()
+            }
         }
     }
 
@@ -119,25 +128,55 @@ class ImportActivity : ComponentActivity() {
     }
 
     /**
-     * Builds EXACTLY ONE [IncomingItem] per URI and hands the whole batch over.
+     * Builds EXACTLY ONE [IncomingItem] per URI and hands them over, IN INPUT ORDER.
      *
-     * The `handedOff` flag is the plan's `transferred` flag, hoisted from the per-URI block to the
-     * batch: ownership passes to the coordinator if and only if `enqueue` is actually reached, and
-     * every other exit — a thrown exception, or this scope being cancelled mid-loop because the
-     * activity is being destroyed — closes each already-opened stream and returns its slot. Hoisting
-     * it is strictly stronger than the per-URI form, which would leave the window between the last
-     * URI's block ending and `enqueue` uncovered.
+     * `transferred` counts the items the coordinator has actually accepted, so ownership is tracked
+     * per item rather than per batch: every item beyond that count — after a throw, or after this
+     * scope is cancelled mid-loop because the activity is being destroyed — has its stream closed
+     * and its slot returned. Items are offered ONE AT A TIME for exactly that reason: `enqueue` is
+     * documented never to throw, but a hostile stream's `close()` can still push a process-fatal
+     * error out of its rejection path, and a single batch call would leave us unable to tell which
+     * items had already changed hands (double-releasing is harmless — a slot release is idempotent
+     * — but double-closing a stream the coordinator now owns is not ours to do).
+     *
+     * SCOPE OF THE INVARIANT: one outcome per URI holds for a batch that RUNS TO COMPLETION. A batch
+     * cancelled by the activity's destruction is abandoned wholesale — nothing is enqueued, every
+     * opened stream is closed and every slot returned, and no outcome is emitted. That is the plan's
+     * chosen behaviour for a mid-loop cancellation (the alternative, importing documents for a user
+     * who has already navigated away, was not the trade it made) and it is what
+     * `aCancelledBatchLeaksNoSlotAndNoDescriptor` pins.
      */
     private suspend fun admit(uris: List<Uri>, deps: ImportDependencies) {
         val items = ArrayList<IncomingItem>(uris.size)
-        var handedOff = false
+        var transferred = 0
         try {
             for (uri in uris) items += itemFor(uri, deps)
-            deps.coordinator.enqueue(items)     // never suspends, never throws
-            handedOff = true
+            while (transferred < items.size) {
+                deps.coordinator.enqueue(listOf(items[transferred]))   // never suspends
+                transferred++
+            }
         } finally {
-            if (!handedOff) items.forEach(::release)
+            releaseAll(items.subList(transferred, items.size))
         }
+    }
+
+    /**
+     * Releases every item the coordinator never received.
+     *
+     * Per item, isolated: [closeQuietly] deliberately rethrows a process-fatal error, and letting
+     * that abort the loop would strand every later item's slot. The first one is remembered and
+     * rethrown once the rest have been released.
+     */
+    private fun releaseAll(items: List<IncomingItem>) {
+        var fatal: Throwable? = null
+        for (item in items) {
+            try {
+                release(item)
+            } catch (e: Throwable) {
+                if (fatal == null) fatal = e
+            }
+        }
+        fatal?.let { throw it }
     }
 
     /** An item the coordinator never received: close its descriptor, give its slot back. */
@@ -175,6 +214,13 @@ class ImportActivity : ComponentActivity() {
         if (isOwnAuthority(uri.authority)) return unreadable()
 
         val gate = deps.coordinator.boundedCalls
+        // ADMISSION FOR THE RESOLVER CALL ITSELF. Taking the import slot last (below) means a
+        // stalled URI never reaches `acquireSlot`, which is the only other place the abandoned-call
+        // threshold is consulted — so without this check a hostile batch of parking providers would
+        // face no ceiling at all. Each abandoned call costs a parked thread (and possibly an fd)
+        // until the provider returns, and the count self-heals when it does.
+        if (gate.abandonedCalls >= IncomingImportCoordinator.MAX_ABANDONED_CALLS) return failed()
+
         val metadata = when (val call = gate.call(deps.resolveTimeoutMillis, PEEK) { deps.peek(uri) }) {
             is BoundedCall.Completed -> call.value
             is BoundedCall.Failed -> return unreadable()
@@ -203,15 +249,34 @@ class ImportActivity : ComponentActivity() {
             BoundedCall.TimedOut -> return failed()
         }
 
-        // ADMISSION LAST (plan D8's gap): only a document that actually resolved takes one of the
-        // MAX_IN_FLIGHT slots, so a provider stalled in resolution can never hold one. There is no
-        // suspension point between here and the return, so the slot cannot leak in between; the
-        // batch-level `finally` covers everything after.
+        // ADMISSION LAST (plan D8's gap): only a document that actually RESOLVED takes one of the
+        // MAX_IN_FLIGHT slots, so a provider stalled in resolution can never hold one.
+        //
+        // What that costs, stated honestly: the slot no longer precedes the open, so it does not by
+        // itself cap open descriptors. Per activity the window is ONE (this loop is sequential and
+        // the stream is closed immediately if admission is refused); across N concurrently-launched
+        // ImportActivity instances it is N transient descriptors, plus whatever sits inside calls
+        // this app has already walked away from — which is what the abandoned-call check above
+        // bounds. Making that ceiling strict belongs to BoundedCallGate, which admits a call's job
+        // before consulting any budget (Gate-4 round 1, CRITICAL — reported as a follow-up against
+        // IncomingImportCoordinator, outside this WI's write-set).
         val slot = deps.coordinator.acquireSlot() ?: run {
             closeQuietly(pending.stream)
             return failed()
         }
-        return IncomingItem.Ready(pending, slot)
+        // The slot exists only in a local until the item carrying it is returned; an allocation
+        // failure in between would otherwise strand it where the caller's cleanup cannot see it.
+        var carried = false
+        try {
+            val ready = IncomingItem.Ready(pending, slot)
+            carried = true
+            return ready
+        } finally {
+            if (!carried) {
+                closeQuietly(pending.stream)
+                slot.release()
+            }
+        }
     }
 
     /**
@@ -228,12 +293,18 @@ class ImportActivity : ComponentActivity() {
     }
 
     /**
-     * Is [authority] served by one of OUR OWN providers? Resolved through the PackageManager rather
-     * than matched against a literal suffix, so both FileProviders this app declares (books and
-     * diagnostics exports) — and any later one — are covered without a second place to update.
+     * Is [authority] served by one of OUR OWN providers?
+     *
+     * The literal application-ID prefix is checked FIRST so the guard cannot fail OPEN: every
+     * authority this app declares is `<applicationId>.<name>` (books, diagnostics exports), and a
+     * PackageManager lookup that throws or returns null would otherwise wave those through. The
+     * lookup then runs as defence in depth, for an authority of ours that ever stops following the
+     * naming convention. A foreign app squatting on our prefix is rejected too — failing closed on
+     * an authority that is pretending to be ours is the safe direction.
      */
     private fun isOwnAuthority(authority: String?): Boolean {
         if (authority.isNullOrEmpty()) return false
+        if (authority == packageName || authority.startsWith("$packageName.")) return true
         @Suppress("DEPRECATION")
         val info = runCatching { packageManager.resolveContentProvider(authority, 0) }.getOrNull()
         return info?.packageName == packageName

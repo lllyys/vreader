@@ -54,10 +54,13 @@ import androidx.test.runner.lifecycle.Stage
 import com.vreader.app.MainActivity
 import com.vreader.app.VReaderApp
 import com.vreader.app.data.BookImporter
+import com.vreader.app.data.CollectionRepository
 import com.vreader.app.data.ImportException
 import com.vreader.app.data.LibraryRepository
 import com.vreader.app.data.VReaderDatabase
 import com.vreader.app.importFailureMessage
+import com.vreader.app.library.LibraryEvent
+import com.vreader.app.library.LibraryViewModel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExecutorCoroutineDispatcher
@@ -421,19 +424,95 @@ class IncomingIntentImportConnectedTest {
         assertTrue("FLAG_ACTIVITY_SINGLE_TOP", intent.flags and Intent.FLAG_ACTIVITY_SINGLE_TOP != 0)
     }
 
+    /**
+     * PERMIT LEAK across a mid-loop cancellation: one URI has already been opened and admitted when
+     * the activity is destroyed while the next one's provider is parked. Nothing may survive that —
+     * not the descriptor, not the slot — and the batch is abandoned wholesale, which is the exact
+     * scope of the one-outcome-per-URI invariant.
+     */
+    @Test
+    fun aCancelledBatchLeaksNoSlotAndNoDescriptor() {
+        val opened = RecordingStream(bookBytes)
+        val parked = park()
+        val entered = CountDownLatch(1)
+        installDeps(
+            peek = { uri ->
+                if (uri.host == "stall") {
+                    entered.countDown()
+                    parked.await()
+                }
+                metadata
+            },
+            open = { uri -> pending(uri, "good.epub", opened) },
+        )
+
+        launchImport(
+            Intent(Intent.ACTION_SEND_MULTIPLE)
+                .setType("application/epub+zip")
+                .putParcelableArrayListExtra(
+                    Intent.EXTRA_STREAM,
+                    arrayListOf(Uri.parse("content://good/a.epub"), Uri.parse("content://stall/b.epub")),
+                ),
+        )
+        assertTrue("the second URI never reached the provider", entered.await(30, TimeUnit.SECONDS))
+
+        finishAll<ImportActivity>()      // destroyed mid-loop, with URI 1 already opened + admitted
+        awaitNoImportActivity()
+
+        awaitTrue("the already-opened descriptor was never closed") { opened.closed.get() }
+        val held = (0 until IncomingImportCoordinator.MAX_IN_FLIGHT).map {
+            requireNotNull(coordinator.acquireSlot()) { "slot $it leaked by the cancelled batch" }
+        }
+        held.forEach { it.release() }
+        assertTrue("a cancelled batch enqueues nothing", outcomes.isEmpty())
+        assertTrue("a cancelled batch never hands off", handoffs.isEmpty())
+    }
+
     // ── RULE 51 — the shipped toast copy, and silence everywhere else ────────────────────
 
     /**
      * The inbound feedback states (in-progress / added / already-in-library / unsupported) are
      * UNDESIGNED and blocked on needs-design #2030. Failures therefore reuse the SAF-import copy
      * shipped in LibraryViewModel.import VERBATIM, and success — new OR duplicate — is SILENT.
+     *
+     * The expectations are DERIVED, not retyped: the shipped ViewModel is driven through two real
+     * failures and the strings it emits are what `importFailureMessage` must return. Asserting the
+     * same literals twice would pass however far the two copies drifted apart.
      */
     @Test
+    @SdkSuppress(minSdkVersion = Build.VERSION_CODES.Q)
     fun failureOutcomesReuseTheShippedToastCopyAndSuccessIsSilent() {
-        assertEquals("Unsupported format: notes.docx", importFailureMessage(IncomingImportOutcome.Unsupported("notes.docx")))
+        val viewModel = LibraryViewModel(
+            repository = repository,
+            importer = BookImporter(booksDir, repository, lane),
+            collectionRepository = CollectionRepository(db.collectionDao()),
+            resolver = context.contentResolver,
+        )
+        val emitted = CopyOnWriteArrayList<String>()
+        val collector = appScope.launch {
+            viewModel.events.collect { if (it is LibraryEvent.ImportFailed) emitted += it.message }
+        }
+
+        // (1) a document no provider will hand over — the SHIPPED generic failure copy.
+        viewModel.import(Uri.parse("content://com.example.absent/missing.epub"))
+        awaitTrue("the shipped ViewModel emitted no generic failure") { emitted.size >= 1 }
+        val generic = emitted[0]
+
+        // (2) a REAL, openable document whose extension names no known format — the SHIPPED
+        // unsupported copy, carrying the provider's own display name.
+        val row = insertDownload("wi5-copy-${UUID.randomUUID()}.docx", bookBytes, "application/octet-stream")
+        val storedName = displayNameOf(row)
+        viewModel.import(row)
+        awaitTrue("the shipped ViewModel emitted no unsupported failure") { emitted.size >= 2 }
+        val unsupported = emitted[1]
+        collector.cancel()
+
+        assertEquals(generic, importFailureMessage(IncomingImportOutcome.Failed))
+        assertEquals(generic, importFailureMessage(IncomingImportOutcome.TooLarge))
+        assertEquals(unsupported, importFailureMessage(IncomingImportOutcome.Unsupported(storedName)))
+        // The one string with no reachable SAF trigger (`openInputStream` returning null rather
+        // than throwing) is pinned literally against LibraryViewModel.import's own branch.
         assertEquals("Couldn't open the file", importFailureMessage(IncomingImportOutcome.Unreadable))
-        assertEquals("Import failed", importFailureMessage(IncomingImportOutcome.Failed))
-        assertEquals("Import failed", importFailureMessage(IncomingImportOutcome.TooLarge))
         assertNull(
             "a new import is silent",
             importFailureMessage(IncomingImportOutcome.Imported("k", BookFormat.epub, false)),
@@ -506,11 +585,15 @@ class IncomingIntentImportConnectedTest {
     }
 
     @RequiresApi(Build.VERSION_CODES.Q)
-    private fun insertDownload(name: String, bytes: ByteArray): Uri {
+    private fun insertDownload(
+        name: String,
+        bytes: ByteArray,
+        mime: String = "application/epub+zip",
+    ): Uri {
         val resolver = context.contentResolver
         val values = ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, name)
-            put(MediaStore.MediaColumns.MIME_TYPE, "application/epub+zip")
+            put(MediaStore.MediaColumns.MIME_TYPE, mime)
             put(MediaStore.MediaColumns.IS_PENDING, 1)
         }
         val collection = MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
@@ -522,6 +605,15 @@ class IncomingIntentImportConnectedTest {
         values.put(MediaStore.MediaColumns.IS_PENDING, 0)
         resolver.update(uri, values, null, null)
         return uri
+    }
+
+    /** The name the provider ACTUALLY stored — MediaStore may adjust the one it was handed. */
+    private fun displayNameOf(uri: Uri): String {
+        val projection = arrayOf(MediaStore.MediaColumns.DISPLAY_NAME)
+        context.contentResolver.query(uri, projection, null, null, null)!!.use { cursor ->
+            assertTrue("the inserted row disappeared", cursor.moveToFirst())
+            return cursor.getString(0)
+        }
     }
 
     private fun awaitNewBook(repo: LibraryRepository, before: Set<String>): com.vreader.app.data.Book {
