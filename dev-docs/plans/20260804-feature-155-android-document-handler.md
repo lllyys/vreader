@@ -258,7 +258,35 @@ at import time. The sniffer therefore uses **no ZIP library and never inflates a
 - Every read is bounded by the buffer; every malformed-structure path returns `null` rather than
   throwing.
 
+**Two limits accepted as inherent (WI-3, 2026-08-05):**
+
+- **The OCF check is a bounded-prefix format HINT, not EPUB validation.** No 4096-byte prefix can
+  prove a central directory exists. Full validation belongs to the reader that opens the book.
+- **A file of EXACTLY 4096 bytes whose last byte begins an incomplete UTF-8/UTF-16 sequence is
+  hinted `txt`.** Inside a 4096-byte read ceiling it is *observationally identical* to a longer file
+  cut at the boundary (`available()` and declared metadata are attacker-influenced). Resolving it
+  needs either a 4097th byte — weakening the very ceiling the sniffer exists to guarantee — or false
+  negatives on every boundary-cut CJK text file. Confirmed inherent and Low by the Gate-4 round-3
+  auditor; pinned by `aFileExactlyTheProbeLengthWithATruncatedTailIsAcceptedAsText`.
+
 ### D8 — Size and time bounds on an untrusted stream (round 1, H5)
+
+> **OPEN GAP — added 2026-08-05 from WI-3's Gate-4 (HIGH, confirmed independently in all 3 rounds).
+> BLOCKS WI-5.** The bounds below protect the *copy*; **resolution itself is unprotected**.
+> `ContentResolver.query` / `openInputStream` / `getType` and the sniffer's probe read are
+> **synchronous and uninterruptible**: `withContext(Dispatchers.IO)` relocates the blockage without
+> bounding it, and coroutine cancellation cannot interrupt a blocking `InputStream.read` — the
+> caller unwinds while the thread stays parked (verified at `IncomingBookResolver.kt:107`). D8's
+> stall watchdog lives in `IncomingImportCoordinator`, which only receives an item **after**
+> resolution completed, and WI-5 step 2b acquires a permit **before** any stream exists. So a batch
+> of hostile URIs can hold every inbound permit indefinitely and `ImportActivity` never finishes.
+>
+> **Required before WI-5 ships**: extend the isolated per-item worker/watchdog across
+> `peek`/`resolveAndOpen`, with timeout-to-outcome routing and late-result stream disposal. A
+> *resolver-local* executor+timeout was considered and **rejected by the auditor**: it trades a
+> visible hang for leaked or poisoned workers — resource exhaustion, or permanent import denial once
+> the pool is full. The fix necessarily spans `ImportActivity.kt` (WI-5) and
+> `IncomingImportCoordinator.kt` (WI-4), which is why WI-3 escalated instead of patching locally.
 
 An exported entry point must not let a hostile or broken provider fill the disk. **Who does what
 matters** — round 2 (M2) caught v2 claiming a preflight "before opening" that sat in the coordinator,
