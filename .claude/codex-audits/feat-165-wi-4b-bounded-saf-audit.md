@@ -1,8 +1,40 @@
 ---
 branch: feat/165-wi-4b-bounded-saf
 threadId: 019fd3a5-d4c0-74d0-9111-ada30767fc68
-rounds: 3
-final_verdict: block-recommended
+rounds: 4
+final_verdict: follow-up-recommended
+
+## Round 4 — orchestrator-run confirming round (2026-08-06)
+
+The lane fixed round 3's High after the verdict and returned `blocked` rather than certify its own
+fix. Correct, and it paid: round 4 confirmed the fix **and found one new HIGH — in the shipped gate,
+outside this WI's write-set.**
+
+**Confirmed:**
+
+- **Round 3's leak fix is complete for the common post-timeout path** (provider returns after
+  `givenUp` is set), and **`CloseOnce` is correct** for rescue / dispose / ordinary-close races.
+- **All six SAF sites are bounded through the injected gate**, with resolver calls confined to
+  `ContentResolverSafPort`, and **no second production annotations gate exists** (§8.5 holds).
+- **Both survived-mutation fixes are genuine**: the `AnnotationsParser` seam really does kill the
+  sanitize mutation (the old assertion was proving *WI-3's* downstream call, not this boundary's),
+  and the saturated-lane cases really do kill the droppable-dispose mutation — **without weakening
+  the older assertions**.
+
+**New HIGH, filed as bug #371 / GH #2101 rather than patched here:**
+
+> `IncomingImportCoordinator.kt:251` — `dispose` is **not guaranteed to run on the abandoned job's
+> own thread**. If the job has stored `produced` and the caller times out before `await()` settles,
+> `giveUp()` runs `disposeOnce()` **synchronously on the caller** — so a blocking close can park the
+> caller instead of merely avoiding `DiscardPolicy`.
+
+**Why filed, not fixed:** `imports/**` is read-only for #165 by design, and the fix changes the
+**shared** gate — it must be evaluated against **both** callers. It is also **pre-existing and live**:
+#155's shipped, `VERIFIED` inbound import passes `dispose = { it?.stream?.close() }` at
+`ImportActivity.kt:249`, so blocking #165 on it would not reduce exposure, only delay #165.
+
+`final_verdict` updated to `follow-up-recommended`: zero open findings **inside this WI's write-set**,
+with the one out-of-scope HIGH tracked.
 ---
 
 # Gate 4 — feature #165 WI-4b, the bounded SAF I/O boundary
