@@ -1,9 +1,39 @@
 ---
 branch: feat/165-wi-5-preview-sheet
 threadId: 019fd35d-aa55-7301-b4ae-25b9cee3aa58
-rounds: 3
-final_verdict: block-recommended
+rounds: 4
+final_verdict: follow-up-recommended
 ---
+
+## Round 4 — orchestrator-run disposition adjudication (2026-08-06): **VERDICT: clean**
+
+Round 3 ended at `block-recommended`, but the block is a **design** blocker, not a code defect. The
+lane filed `needs-design` **#2099** in-session and unconditionally (rule 51), and correctly declined
+to self-certify the disposition.
+
+The orchestrator verified the artboard claim directly rather than accepting it:
+`vreader-annotation-import.jsx:554` reads `{error ? 'Import 0 items' : 'Import 56 items'}` — the zero
+label is **gated on `error`**, so a *successful* parse with zero importable rows genuinely has no
+approved copy. #2099 confirmed OPEN with `enhancement` + `needs-design`.
+
+Round 4 was scoped to the disposition, **not** to re-litigating the gap:
+
+1. **Shippable with that state blocked — yes.** No path in the shipped code renders an undesigned
+   state or invents copy today. This is the same disposition #165's **export** half already ships
+   under (`needs-design` #2085, foundation-only, row capped at `DONE`).
+2. **The designed states are sound.** Count provenance verified: every rendered count comes from the
+   envelope produced by the **real** `AnnotationsImportReader` over encoded bytes, with fixtures
+   shaped so raw=17, highlights=5, highlights+notes=8, skipped=7 and sample=3 are **all distinct**
+   from importable=10 — so a re-derivation is caught by name — and `onConfirm` returns the **same**
+   `ImportPreview` instance, so a caller cannot rebuild an envelope from displayed numbers.
+3. **Round 3's own finding was handled honestly.** Round 2's local `takeLast(4096)` is fully deleted;
+   nothing in this WI shadows the `imports/` sanitizer with a divergent rule. (It kept a long leaf's
+   **suffix** where the shipped sanitizer keeps its **prefix + extension** — two divergent bounds on
+   one value being worse than one.)
+4. **Nothing new** introduced across the three rounds.
+
+`final_verdict` updated to `follow-up-recommended` on a **clean independent disposition**, not an
+override. The zero-importable state remains blocked on #2099 and belongs to a later WI.
 
 # Gate-4 audit — feature #165 WI-5 (`AnnotationImportPreviewSheet`)
 
