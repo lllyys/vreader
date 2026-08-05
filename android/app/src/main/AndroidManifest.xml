@@ -211,5 +211,21 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
+        <!-- feature #164 WI-7 — share the diagnostics export. A SECOND FileProvider, scoped to
+             filesDir/diagnostics (@xml/diagnostics_paths), rather than a new root on the book
+             provider's @xml/file_paths (plan section 6.4): each provider then grants exactly one
+             directory, and neither feature can widen the other's scope. No DISPLAY_NAME override —
+             the export's on-disk name is already the name a receiver should show.
+             exported=false + grantUriPermissions: only intents WE launch (ACTION_SEND with the read
+             grant) can read the export. -->
+        <provider
+            android:name=".diagnostics.DiagnosticsFileProvider"
+            android:authorities="${applicationId}.diagnosticsprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/diagnostics_paths" />
+        </provider>
     </application>
 </manifest>

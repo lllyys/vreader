@@ -30,6 +30,14 @@ import com.vreader.app.bilingual.ChapterTextProvider
 import com.vreader.app.bilingual.ChapterTranslationPrefetcher
 import com.vreader.app.bilingual.ChapterTranslationStore
 import com.vreader.app.bilingual.PerBookBilingualStore
+import com.vreader.app.diagnostics.CompositeDiagnosticsSource
+import com.vreader.app.diagnostics.DiagnosticsExportWriter
+import com.vreader.app.diagnostics.DiagnosticsLogSource
+import com.vreader.app.diagnostics.DiagnosticsLogStore
+import com.vreader.app.diagnostics.DiagnosticsViewModel
+import com.vreader.app.diagnostics.LogcatDiagnosticsSource
+import com.vreader.app.diagnostics.RingBufferDiagnosticsSource
+import com.vreader.app.diagnostics.VLog
 import com.vreader.app.stats.ReadingStatsRepository
 import com.vreader.app.stats.ReadingTimeTracker
 import com.vreader.app.stats.clock.SystemDateClock
@@ -392,6 +400,46 @@ class AppContainer(
         IncomingImportCoordinator.sweepStaleTempFiles(booksDir)
     }
 
+    // ── feature #164 WI-7 — the diagnostics capture + export graph ────────────────────────
+    // The ring is the capture FLOOR: VReaderApp.onCreate installs it as VLog's sink, so every
+    // deliberate log call this app makes is recorded in-process even where the platform refuses an
+    // app its own logcat. It is a process singleton for the obvious reason — a second ring would
+    // silently hold half the breadcrumbs.
+
+    /** [VLog]'s sink, installed once from [VReaderApp.onCreate]. */
+    val diagnosticsRing: RingBufferDiagnosticsSource by lazy { RingBufferDiagnosticsSource() }
+
+    /**
+     * Platform log FIRST, in-process ring second: logcat retains entries across process launches
+     * (the pre-crash trail the ring cannot have), while the ring is the fallback that keeps the
+     * viewer useful when logcat is denied and carries the untruncated copy of any long payload.
+     */
+    private val diagnosticsSource: DiagnosticsLogSource by lazy {
+        CompositeDiagnosticsSource(primary = LogcatDiagnosticsSource(), secondary = diagnosticsRing)
+    }
+
+    /** The UI-facing read + redact boundary (its `lastLoadDegraded` latch is per-store). */
+    val diagnosticsStore: DiagnosticsLogStore by lazy { DiagnosticsLogStore(diagnosticsSource) }
+
+    /**
+     * Writes the export into `filesDir/diagnostics` — the ONE directory `@xml/diagnostics_paths`
+     * grants, single-sourced through [DiagnosticsExportWriter.DIRECTORY_NAME].
+     *
+     * `renderPayload` is the SHARED store's `exportText`, which redacts every entry: that wiring is
+     * what makes redaction structural rather than a caller convention, so no code path can put an
+     * unredacted byte in a file that is about to be handed to another app.
+     */
+    val diagnosticsExportWriter: DiagnosticsExportWriter by lazy {
+        DiagnosticsExportWriter(
+            dir = File(appContext.filesDir, DiagnosticsExportWriter.DIRECTORY_NAME),
+            renderPayload = diagnosticsStore::exportText,
+            ioDispatcher = Dispatchers.IO,
+        )
+    }
+
+    /** A fresh viewer ViewModel per screen over the SHARED store — never a singleton. */
+    fun diagnosticsViewModel(): DiagnosticsViewModel = DiagnosticsViewModel(diagnosticsStore)
+
     /** In-memory last reading char-offset per fingerprintKey. Written synchronously on
      *  save so a fast rotation / reopen restores the LATEST position without waiting for
      *  the async Room write to commit; Room remains the durable store across process death. */
@@ -426,6 +474,11 @@ class VReaderApp : Application() {
     override fun onCreate() {
         super.onCreate()
         container = AppContainer(this)
+        // feature #164 WI-7 — install the capture floor FIRST, so anything the rest of onCreate
+        // logs (and everything after it) is recorded. Without this call VLog still forwards to
+        // logcat but records nothing, and the diagnostics viewer/export lose the in-process trail
+        // entirely — which is what AppContainerDiagnosticsWiringTest exists to catch.
+        VLog.install(container.diagnosticsRing)
         // feature #128 WI-5 — eagerly start the cross-book search-index collector (idempotent).
         container.startSearchIndexing()
     }
