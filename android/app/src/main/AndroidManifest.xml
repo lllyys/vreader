@@ -41,6 +41,163 @@
         <activity
             android:name=".reader.Azw3ReaderActivity"
             android:exported="false" />
+        <!-- feature #155 — inbound document handler ("Open with VReader" / "Share to
+             VReader"). The ONLY exported activity besides the launcher, and the reason
+             it is separate from MainActivity: every activity is launchMode `standard`,
+             so a VIEW filter on MainActivity would stack a second MainActivity over an
+             open reader. taskAffinity="" + noHistory + excludeFromRecents keep it out of
+             VReader's task and out of Recents; the theme is TRANSLUCENT, never NoDisplay
+             (a no-display activity must finish before becoming visible, but this one has
+             to stay alive while it opens the incoming streams). It declares no label, so
+             the chooser shows the application label.
+
+             FOUR SEPARATE FILTERS, not one: <data> elements MERGE into a cross-product
+             within a single <intent-filter>, so MIME matching (A/C/D) and pathPattern
+             matching (B) must never share a filter — combining them would silently
+             synthesise match rules nobody wrote. -->
+        <activity
+            android:name=".imports.ImportActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@style/Theme.VReader.Import">
+
+            <!-- A — VIEW by MIME. BROWSABLE lets a browser download open into VReader.
+                 `file` is carried here only for legacy senders (it is useless in filter B,
+                 where an empty authority can never match host="*"). -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="content" />
+                <data android:scheme="file" />
+                <data android:mimeType="application/epub+zip" />
+                <data android:mimeType="application/x-epub+zip" />
+                <data android:mimeType="application/epub" />
+                <data android:mimeType="application/pdf" />
+                <data android:mimeType="application/x-pdf" />
+                <data android:mimeType="text/plain" />
+                <data android:mimeType="text/markdown" />
+                <data android:mimeType="text/x-markdown" />
+                <data android:mimeType="application/vnd.amazon.ebook" />
+                <data android:mimeType="application/vnd.amazon.mobi8-ebook" />
+                <data android:mimeType="application/x-mobipocket-ebook" />
+                <data android:mimeType="application/octet-stream" />
+            </intent-filter>
+
+            <!-- B — VIEW by extension, for TYPELESS senders only (a filter with no
+                 mimeType cannot match an intent that has one). content:// only, because
+                 file:// has an empty authority that host="*" can never match.
+                 PATTERN_SIMPLE_GLOB is not a regex and has no reliable backtracking:
+                 `.*\\.epub` stops at the FIRST dot, so each extension is enumerated with
+                 one, two and three `.*\\.` repeats to survive earlier dots in the path,
+                 and in lowercase AND uppercase because pathPattern is case-sensitive.
+                 pathSuffix / pathAdvancedPattern are API 31+ and would be IGNORED on
+                 API 26-30, silently widening this filter to any content URI — not used. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="content" />
+                <data android:host="*" />
+                <data android:pathPattern=".*\\.epub" />
+                <data android:pathPattern=".*\\..*\\.epub" />
+                <data android:pathPattern=".*\\..*\\..*\\.epub" />
+                <data android:pathPattern=".*\\.EPUB" />
+                <data android:pathPattern=".*\\..*\\.EPUB" />
+                <data android:pathPattern=".*\\..*\\..*\\.EPUB" />
+                <data android:pathPattern=".*\\.pdf" />
+                <data android:pathPattern=".*\\..*\\.pdf" />
+                <data android:pathPattern=".*\\..*\\..*\\.pdf" />
+                <data android:pathPattern=".*\\.PDF" />
+                <data android:pathPattern=".*\\..*\\.PDF" />
+                <data android:pathPattern=".*\\..*\\..*\\.PDF" />
+                <data android:pathPattern=".*\\.txt" />
+                <data android:pathPattern=".*\\..*\\.txt" />
+                <data android:pathPattern=".*\\..*\\..*\\.txt" />
+                <data android:pathPattern=".*\\.TXT" />
+                <data android:pathPattern=".*\\..*\\.TXT" />
+                <data android:pathPattern=".*\\..*\\..*\\.TXT" />
+                <data android:pathPattern=".*\\.md" />
+                <data android:pathPattern=".*\\..*\\.md" />
+                <data android:pathPattern=".*\\..*\\..*\\.md" />
+                <data android:pathPattern=".*\\.MD" />
+                <data android:pathPattern=".*\\..*\\.MD" />
+                <data android:pathPattern=".*\\..*\\..*\\.MD" />
+                <data android:pathPattern=".*\\.markdown" />
+                <data android:pathPattern=".*\\..*\\.markdown" />
+                <data android:pathPattern=".*\\..*\\..*\\.markdown" />
+                <data android:pathPattern=".*\\.MARKDOWN" />
+                <data android:pathPattern=".*\\..*\\.MARKDOWN" />
+                <data android:pathPattern=".*\\..*\\..*\\.MARKDOWN" />
+                <data android:pathPattern=".*\\.azw3" />
+                <data android:pathPattern=".*\\..*\\.azw3" />
+                <data android:pathPattern=".*\\..*\\..*\\.azw3" />
+                <data android:pathPattern=".*\\.AZW3" />
+                <data android:pathPattern=".*\\..*\\.AZW3" />
+                <data android:pathPattern=".*\\..*\\..*\\.AZW3" />
+                <data android:pathPattern=".*\\.azw" />
+                <data android:pathPattern=".*\\..*\\.azw" />
+                <data android:pathPattern=".*\\..*\\..*\\.azw" />
+                <data android:pathPattern=".*\\.AZW" />
+                <data android:pathPattern=".*\\..*\\.AZW" />
+                <data android:pathPattern=".*\\..*\\..*\\.AZW" />
+                <data android:pathPattern=".*\\.mobi" />
+                <data android:pathPattern=".*\\..*\\.mobi" />
+                <data android:pathPattern=".*\\..*\\..*\\.mobi" />
+                <data android:pathPattern=".*\\.MOBI" />
+                <data android:pathPattern=".*\\..*\\.MOBI" />
+                <data android:pathPattern=".*\\..*\\..*\\.MOBI" />
+                <data android:pathPattern=".*\\.prc" />
+                <data android:pathPattern=".*\\..*\\.prc" />
+                <data android:pathPattern=".*\\..*\\..*\\.prc" />
+                <data android:pathPattern=".*\\.PRC" />
+                <data android:pathPattern=".*\\..*\\.PRC" />
+                <data android:pathPattern=".*\\..*\\..*\\.PRC" />
+            </intent-filter>
+
+            <!-- C — SEND. Type-only: the payload is EXTRA_STREAM/ClipData, never
+                 intent.data, so no scheme/host/path applies. Deliberately NOT BROWSABLE.
+                 text/plain and application/octet-stream are accepted here because that is
+                 how file managers really share .txt/.md and untyped EPUB/AZW3; the
+                 "this is a text snippet, not a file" discrimination happens at RUNTIME
+                 (no EXTRA_STREAM and no ClipData Uri ⇒ nothing to import). -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="application/epub+zip" />
+                <data android:mimeType="application/x-epub+zip" />
+                <data android:mimeType="application/epub" />
+                <data android:mimeType="application/pdf" />
+                <data android:mimeType="application/x-pdf" />
+                <data android:mimeType="text/plain" />
+                <data android:mimeType="text/markdown" />
+                <data android:mimeType="text/x-markdown" />
+                <data android:mimeType="application/vnd.amazon.ebook" />
+                <data android:mimeType="application/vnd.amazon.mobi8-ebook" />
+                <data android:mimeType="application/x-mobipocket-ebook" />
+                <data android:mimeType="application/octet-stream" />
+            </intent-filter>
+
+            <!-- D — SEND_MULTIPLE. Same type list as C. -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="application/epub+zip" />
+                <data android:mimeType="application/x-epub+zip" />
+                <data android:mimeType="application/epub" />
+                <data android:mimeType="application/pdf" />
+                <data android:mimeType="application/x-pdf" />
+                <data android:mimeType="text/plain" />
+                <data android:mimeType="text/markdown" />
+                <data android:mimeType="text/x-markdown" />
+                <data android:mimeType="application/vnd.amazon.ebook" />
+                <data android:mimeType="application/vnd.amazon.mobi8-ebook" />
+                <data android:mimeType="application/x-mobipocket-ebook" />
+                <data android:mimeType="application/octet-stream" />
+            </intent-filter>
+        </activity>
         <!-- feature #134 WI-2 — share book file. A FileProvider scoped to filesDir/books
              (@xml/file_paths) with a DISPLAY_NAME override so a shared book reports title.ext.
              exported=false + grantUriPermissions: only intents WE launch (ACTION_SEND with the
