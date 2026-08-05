@@ -100,7 +100,8 @@ class JustificationEpubStyleSpikeTest {
                 var o={found:!!r, pCount:document.querySelectorAll('p').length,
                        textLen:(r?r.len:-1), sheets:sheets.join('|'),
                        lang:(root.getAttribute('lang')||root.getAttribute('xml:lang')||''),
-                       rootStyle:(root.getAttribute('style')||''),
+                       rootStyle:(root.getAttribute('style')||''), docHref:location.pathname,
+                       textHead:(r?(r.el.textContent||'').replace(/\s+/g,' ').trim().substring(0,40):''),
                        bodyTextAlign:bcs.textAlign, bodyLineHeight:bcs.lineHeight, bodyFontSize:bcs.fontSize};
                 if(r){var cs=getComputedStyle(r.el);
                   o.textAlign=cs.textAlign; o.lineHeight=cs.lineHeight; o.fontSize=cs.fontSize;
@@ -166,57 +167,115 @@ class JustificationEpubStyleSpikeTest {
     /** Evaluate [js] against the live navigator ON THE MAIN THREAD (R2BasicWebView.checkThread throws
      *  off-main) and block the test thread for the result. */
     private fun evalJs(scenario: ActivityScenario<ReaderActivity>, js: String): String? {
-        var result: String? = null
+        // A per-call holder: on timeout we must NOT read a value a still-running coroutine may write
+        // later, or a slow evaluation would surface as a stale reading in a subsequent poll.
+        val holder = java.util.concurrent.atomic.AtomicReference<String?>(null)
         val done = CountDownLatch(1)
         scenario.onActivity { act ->
             val nav = act.supportFragmentManager.findFragmentByTag(READER_TAG) as? EpubNavigatorFragment
             if (nav == null) { done.countDown(); return@onActivity }
             act.lifecycleScope.launch(Dispatchers.Main.immediate) {
-                result = runCatching { nav.evaluateJavascript(js) }.getOrNull()
+                holder.set(runCatching { nav.evaluateJavascript(js) }.getOrNull())
                 done.countDown()
             }
         }
-        done.await(20, TimeUnit.SECONDS)
-        return result
+        if (!done.await(20, TimeUnit.SECONDS)) {
+            Log.w(TAG, "evalJs timed out after 20s — discarding this sample")
+            return null
+        }
+        return holder.get()
     }
 
     /**
-     * Poll the DOM until it is SETTLED — a `<p>` is present and the `<html>` inline style stops changing
-     * between consecutive samples. A `submitPreferences` reflow rewrites that style attribute and
-     * re-renders, so sampling on a fixed sleep could read a half-applied DOM.
+     * Poll the DOM until it is SETTLED **in the state we asked for**.
+     *
+     * The first version of this helper only waited for the `<html>` inline style to stop changing, which
+     * meant it could return the OLD state before a `submitPreferences` / store emission had been applied
+     * at all — and every one of this class's conclusions is a *negative* ("the computed value did not
+     * change"), so that would have been a silent false-confirmation machine. [require] therefore states
+     * the CSS variables that MUST be present before a reading counts, and a state that never arrives is
+     * an explicit failure rather than a quietly stale sample.
      */
-    private fun settledProbe(scenario: ActivityScenario<ReaderActivity>): JSONObject {
+    private fun settledProbe(
+        scenario: ActivityScenario<ReaderActivity>,
+        description: String,
+        require: (JSONObject) -> Boolean = { true },
+    ): JSONObject {
         var previous: String? = null
+        var stableCount = 0
         var last: JSONObject? = null
-        for (i in 0 until 40) {
-            val raw = evalJs(scenario, PROBE_JS)
-            if (raw != null) {
-                val decoded = JSONTokener(raw).nextValue()
-                val json = if (decoded is String) JSONObject(decoded) else decoded as JSONObject
+        for (i in 0 until 60) {
+            val json = probeOnce(scenario)
+            if (json != null) {
                 last = json
-                if (json.optBoolean("found")) {
+                // An error object or a document with no measurable text is NEVER a valid reading.
+                if (json.optBoolean("found") && !json.has("error")) {
                     val style = json.optString("rootStyle")
-                    if (previous == style && i >= 2) return json
+                    stableCount = if (previous == style) stableCount + 1 else 0
                     previous = style
+                    if (stableCount >= 1 && require(json)) return json
                 }
             }
             Thread.sleep(250)
         }
-        return requireNotNull(last) { "the DOM probe never returned a result" }
+        throw AssertionError(
+            "the DOM never settled into the required state [$description] — refusing to report a stale or " +
+                "invalid reading. last=${last?.optString("rootStyle")} found=${last?.optBoolean("found")}",
+        )
     }
+
+    /** One evaluation of [PROBE_JS], parsed; null when the evaluation failed or timed out. */
+    private fun probeOnce(scenario: ActivityScenario<ReaderActivity>): JSONObject? {
+        val raw = evalJs(scenario, PROBE_JS) ?: return null
+        val decoded = JSONTokener(raw).nextValue()
+        return if (decoded is String) JSONObject(decoded) else decoded as? JSONObject
+    }
+
+    /**
+     * Poll until the `<html>` inline style stops changing and return whatever the DOM says — INCLUDING a
+     * resource with no text element at all. Used only while paging towards prose: a real EPUB's opening
+     * resource can be a bare cover (`<body><img/></body>`), which is a legitimate intermediate state, not
+     * a measurement. Measurements always go through the strict [settledProbe].
+     */
+    private fun settledRaw(scenario: ActivityScenario<ReaderActivity>): JSONObject? {
+        var previous: String? = null
+        var last: JSONObject? = null
+        for (i in 0 until 12) {
+            val json = probeOnce(scenario)
+            if (json != null) {
+                last = json
+                val style = json.optString("rootStyle")
+                if (previous == style && i >= 1) return json
+                previous = style
+            }
+            Thread.sleep(250)
+        }
+        return last
+    }
+
+    /** True when ReadiumCSS's advanced-settings gate (`publisherStyles = false`) is on in the live DOM. */
+    private fun advancedOn(p: JSONObject) = p.optString("rootStyle").contains("readium-advanced-on")
+
+    /** True when [decl] (e.g. `--USER__textAlign: justify`) is present in the live `<html>` inline style. */
+    private fun hasDecl(p: JSONObject, decl: String) = p.optString("rootStyle").contains(decl)
 
     /**
      * `submitPreferences` REPLACES the whole preference set rather than merging, so every submission here
      * pins `scroll = true` — the production default (the host opens with `scroll = layout == Scroll`).
      * Without it the first run flipped the reader to `readium-paged-on` midway, which would have been an
      * uncontrolled second variable in the before/after comparison.
+     *
+     * A MISSING navigator is a hard failure, not a silent no-op: submitting nothing and then measuring
+     * "no change" would manufacture exactly the negative results this class reports.
      */
     @OptIn(ExperimentalReadiumApi::class)
     private fun submit(scenario: ActivityScenario<ReaderActivity>, prefs: EpubPreferences) {
+        var submitted = false
         scenario.onActivity { act ->
-            (act.supportFragmentManager.findFragmentByTag(READER_TAG) as? EpubNavigatorFragment)
-                ?.submitPreferences(EpubPreferences(scroll = true) + prefs)
+            val nav = act.supportFragmentManager.findFragmentByTag(READER_TAG) as? EpubNavigatorFragment
+            if (nav != null) { nav.submitPreferences(EpubPreferences(scroll = true) + prefs); submitted = true }
         }
+        assertTrue("the Readium navigator must exist for a preference submission to mean anything", submitted)
     }
 
     /**
@@ -226,9 +285,11 @@ class JustificationEpubStyleSpikeTest {
      * motion a reading user makes.
      */
     private fun advanceToProse(scenario: ActivityScenario<ReaderActivity>, label: String): JSONObject {
-        var probe = settledProbe(scenario)
+        var probe = settledRaw(scenario)
         for (step in 0 until 30) {
-            if (probe.optBoolean("found") && probe.optInt("textLen") >= MIN_PROSE_CHARS) {
+            if (probe != null && probe.optBoolean("found") && !probe.has("error") &&
+                probe.optInt("textLen") >= MIN_PROSE_CHARS
+            ) {
                 Log.i(TAG, "advanceToProse $label steps=$step tag=${probe.optString("tag")} textLen=${probe.optInt("textLen")}")
                 return probe
             }
@@ -239,7 +300,7 @@ class JustificationEpubStyleSpikeTest {
             }
             if (!moved) Log.w(TAG, "advanceToProse $label goForward returned false at step $step")
             Thread.sleep(400)
-            probe = settledProbe(scenario)
+            probe = settledRaw(scenario)
         }
         throw AssertionError(
             "$label: never reached a resource with >= $MIN_PROSE_CHARS chars of prose — the measurement " +
@@ -264,10 +325,22 @@ class JustificationEpubStyleSpikeTest {
     /** The computed `text-align` of the prose element and of `body`, under one preference state. */
     private data class AlignReading(val element: String, val body: String, val tag: String)
 
+    /** The three readings plus the invariants that prove all three measured the SAME content. */
+    private data class AlignRun(
+        val default: AlignReading,
+        val justifyOnly: AlignReading,
+        val withFlag: AlignReading,
+        val lang: String,
+        val sheets: String,
+        val docHref: String,
+        val textHead: String,
+        val sameContentThroughout: Boolean,
+    )
+
     @OptIn(ExperimentalReadiumApi::class)
-    private fun measureTextAlign(file: String, bytes: Long, label: String): Triple<AlignReading, AlignReading, AlignReading> {
+    private fun measureTextAlign(file: String, bytes: Long, label: String): AlignRun {
         val book = importRealEpub(file, bytes)
-        var out: Triple<AlignReading, AlignReading, AlignReading>? = null
+        var out: AlignRun? = null
         ActivityScenario.launch<ReaderActivity>(
             ReaderActivity.intent(instrumentation.targetContext, book.fingerprintKey),
         ).use { scenario ->
@@ -278,18 +351,40 @@ class JustificationEpubStyleSpikeTest {
                 "$label: the probe must be measuring real prose (>= $MIN_PROSE_CHARS chars), not a cover page",
                 default.optInt("textLen") >= MIN_PROSE_CHARS,
             )
+            assertTrue(
+                "$label: the production default must NOT already have the advanced gate on " +
+                    "(publisherStyles is never set in production — W9)",
+                !advancedOn(default),
+            )
 
+            // Each submission is followed by a probe that REQUIRES the requested variables to be live in
+            // the DOM, so a reading can never be of the previous state.
             submit(scenario, EpubPreferences(textAlign = ReadiumTextAlign.JUSTIFY))
-            val justifyOnly = settledProbe(scenario)
+            val justifyOnly = settledProbe(scenario, "$label: --USER__textAlign live, advanced gate OFF") {
+                hasDecl(it, "--USER__textAlign: justify") && !advancedOn(it)
+            }
             log("M3", label, "textAlign=JUSTIFY,publisherStyles-unset", justifyOnly)
 
             submit(scenario, EpubPreferences(textAlign = ReadiumTextAlign.JUSTIFY, publisherStyles = false))
-            val withFlag = settledProbe(scenario)
+            val withFlag = settledProbe(scenario, "$label: --USER__textAlign live, advanced gate ON") {
+                hasDecl(it, "--USER__textAlign: justify") && advancedOn(it)
+            }
             log("M3", label, "textAlign=JUSTIFY,publisherStyles=false", withFlag)
 
             fun read(p: JSONObject) =
                 AlignReading(p.optString("textAlign"), p.optString("bodyTextAlign"), p.optString("tag"))
-            out = Triple(read(default), read(justifyOnly), read(withFlag))
+            val states = listOf(default, justifyOnly, withFlag)
+            out = AlignRun(
+                default = read(default), justifyOnly = read(justifyOnly), withFlag = read(withFlag),
+                lang = default.optString("lang"),
+                sheets = default.optString("sheets"),
+                docHref = default.optString("docHref"),
+                textHead = default.optString("textHead"),
+                // All three readings must come from the same resource AND the same element, or a
+                // "nothing changed" verdict could just be two different paragraphs.
+                sameContentThroughout = states.map { it.optString("docHref") }.distinct().size == 1 &&
+                    states.map { it.optString("textHead") }.distinct().size == 1,
+            )
         }
         return out!!
     }
@@ -300,18 +395,30 @@ class JustificationEpubStyleSpikeTest {
      * WI-2's two properties inseparable (plan §7.2).
      */
     @Test fun m3_enEpub_justifyRequiresPublisherStylesFalse() {
-        val (default, justifyOnly, withFlag) = measureTextAlign(EN_FILE, EN_BYTES, "real:The Half Second(en)")
-        Log.i(TAG, "M3-SUMMARY book=en default=$default justifyOnly=$justifyOnly withFlag=$withFlag")
+        val run = measureTextAlign(EN_FILE, EN_BYTES, "real:The Half Second(en)")
+        Log.i(TAG, "M3-SUMMARY book=en $run")
+        assertTrue("M3/en: all three readings must be of the same resource + element", run.sameContentThroughout)
+        assertEquals("M3/en: the Latin book must declare English", "en", run.lang)
+        assertTrue(
+            "M3/en: the Latin book must resolve the DEFAULT ReadiumCSS, not the CJK one (the contrast that " +
+                "makes the zh-CN result meaningful) — sheets=${run.sheets}",
+            run.sheets.contains("readium-css/ReadiumCSS-after.css") && !run.sheets.contains("cjk-horizontal"),
+        )
         assertEquals(
             "M3/en: computed text-align on body with publisherStyles=false must be justify " +
                 "(body is named directly in ReadiumCSS's override selector)",
-            "justify", withFlag.body,
+            "justify", run.withFlag.body,
         )
-        assertNotEquals(
-            "M3/en: textAlign=JUSTIFY alone must NOT reach the DOM (W10 — the variable is emitted but no " +
-                "rule consumes it without readium-advanced-on). If this ever equals 'justify', W10 is " +
-                "wrong and publisherStyles=false is not load-bearing.",
-            "justify", justifyOnly.body,
+        // Positive, not merely "not justify": the un-gated states must be a real start/left value, so an
+        // empty or error reading cannot masquerade as "the override did not apply".
+        assertTrue(
+            "M3/en: WITHOUT the advanced gate the computed body text-align must be a real start/left " +
+                "value (was '${run.justifyOnly.body}') — W10: the variable is emitted but no rule consumes it",
+            run.justifyOnly.body in setOf("start", "left"),
+        )
+        assertTrue(
+            "M3/en: the production default must likewise be start/left (was '${run.default.body}')",
+            run.default.body in setOf("start", "left"),
         )
     }
 
@@ -330,13 +437,27 @@ class JustificationEpubStyleSpikeTest {
      * it isolates OUR effect — and it stays `start` in all three states, which is W12 confirmed.
      */
     @Test fun m3_zhEpub_cjkStylesheet_characterisation() {
-        val (default, justifyOnly, withFlag) = measureTextAlign(ZH_FILE, ZH_BYTES, "real:道诡异仙(zh-CN)")
-        Log.i(TAG, "M3-SUMMARY book=zh default=$default justifyOnly=$justifyOnly withFlag=$withFlag")
-        assertNotEquals(
-            "M3/zh characterisation: the CJK publication must NOT compute text-align:justify on body even " +
-                "with publisherStyles=false (W12 — cjk-horizontal/ReadiumCSS-after.css has no " +
-                "USER__textAlign rule). A 'justify' here STRIKES plan §4.3(b) and upgrades AC-5 for EPUB.",
-            "justify", withFlag.body,
+        val run = measureTextAlign(ZH_FILE, ZH_BYTES, "real:道诡异仙(zh-CN)")
+        Log.i(TAG, "M3-SUMMARY book=zh $run")
+        // Every precondition of the characterisation is asserted, so the test cannot "pass" by measuring
+        // an error object, a stale DOM, the wrong resource, or a non-CJK stylesheet.
+        assertTrue("M3/zh: all three readings must be of the same resource + element", run.sameContentThroughout)
+        assertTrue("M3/zh: the publication must declare a zh language (was '${run.lang}') — W14", run.lang.startsWith("zh"))
+        assertTrue(
+            "M3/zh: Readium must have resolved the cjk-horizontal stylesheet — W12/W13 — sheets=${run.sheets}",
+            run.sheets.contains("cjk-horizontal/ReadiumCSS-after.css"),
+        )
+        assertTrue(
+            "M3/zh characterisation: body computed text-align must stay a real start/left value even WITH " +
+                "publisherStyles=false (was '${run.withFlag.body}') — W12: cjk-horizontal/ReadiumCSS-after.css " +
+                "has no USER__textAlign rule, so our override never applies. A 'justify' here STRIKES plan " +
+                "§4.3(b) and upgrades AC-5 for EPUB.",
+            run.withFlag.body in setOf("start", "left"),
+        )
+        assertTrue(
+            "M3/zh: body must be start/left in the un-gated states too (default='${run.default.body}', " +
+                "justifyOnly='${run.justifyOnly.body}')",
+            run.default.body in setOf("start", "left") && run.justifyOnly.body in setOf("start", "left"),
         )
     }
 
@@ -365,11 +486,20 @@ class JustificationEpubStyleSpikeTest {
                 "M4 must measure real prose, not a cover page",
                 before.optInt("textLen") >= MIN_PROSE_CHARS,
             )
+            assertTrue(
+                "M4 baseline must be the genuine production state: --USER__lineHeight 1.5 live and the " +
+                    "advanced gate OFF (W9 — publisherStyles is never set in production)",
+                hasDecl(before, "--USER__lineHeight: 1.5") && !advancedOn(before),
+            )
 
             // The REAL user action: move the Display sheet's line-spacing slider to its maximum. The host's
             // observeDisplaySettings collector re-submits toEpubPreferences() — publisherStyles unset.
+            // The probe REQUIRES --USER__lineHeight to actually read 2.0 before it counts, so "the computed
+            // value did not change" can never be an artifact of reading before the change landed.
             runBlocking { store.setLineSpacing(ReaderSettings.MAX_LINE_SPACING) }
-            val after = settledProbe(scenario)
+            val after = settledProbe(scenario, "--USER__lineHeight: 2.0 live, advanced gate OFF") {
+                hasDecl(it, "--USER__lineHeight: 2.0") && !advancedOn(it)
+            }
             log("M4", "real:The Half Second(en)", "lineSpacing=2.0 (production, publisherStyles-unset)", after)
             val lh1 = after.optString("lineHeight")
             val bh1 = after.optString("bodyLineHeight")
@@ -377,7 +507,9 @@ class JustificationEpubStyleSpikeTest {
             // Same line height, now WITH the flag — the WI-2 fix.
             @OptIn(ExperimentalReadiumApi::class)
             submit(scenario, EpubPreferences(lineHeight = 2.0, publisherStyles = false))
-            val fixed = settledProbe(scenario)
+            val fixed = settledProbe(scenario, "--USER__lineHeight: 2.0 live, advanced gate ON") {
+                hasDecl(it, "--USER__lineHeight: 2.0") && advancedOn(it)
+            }
             log("M4", "real:The Half Second(en)", "lineHeight=2.0,publisherStyles=false", fixed)
             val lh2 = fixed.optString("lineHeight")
             val bh2 = fixed.optString("bodyLineHeight")
@@ -390,8 +522,16 @@ class JustificationEpubStyleSpikeTest {
                     "rootVar_moved=${before.optString("rootStyle") != after.optString("rootStyle")}",
             )
             // Guard against a vacuous pass: an empty reading would make every comparison below trivially
-            // true. The values must be real CSS lengths before they can be evidence either way.
-            assertTrue("M4: computed line-height readings must be non-empty", lh0.isNotEmpty() && bh0.isNotEmpty())
+            // true. Every value must be a real CSS pixel length before it can be evidence either way —
+            // including lh2/bh2, whose "changed" assertion would otherwise pass on an empty string.
+            for ((name, v) in listOf("lh0" to lh0, "lh1" to lh1, "lh2" to lh2, "bh0" to bh0, "bh1" to bh1, "bh2" to bh2)) {
+                assertTrue("M4: computed $name must be a real px length, was '$v'", v.endsWith("px") && v.length > 2)
+            }
+            assertTrue(
+                "M4: the three readings must be of the same resource + element",
+                listOf(before, after, fixed).map { it.optString("docHref") }.distinct().size == 1 &&
+                    listOf(before, after, fixed).map { it.optString("textHead") }.distinct().size == 1,
+            )
             assertEquals(
                 "M4 / bug #367 CONFIRMED: the production line-spacing slider must leave computed " +
                     "line-height UNCHANGED while publisherStyles is unset ($lh0 → $lh1). If these ever " +

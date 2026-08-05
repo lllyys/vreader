@@ -15,6 +15,8 @@ import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.style.TextAlign
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import org.junit.FixMethodOrder
+import org.junit.runners.MethodSorters
 import com.vreader.app.reader.settings.ReaderSettings
 import com.vreader.app.reader.settings.bodyTextStyle
 import org.junit.Assert.assertEquals
@@ -65,6 +67,7 @@ import kotlin.math.abs
  * truncated/stale file "real". Run ONE class per connected invocation (MEMORY #129/#133).
  */
 @RunWith(AndroidJUnit4::class)
+@FixMethodOrder(MethodSorters.NAME_ASCENDING)   // `controlM2…` sorts before `measurementM1…` — see [controlPassed]
 class JustificationMeasurementSpikeTest {
 
     @get:Rule val compose = createComposeRule()
@@ -80,7 +83,21 @@ class JustificationMeasurementSpikeTest {
         const val MAX_PARAGRAPH_CHARS = 1_500
         /** Float noise floor for "these two x-coordinates are the same pixel position". */
         const val EPSILON_PX = 0.5f
+        /** A CJK paragraph must be overwhelmingly CJK — a mislabelled fixture must not be measured as one. */
+        const val MIN_CJK_FRACTION = 0.8
+
+        /**
+         * Set by the M2 positive control when it passes. M1 REQUIRES it, so the control cannot be skipped
+         * — a filtered invocation that runs M1 alone fails loudly instead of publishing an uninterpretable
+         * "CJK does not move" number. Method order is pinned so the control always runs first.
+         */
+        @JvmStatic var controlPassed = false
     }
+
+    /** Chinese/Japanese/Korean ideographs + CJK punctuation + fullwidth forms. */
+    private fun isCjk(c: Char): Boolean = c.code in 0x3000..0x303F ||
+        c.code in 0x3400..0x4DBF || c.code in 0x4E00..0x9FFF ||
+        c.code in 0xF900..0xFAFF || c.code in 0xFF00..0xFFEF
 
     // ---------------------------------------------------------------- fixtures
 
@@ -147,6 +164,11 @@ class JustificationMeasurementSpikeTest {
     }.getOrNull()
 
     private fun readMetrics(anchor: String): Metrics {
+        // Exactly one node may match the anchor, or the two readings could be of different Texts.
+        assertEquals(
+            "the anchor must identify exactly one rendered Text node",
+            1, compose.onAllNodesWithText(anchor, substring = true).fetchSemanticsNodes().size,
+        )
         val layout = requireNotNull(layoutFor(anchor)) { "no TextLayoutResult for the rendered paragraph" }
         val lines = layout.lineCount
         val rights = (0 until lines).map { layout.getLineRight(it) }
@@ -248,7 +270,7 @@ class JustificationMeasurementSpikeTest {
      * the wiring is broken and M1 is uninterpretable — a WI-0 FAILURE, not a finding about CJK.
      */
     @Test
-    fun m2_latinSynthetic_justifyMovesGlyphs_positiveControl() {
+    fun controlM2_latinSynthetic_justifyMovesGlyphs_positiveControl() {
         val para = pickParagraph(readLatinAsset(), asciiLettersAllowed = true)
         val (start, justify) = measureBothAlignments(para)
         val moved = report("M2", "synthetic:latin-justify-sample.txt", para, start, justify)
@@ -267,10 +289,15 @@ class JustificationMeasurementSpikeTest {
                 "flush=$flush of ${n - 1} — rights=${justify.lineRights}",
             flush == n - 1,
         )
-        if (start.pixels != null && justify.pixels != null) {
-            val pxDiff = start.pixels.indices.count { start.pixels[it] != justify.pixels[it] }
-            assertTrue("M2: the rendered pixels must differ between Start and Justify", pxDiff > 0)
-        }
+        // Pixel capture is MANDATORY, not best-effort: it is the ground-truth signal that makes M1's
+        // negative credible. If it silently became unavailable, the run must fail rather than quietly
+        // degrade to a single signal.
+        assertTrue(
+            "M2: captureToImage must work on this device — the pixel ground truth is required evidence",
+            start.pixels != null && justify.pixels != null && start.pixelDims == justify.pixelDims,
+        )
+        val pxDiff = start.pixels!!.indices.count { start.pixels[it] != justify.pixels!![it] }
+        assertTrue("M2: the rendered pixels must differ between Start and Justify", pxDiff > 0)
         // The control also CHARACTERISES a Compose API as justification-blind: while the pixels above
         // demonstrably moved, `getBoundingBox().left` reported ZERO movement on every non-final line.
         // Pinning it here is what stops a future reader from treating that API's silence on the CJK run
@@ -280,6 +307,7 @@ class JustificationMeasurementSpikeTest {
                 "in this Compose version — so they are not evidence in M1 either",
             0, movedLines(start.midGlyphLefts, justify.midGlyphLefts, n),
         )
+        controlPassed = true   // unblocks M1 — see [controlPassed]
     }
 
     // ---------------------------------------------------------------- M1 (the question)
@@ -292,7 +320,14 @@ class JustificationMeasurementSpikeTest {
      * forces plan §4.3(a) + AC-1b to be revisited rather than rotting.
      */
     @Test
-    fun m1_cjkRealBook_justifyIsInert_characterisation() {
+    fun measurementM1_cjkRealBook_justifyIsInert_characterisation() {
+        // The control gates the measurement MECHANICALLY, not by convention: without a passing M2 in this
+        // same run, a "nothing moved" result is indistinguishable from a broken harness.
+        assertTrue(
+            "M1 is uninterpretable without the M2 positive control passing in the SAME run — run the whole " +
+                "class, not a filtered single method",
+            controlPassed,
+        )
         val text = requireNotNull(readRealCjkBookOrNull()) {
             "M1 requires the REAL CJK book (test-books/books/txt/黑暗血时代.txt, $REAL_BOOK_BYTES bytes) " +
                 "pushed to the app's external files dir as perf-cjk.txt — a synthetic stand-in would make " +
@@ -300,6 +335,13 @@ class JustificationMeasurementSpikeTest {
         }
         val para = pickParagraph(text, asciiLettersAllowed = false)
         assertTrue("the CJK paragraph must contain no spaces to stretch", !para.contains(' '))
+        // Prove the measured text really is CJK script — a mislabelled fixture must not silently become
+        // "the CJK result".
+        val cjkFraction = para.count { isCjk(it) }.toDouble() / para.length
+        assertTrue(
+            "the measured paragraph must be predominantly CJK script (was ${"%.2f".format(cjkFraction)})",
+            cjkFraction >= MIN_CJK_FRACTION,
+        )
         val (start, justify) = measureBothAlignments(para)
         val moved = report("M1", "real:黑暗血时代.txt", para, start, justify)
         val n = justify.lineCount
@@ -312,11 +354,14 @@ class JustificationMeasurementSpikeTest {
         )
         // NO assertion on midGlyphLefts here: M2 proved that API is justification-blind, so asserting it
         // unchanged would be a test that CANNOT fail — worse than no test. Its values are logged only.
-        if (start.pixels != null && justify.pixels != null && start.pixelDims == justify.pixelDims) {
-            assertEquals(
-                "M1: not a single rendered pixel may differ if no glyph moved (the ground truth)",
-                0, start.pixels.indices.count { start.pixels[it] != justify.pixels[it] },
-            )
-        }
+        assertTrue(
+            "M1: the pixel ground truth is REQUIRED — a missing capture would reduce the negative result " +
+                "to a single signal without anyone noticing",
+            start.pixels != null && justify.pixels != null && start.pixelDims == justify.pixelDims,
+        )
+        assertEquals(
+            "M1: not a single rendered pixel may differ if no glyph moved (the ground truth)",
+            0, start.pixels!!.indices.count { start.pixels[it] != justify.pixels!![it] },
+        )
     }
 }
