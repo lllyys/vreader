@@ -35,16 +35,21 @@ import java.time.Instant
  *   header. Indentation makes "starts at column 0" the entry-line predicate for any reader.
  *
  * Known limitations (accepted, NOT mitigated — do not read these as guarantees):
- * - **[lastLoadDegraded] CANNOT SEE PRIMARY-ONLY DEGRADATION, and with the production wiring it is
- *   effectively always `false`.** The store sees one flat [SourceResult]. `CompositeDiagnosticsSource`
- *   reports `Unavailable` only when BOTH of its sources fail, and `RingBufferDiagnosticsSource` has
- *   no failure path at all — so "logcat denied + ring healthy" arrives as `Available`, and
- *   [CAPTURE_SOURCE_DEGRADED] is unreachable in the shipped app. This does NOT meet the plan's
- *   "the last load's PRIMARY source reported Unavailable" contract (API sketch) or WI-4 acceptance
- *   criterion 2; closing it needs provenance carried on `SourceResult` (e.g.
- *   `Available(entries, primaryDegraded)`) plus the composite propagating it — files owned by WI-1
- *   and WI-3, outside this WI's write-set. **Escalated to the orchestrator, not silently accepted.**
- *   Until then the flag means only "this store's own source reported `Unavailable`, or threw".
+ * - **[lastLoadDegraded] CANNOT SEE PRIMARY-ONLY DEGRADATION.** The store sees one flat
+ *   [SourceResult]. `CompositeDiagnosticsSource` reports `Unavailable` only when BOTH of its
+ *   sources fail, and `RingBufferDiagnosticsSource` has no *modelled* `Unavailable` path — every
+ *   normal return is `Available` (a throw from it is still contained by the composite). So under
+ *   the wiring the plan specifies, "logcat denied + ring healthy" arrives here as `Available` and
+ *   [CAPTURE_SOURCE_DEGRADED] is unreachable for exactly the operational case it exists to report.
+ *   That does NOT meet the plan's "the last load's PRIMARY source reported Unavailable" contract
+ *   (API sketch) or WI-4 acceptance criterion 2. Closing it needs provenance carried on
+ *   `SourceResult` (e.g. `Available(entries, primaryUnavailable)`) plus the composite propagating
+ *   it — files owned by WI-1 and WI-3, outside this WI's write-set.
+ *   **Escalated to the orchestrator, not silently accepted**; no test in this WI's suite asserts
+ *   the flat behaviour as if it were correct. Note the store and the composite have no production
+ *   construction yet at all (the container wiring is WI-7/WI-8), so this is a contract gap to close
+ *   before the feature ships, not a live user-facing defect today. Until it is closed, the flag
+ *   means only "this store's own source reported `Unavailable`, or threw an ordinary `Exception`".
  * - **Loads are expected to be SINGLE-FLIGHT.** [lastLoadDegraded] is `@Volatile`, so there is no
  *   torn read, but it is a store-wide latch rather than a property of one returned batch: if two
  *   loads overlap, the verdict of the one that COMPLETES LAST wins, and an earlier caller reading
@@ -159,7 +164,12 @@ class DiagnosticsLogStore(
          */
         const val CAPTURE_SOURCE_FULL: String = "logcat + breadcrumbs"
 
-        /** `capture source:` value when the last load's source reported unavailable (section 6.5). */
+        /**
+         * `capture source:` value when the last-completing load's source reported `Unavailable`
+         * OR threw a contained ordinary exception (section 6.5). See the class doc's first known
+         * limitation: under the planned composite wiring this is not reachable for the
+         * primary-only degradation it is meant to describe.
+         */
         const val CAPTURE_SOURCE_DEGRADED: String = "breadcrumbs only (platform log unavailable)"
 
         /** What every continuation line of a multi-line message is prefixed with. */
