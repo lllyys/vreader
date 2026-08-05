@@ -5,6 +5,9 @@
 **Platform**: `android-app` (rule 40 → bumps `android/version.properties`, tags `android/vX.Y.Z`)
 **Slug**: android-justified-text
 **iOS parity**: #92 (TXT, VERIFIED v3.53.1) + #95 (EPUB, VERIFIED v3.60.0)
+**Related bug**: **#367 / GH #2074** — "#129's EPUB line-spacing slider is likely inert;
+`publisherStyles` is never set" (`docs/bugs.md:429`). Filed off this plan's v1 W11 finding.
+WI-0 M4 measures it; **WI-2 fixes it** (§7.2 E2, AC-6).
 
 ---
 
@@ -139,14 +142,16 @@ relies on was checked by opening the file. Claims are marked ✅ verified / ⚠�
 | W8 ✅ | `TextAlign.JUSTIFY` exists in that enum | `javap org/readium/r2/navigator/preferences/TextAlign` → `CENTER, JUSTIFY, START, END, LEFT, RIGHT` |
 | W9 ⚠️ | **`publisherStyles` is never set anywhere in the app** — not in the mapper, not in `EpubNavigatorFragment.Configuration`, not via `EpubDefaults` | Repo-wide grep for `publisherStyles`/`EpubDefaults` across `android/app/src/main/kotlin` → **zero** hits; the only navigator config is `.../ReaderActivity.kt:257-260`, which sets only `selectionActionModeCallback` |
 | W10 ⚠️ | ReadiumCSS applies `--USER__textAlign` **only** when `readium-advanced-on` is present (i.e. `publisherStyles = false`) | The shipped stylesheet inside the aar, `assets/readium/readium-css/ReadiumCSS-after.css`: `:root[style*=readium-advanced-on][style*="--USER__textAlign"]{text-align:var(--USER__textAlign)}` |
-| W11 ⚠️ | **The same gate covers `--USER__lineHeight`** — so #129's EPUB line-spacing slider is very likely a no-op today (a pre-existing latent defect, §11 R4) | same file: `:root[style*=readium-advanced-on][style*="--USER__lineHeight"]{line-height:var(--USER__lineHeight)!important}` |
+| W11 ⚠️ | **The same gate covers `--USER__lineHeight`** — so #129's EPUB line-spacing slider is very likely a no-op today. **Now filed as bug #367 / GH #2074** (`docs/bugs.md:429`), off this plan's v1 finding. WI-0 M4 settles it; WI-2 fixes it (§7.2 E2) | same file: `:root[style*=readium-advanced-on][style*="--USER__lineHeight"]{line-height:var(--USER__lineHeight)!important}`. Note the ungated properties — `--USER__fontSize`, `--USER__pageMargins`, `--USER__backgroundColor`, `--USER__textColor` — carry no `readium-advanced-on` prefix, which is why font size / margin / theme demonstrably work today and line spacing alone is inert |
 | W12 ⚠️ | For a **CJK** publication ReadiumCSS **disables `text-align` entirely** | `assets/readium/readium-css/cjk-horizontal/ReadiumCSS-after.css` contains **0** occurrences of `USER__textAlign` (grep -c = 0), and the bundled `readium-css/ReadMe.md:53-60` states for CJK-horizontal: "**Disabled user settings: `text-align`; `hyphens`; paragraphs' indent; `word-spacing`; `letter-spacing`**" |
 | W13 ⚠️ | Readium picks that CJK stylesheet from the publication **language** | `javap -c Layout$Companion` → calls `LanguageKt.isCjk(Language)` then selects `Stylesheets.CjkHorizontal` / `CjkVertical`; `javap -c LanguageKt` → matches `zh`, `ja`, `ko` (+ `zh-hant`/`zh-tw` for vertical) |
 | W14 ⚠️ | Our **real CJK test EPUB triggers exactly that path** | `test-books/books/epub/道诡异仙 - 狐尾的笔.epub` → `OEBPS/content.opf` declares `<dc:language>zh-CN</dc:language>` and no `page-progression-direction` → `isCjk` true, ltr → **CjkHorizontal** |
 | W15 ✅ | The other real EPUB is Latin and will take the Default stylesheet | `test-books/books/epub/The Half Second - Li Xiaolai.epub` → `<dc:language>en</dc:language>` |
 | W16 ⚠️ | Compose maps `TextAlign.Justify` to a **boolean** inter-word justification flag; there is no inter-character path | `javap -c androidx/compose/ui/text/AndroidParagraph` (ui-text-android 1.9.0) — `TextStyle.getTextAlign()` compared against `TextAlign.Companion.getJustify()`, result stored as `iconst_1`/`iconst_0` into the `justificationMode` slot; `StaticLayoutFactoryImpl` then calls `StaticLayoutFactory26.setJustificationMode(builder, mode)`. `1` = `LineBreaker.JUSTIFICATION_MODE_INTER_WORD` |
 | W17 ✅ | The AZW3 (foliate) reader has a live CSS-injection seam that already receives `ReaderSettings` | `.../reader/Azw3DisplayCss.kt:33-70` (`foliateDisplayCss()`), injected at `.../reader/Azw3ReaderActivity.kt:394` — `LaunchedEffect(holder, displaySettings) { holder.document.setStyles(displaySettings.foliateDisplayCss()) }` |
-| W18 ✅ | The Display sheet **is** production-reachable (rule 47 Gate-5) from both hosts | `.../reader/chrome/ReaderBottomChrome.kt:149` renders the "Display" (Aa) slot; the sheet is opened at `.../reader/ReaderActivity.kt:1071` (EPUB) and `.../reader/TxtReaderActivity.kt:979` (TXT/MD). User path: **Library → tap a book → tap centre to show chrome → bottom bar "Display"**. (Relevant even though this plan adds no control — Gate 5 still needs a production path to *observe* the change, and a settings change is the natural trigger.) |
+| W18a ✅ | The Display sheet is production-reachable **for EPUB and TXT/MD only** | `.../reader/chrome/ReaderBottomChrome.kt:149` renders the "Display" (Aa) slot; the sheet is opened at `.../reader/ReaderActivity.kt:1071` (EPUB) and `.../reader/TxtReaderActivity.kt:979` (TXT/MD). User path: **Library → tap a book → tap centre to show chrome → bottom bar "Display"**. |
+| W18b ⚠️ | **AZW3 has NO Display control.** Its bottom chrome is Notes-only — but the #129 CSS *is* applied live from the store with no control surface | `.../reader/Azw3ReaderActivity.kt:11-12` — "it has **no Display control** (the #129 CSS is applied live from the store with no control surface), so the bottom chrome is Notes-only." Still true after #140 WI-5 extracted the chrome: `Azw3ReaderChrome.kt:6` ("the Notes-only bottom toolbar … AZW3 has no Contents/Display"), `:88`, `:133-134`. The CSS injection itself is unconditional at `Azw3ReaderActivity.kt:394` (W17). |
+| W18c ✅ | **Opening a book is itself a production entry point** — and it is the only one this feature's justification criteria need | `MainActivity` routes a Library tap to the format's reader activity; each host applies the display settings at open with no user action (`ReaderActivity.kt:241-243` EPUB, `TxtReaderActivity.kt:865`/`:901` TXT/MD, `Azw3ReaderActivity.kt:394` AZW3). Justify-by-default is a constant, not a user-varying setting, so **"Library → tap the book → look at the body text" fully exercises it on every host, AZW3 included** (§9.1). |
 | W19 ✅ | Settings persist as a versioned JSON blob with `ignoreUnknownKeys`, so **no** new persisted field is needed for a default-only change | `.../settings/ReaderSettingsStore.kt:24-31` (`ReaderSettingsState`), `:35` (`Json { ignoreUnknownKeys = true; encodeDefaults = true }`) |
 | W20 ✅ | MD is rendered by the **same** host and the same `bodyTextStyle`, one `Text` per chunk, with headings emitted as a `SpanStyle` inside a heading-only chunk | `.../reader/TxtReaderBody.kt:198` (`val isMarkdown = format == BookFormat.md`), `:973` (`mapper.renderedText(i)`), `:994` (`Text(`); heading detection + span at `.../reader/MarkdownRenderer.kt:64-73` |
 
@@ -255,13 +260,15 @@ One added property. Because W3/W4 hold, this reaches the scroll body, the paged 
 render, **and** phase-1 pagination measurement, with no host edits. The file's `Purpose:` header and
 its `@coordinates-with` list must be updated in the same commit (rule 22).
 
-**5.2 A heading-aware alignment for MD** — same file plus `.../reader/TxtReaderBody.kt`.
+**5.2 A heading-aware alignment for MD — SCROLL MODE ONLY** (revised in v2; see §5.2b for paged).
 
-A Markdown *heading* is its own chunk (W20), rendered by the same per-chunk `Text`. A one-line
-heading is unaffected (last-line rule), but a **wrapping** heading would be justified — visually
-wrong, and the exact class iOS guarded against (`TXTChapterStartDecorator` sets an explicit `.center`
-on a fresh style; #92's plan pins it with `chapterStartBodyIsJustifiedHeadingCentered`). Proposed
-seam — a pure, JVM-testable function next to `bodyTextStyle()`:
+In **scroll** mode a Markdown heading is its own chunk **and its own `Text`** (W20:
+`TxtReaderBody.kt:973` renders `mapper.renderedText(i)` per chunk at `:994`). A one-line heading is
+unaffected anyway (last-line rule), but a **wrapping** heading would be justified — visually wrong,
+and the exact class iOS guarded against (`TXTChapterStartDecorator` sets an explicit `.center` on a
+fresh style; #92 pins it with `chapterStartBodyIsJustifiedHeadingCentered`). Because scroll mode has
+one `Text` per chunk, per-chunk alignment is a clean, cheap fit. Proposed seam — a pure,
+JVM-testable function next to `bodyTextStyle()`:
 
 ```kotlin
 /** Body alignment for a rendered chunk: prose justifies; a Markdown heading chunk stays natural. */
@@ -270,13 +277,56 @@ fun ReaderSettings.chunkTextAlign(isHeadingChunk: Boolean): TextAlign =
 ```
 
 `MarkdownRenderer` already knows whether a chunk matched `ATX` (`MarkdownRenderer.kt:64-66`); the WI
-exposes that as a boolean on `MarkdownRendered` (additive field) and the MD render branch
-(`TxtReaderBody.kt:973`, `:994`) applies `style = effectiveStyle.copy(textAlign = …)`. **Note**: a
-`copy()` at the render site would break the W4 determinism contract if phase-1 measured a different
-alignment — but alignment does not move line breaks (§11 R1), and phase-1 measures the *same*
-`effectiveStyle`, so the invariant to pin is "line breaks identical under any `textAlign`", which is
-test T5. This is called out explicitly for the Gate-2 auditor as the riskiest single decision in the
-plan.
+exposes that as a boolean on `MarkdownRendered` (additive field) and the scroll MD render branch
+applies `style = effectiveStyle.copy(textAlign = …)`. Alignment does not move line breaks (§11 R1,
+pinned by T5), so this `copy()` cannot desynchronise anything.
+
+**5.2b Paged Markdown — the exclusion is NOT achievable at this seam, and the plan says so.**
+
+**Gate-2 round-2 HIGH.** The v1 plan specified heading exclusion without qualifying the layout mode.
+That criterion cannot stand for **paged** MD, verified:
+
+- `TxtPaginator.renderPage` (`.../reader/paged/TxtPaginator.kt:331-376`) walks `firstChunk..lastChunk`
+  and **concatenates slices from multiple chunks into ONE `AnnotatedString`** via a single
+  `AnnotatedString.Builder` (`:344`, `:369-372`).
+- `TxtReaderBody.kt:789-792` renders that whole page in **one** `Text(text = rendered, style = effectiveStyle)`.
+- `renderPage` even takes `style: TextStyle` **`@Suppress("UNUSED_PARAMETER")`** (`:335`) — it does
+  not consult the style at all.
+- Neither `MarkdownRendered`, `ChunkTextMapper`, nor `PageOffsetMap`/`PageSegment` carries a
+  heading flag today.
+
+A single Compose `Text` has exactly one paragraph-level `textAlign`. So on a paged MD page, a
+heading and the prose after it share one alignment — the exclusion is structurally impossible at the
+`bodyTextStyle` seam.
+
+**Decision: scope the exclusion to scroll mode; document paged as a known limitation.** In paged MD, a
+heading that wraps to ≥2 lines will be justified. The blast radius is narrow: it needs paged layout
+**and** Markdown **and** a heading long enough to wrap (a one-line heading is untouched by the
+last-line rule). This is deliberately the same posture iOS took when its paged renderer could not
+satisfy the same class of criterion — #92's WI-2 was DEFERRED as "the cosmetic remainder (one
+page-bottom line per page, paged mode only)" rather than architected around
+(`20260605-feature-92-txt-justified-text.md:140-146, 179`).
+
+**The rejected alternative, and why it is a follow-up not a WI here.** Compose `AnnotatedString`
+*does* support `ParagraphStyle` spans, so one could thread a heading flag through
+`MarkdownRendered → PageSegment → renderPage` and `pushStyle(ParagraphStyle(textAlign = Start))`
+over heading ranges. Two reasons that is not in scope:
+
+1. **A `ParagraphStyle` span boundary forces a paragraph break**, which *does* affect line breaking —
+   unlike `textAlign`, which does not. Phase-1 measures **per chunk** (`ComposeLineMeasurer.measure`
+   over one chunk's text); phase-2 would render **per page** *with* spans. If the spans introduce
+   breaks the measurer did not see, page content overflows its box — the precise failure the W4
+   determinism contract exists to prevent, and a far worse defect than a justified heading.
+   (Chunks are split at newlines, so the boundaries *may* already be paragraph breaks and the spans
+   may be inert — but that is an unverified hypothesis, and shipping on it is exactly the move this
+   plan refuses elsewhere.)
+2. It touches the paginator's cross-cutting seam, which #137/#138 built and pinned; changing it for a
+   cosmetic edge case in a format with **no real book fixture** (§10) is disproportionate.
+
+If measurement later shows the spans are break-neutral, this becomes a small follow-up. It is not
+filed pre-emptively because it is a *code* limitation with no design or UX blocker attached — nothing
+about it is invisible or unschedulable (contrast rule 51's `needs-design` obligation, which is about
+undesigned surfaces, not deferred polish).
 
 **5.3 `android/app/src/main/kotlin/com/vreader/app/reader/EpubPreferencesMapper.kt`** — the EPUB seam (W5).
 
@@ -307,7 +357,11 @@ rule) — exactly the design's `hyphens: 'auto'` at `vreader-reader.jsx:380`; an
 override to `:not(blockquote):not(figcaption) p, body, li`, so blockquotes and figure captions keep
 their own alignment.
 
-**5.4 `android/app/src/main/kotlin/com/vreader/app/reader/Azw3DisplayCss.kt`** — the AZW3 seam (W17), **pending Q2**.
+**5.4 `android/app/src/main/kotlin/com/vreader/app/reader/Azw3DisplayCss.kt`** — the AZW3 seam (W17).
+
+*In scope per the coordinator's ruling; Gate-2 round 2's objection (AZW3 has no Display control) is
+resolved at §9.1/Q2 — the leg verifies through **P1** and needs no control, because justify-by-default
+requires no user action.*
 
 One appended rule in the existing deterministic list, mirroring iOS's `FoliateStyleMapper` leg of #95:
 
@@ -387,14 +441,58 @@ desktop-JVM-vs-on-target 100× miss).
 
 | WI | Tier | Scope | Est. PR size | Gate-5 requirement |
 |---|---|---|---|---|
-| **WI-0** | **foundational** (measurement spike; **no production code**) | On the emulator, with the two real CJK fixtures, determine empirically: (a) does `TextAlign.Justify` change CJK TXT rendering? (b) does `EpubPreferences.textAlign = JUSTIFY` + `publisherStyles = false` change the `zh-CN` EPUB's computed `text-align`? Record both in the WI's PR body. | tiny (a throwaway connected test + a `document.querySelector` evaluation; nothing merged to `main` beyond the recorded finding) | none (no behaviour change) — but the emulator run itself is the deliverable |
-| **WI-1** | **behavioral** | §5.1 + §5.2 — TXT/MD justify at the `bodyTextStyle()` seam, MD heading exclusion, pagination-invariance proof. Re-run the #137/#138 paged connected suites as regression (the row calls this out). | small–medium | required: real TXT, **both** layouts (Scroll and Paged), via Library → book → Display |
-| **WI-2** | **behavioral** | §5.3 — EPUB `textAlign = JUSTIFY` **+ `publisherStyles = false`**, including the disclosed side effects (line-height starts applying, advanced type scale engages). | small (2 properties) / large blast radius | required: **both** real EPUBs (`en` and `zh-CN`), scroll and paged overflow |
-| **WI-3** | **behavioral**, **FINAL** — *pending Q2* | §5.4 — AZW3 foliate CSS justify. Completes the reflowable set and matches iOS #95's Foliate leg. Flips the row to `DONE`. | small | required: real AZW3 from `test-books/books/azw3/` |
+| **WI-0** | **foundational** (measurement spike; **no production code**) | Measure, on the emulator, against the real CJK fixtures — **pixels and computed style, never a submitted preference** (§7.1). Settles the CJK question **and bug #367** in one run. | tiny (throwaway connected test + WebView JS evaluations; nothing merged beyond the recorded findings) | n/a (no behaviour change) — the emulator measurement **is** the deliverable |
+| **WI-1** | **behavioral** | §5.1 + §5.2 — TXT/MD justify at the `bodyTextStyle()` seam, **scroll-mode** MD heading exclusion, paged-MD limitation documented (§5.2b), pagination-invariance proof. Re-run the #137/#138 paged connected suites as regression (the row calls this out). | small–medium | required: real TXT, **both** layouts, via **Library → open the book** (§9.1) |
+| **WI-2** | **behavioral** | §5.3 — EPUB `textAlign = JUSTIFY` **+ `publisherStyles = false`**, with the **bounded** side-effect set each individually verified (§7.2). Fixes bug #367 / GH #2074. | small (2 properties) / bounded-but-real blast radius | required: **both** real EPUBs (`en` and `zh-CN`), scroll and paged overflow; **plus** the §7.2 side-effect matrix via Library → book → Display |
+| **WI-3** | **behavioral**, **FINAL** — *see Q2* | §5.4 — AZW3 foliate CSS justify. Completes the reflowable set and matches iOS #95's Foliate leg. Flips the row to `DONE`. | small | required: real AZW3, via **Library → open the book** — **no Display control is needed or used** (§9.1, W18b/W18c) |
 
-If Q2 (§13) excludes AZW3, WI-2 becomes the final WI and the row's `DONE` flip moves there — but then
-Android ships EPUB justified and AZW3 ragged, which is a visible inconsistency inside one app and a
-parity gap against iOS #95. The recommendation is to include it.
+### 7.1 — WI-0 acceptance: it must move pixels or move computed style
+
+The entire reason WI-0 exists is that *"the preference was submitted"* and *"the composable
+recomposed"* both pass while nothing renders differently. So WI-0's own acceptance is written to
+exclude that evidence class. It is **not** satisfied by asserting a `ReaderSettings`,
+`EpubPreferences`, or `TextStyle` value. Four measurements, each a number read back **after** layout:
+
+| Measurement | Method | What "no-op" looks like |
+|---|---|---|
+| **M1 — CJK TXT pixels** | Render `黑暗血时代.txt` body, capture `TextLayoutResult` via `onTextLayout`, and read `getLineRight(i)` for every **non-final** line. Run twice: `textAlign = Start` vs `Justify`. | Identical `getLineRight` values across both runs ⇒ **zero glyphs moved** ⇒ Compose inter-word justification is inert on CJK (the §4.3(a) prediction). A justified Latin control (`The Half Second`) must show `getLineRight ≈ content-box right edge` — this is the positive control proving the measurement itself works. |
+| **M2 — Latin TXT pixels (positive control)** | Same, on Latin prose. | If M2 *also* shows no movement, the measurement or the wiring is broken — not the CJK hypothesis. M2 failing invalidates M1. |
+| **M3 — EPUB computed style** | `evaluateJavascript("getComputedStyle(document.querySelector('p')).textAlign")` in the Readium WebView, for the `en` and the `zh-CN` book, each with `publisherStyles` unset vs `false`. | `zh-CN` returning `start`/`left` with `publisherStyles=false` ⇒ the CJK stylesheet gate (§4.3(b), W12–W14) confirmed. `en` must return `justify` with the flag and **not** without it — that pair is the W10 proof. |
+| **M4 — bug #367** | Same evaluation for `line-height`, before/after a line-spacing slider change, with `publisherStyles` unset vs `false`. | `line-height` unchanged by the slider while the flag is unset ⇒ **bug #367 confirmed**; changing once the flag is set ⇒ WI-2 is its fix. |
+
+M1/M2 use `TextLayoutResult.getLineRight` rather than screenshot diffing because it is a
+deterministic number, robust to font/AA differences, and assertable in a connected test. Screenshots
+are still attached to the evidence file as human-legible corroboration, but the *decision* rests on
+the numbers.
+
+### 7.2 — WI-2 acceptance: the blast radius is bounded, enumerated, and each item verified
+
+**Why `publisherStyles = false` belongs in this feature and not its own.** It is not an optional
+improvement bundled for convenience — `textAlign` is **inert without it** (W10). There is no version
+of "EPUB justification" that does not flip this flag, so splitting it out would produce a WI that
+ships a no-op and a second WI that makes it work. It stays in WI-2, and WI-2 owns its full
+verification. (It also fixes bug #367 / GH #2074, which was filed off this plan's v1 W11 finding.)
+
+**The side effects are bounded by what we actually set.** ReadiumCSS's advanced-gated properties are
+`textAlign`, `lineHeight`, `paraSpacing`, `paraIndent`, `wordSpacing`, `letterSpacing`, `bodyHyphens`,
+plus the `readium-advanced-on` type-scale block. Each gated rule requires **both** `readium-advanced-on`
+*and* its `--USER__*` variable to be present. `toEpubPreferences()` sets **none** of `paraSpacing`,
+`paraIndent`, `wordSpacing`, `letterSpacing`, `bodyHyphens` (W5), so those variables are never emitted
+and their rules never match. That bounds the change to exactly four observable effects:
+
+| # | Effect | Rule (from the shipped `ReadiumCSS-after.css`) | Verification |
+|---|---|---|---|
+| E1 | Body prose justifies | `:root[readium-advanced-on][--USER__textAlign]{text-align:var(--USER__textAlign)}` | the feature itself — C4 |
+| E2 | **Line spacing starts working** (bug #367 fixed) | `:root[readium-advanced-on][--USER__lineHeight]{line-height:…!important}` | computed `line-height` changes with the slider (AC-6) |
+| E3 | Heading type scale engages | `:root[readium-advanced-on] h1{font-size:1.75rem!important}` (h2 1.5, h3 1.25, h4–h6 1rem; `small`, `sub`, `sup`) | computed `font-size` on `h1`/`h2` before vs after; recorded with a screenshot — headings will visibly change size on some books |
+| E4 | Paragraph font-size flattens to `1rem` | `:root[readium-advanced-on] dd,div,li,p,pre{font-size:1rem!important}` | computed `font-size` on a `<p>` a book had set to e.g. `0.9em`; recorded — this is the effect most likely to surprise a user |
+| E5 | Hyphenation auto-enables under justify | `[--USER__textAlign: justify] body{hyphens:auto}` | computed `hyphens` = `auto` on the `en` book (desirable; matches the design's `hyphens:'auto'`) |
+
+E3 and E4 are **real user-visible typography changes beyond alignment**, and they are why WI-2 is its
+own PR with its own audit and its own Gate-5 slice. They are disclosed in the PR body and the release
+note as "EPUB typography settings that were silently inert now apply", not presented as a pure
+alignment change. If E3/E4 look bad on the real books at Gate 5, the escape hatch is to set the
+neutralising preferences explicitly (e.g. pin `typeScale`) — decided on evidence, not pre-emptively.
 
 **Why not one WI**: WI-2's `publisherStyles = false` is a much larger visual change than the other
 two combined (§5.3) and deserves its own audit and its own Gate-5 slice. Bundling it with a one-line
@@ -413,7 +511,7 @@ extended rather than created, per the rule-55 "new files are awkward" guidance.
 |---|---|---|---|
 | T1 | `bodyTextStyle_isJustified` | `.../settings/TxtDisplaySettingsTest.kt` (existing) | `bodyTextStyle().textAlign == TextAlign.Justify` |
 | T2 | `bodyTextStyle_keepsSizeFamilyLineHeightWithJustify` | same | adding alignment dropped no existing property (the #92 `buildPreservesLineSpacingAndFontWithJustify` analog) |
-| T3 | `chunkTextAlign_headingIsNotJustified` | same | `chunkTextAlign(isHeadingChunk = true) == TextAlign.Start`; `false → Justify` |
+| T3 | `chunkTextAlign_headingIsNotJustified` | same | `chunkTextAlign(isHeadingChunk = true) == TextAlign.Start`; `false → Justify` (the **scroll**-mode seam only — §5.2b) |
 | T4 | `markdownRendered_flagsHeadingChunks` | `.../reader/MarkdownRendererTest.kt` (existing) | `# H1` → heading flag true; a bullet chunk and a prose chunk → false; **empty chunk** → false, no crash |
 | T6 | `toEpubPreferences_setsJustifyAndDisablesPublisherStyles` | `.../reader/EpubPreferencesMappingTest.kt` (existing) | `textAlign == TextAlign.JUSTIFY` **and** `publisherStyles == false` — the two are asserted **together**, because either alone is inert |
 | T7 | `foliateDisplayCss_justifiesGuardedParagraphs` | `.../reader/Azw3DisplayCssTest.kt` (existing) | the emitted CSS contains the `p:not(...)` justify rule; contains no `h1..h6` justify; output stays byte-deterministic for equal settings (the file's existing contract) |
@@ -429,8 +527,9 @@ extended rather than created, per the rule-55 "new files are awkward" guidance.
 
 | # | Test | File | Asserts |
 |---|---|---|---|
-| C1 | `txtBody_rendersJustified_scrollAndPaged` | `TxtDisplaySettingsUiTest.kt` (existing) | after opening a real TXT through the production path, the rendered body's `TextLayoutResult` reports `textAlign == Justify`, in **both** layouts |
-| C2 | `mdHeading_isNotJustified` | same | a wrapping MD heading's layout reports a non-justify alignment while the following prose reports justify |
+| C1 | `txtBody_rendersJustified_scrollAndPaged` | `TxtDisplaySettingsUiTest.kt` (existing) | after opening a real TXT through **P1**, non-final lines' `getLineRight` reach the content-box right edge, in **both** layouts. (Asserting `TextLayoutResult.layoutInput.style.textAlign == Justify` is *necessary but not sufficient* — it passes on CJK where nothing moves; the `getLineRight` assertion is the discriminating one.) |
+| C2 | `mdHeading_isNotJustified_scrollMode` | same | **scroll mode only**: a **wrapping** MD heading's `Text` reports a non-justify alignment while the following prose chunk reports justify. Paged MD is covered by C2b. |
+| C2b | `mdPagedHeading_knownLimitation` | same | **paged mode**: documents the §5.2b limitation as an executable fact — a page containing a wrapping heading renders with a single justified alignment. Written as a **characterisation test** so that if a future change makes per-paragraph alignment possible, this test fails and forces the limitation note to be revisited rather than silently rotting. |
 | C3 | `pagedPageBoundaries_unchanged` | `TxtPagedWindowedConnectedTest.kt` (existing, extended) | the paged index over a real book yields the same page count / boundaries as before the change (regression, per the row's explicit "re-run the #137/#138 paged connected suites") |
 | C4 | `epub_computedTextAlign_isJustify` | `EpubDisplaySettingsConnectedTest.kt` (existing) | **evaluates the DOM**, not the preference object: `getComputedStyle(p).textAlign === 'justify'` on the Latin EPUB. See the "passes while wrong" note below — the existing test in this file asserts only that "navigator accepted a background color" (`:47`), which is exactly the shape that cannot catch this class. |
 | C5 | `epub_cjk_computedTextAlign_observed` | same | the **same** DOM evaluation on the `zh-CN` EPUB, recorded as an **observation** (§12 AC-5), not asserted to a fixed value until WI-0 establishes the truth |
@@ -451,7 +550,8 @@ the assertion that actually discriminates.
 | Criterion | Green-on-broken (do **not** rely on) | Discriminating assertion |
 |---|---|---|
 | **AC-1** TXT/MD prose is justified | `assertEquals(TextAlign.Justify, settings.bodyTextStyle().textAlign)` — passes even if no host consumes `bodyTextStyle`, and even if Compose renders it as a no-op | **C1**: read `textAlign` back off the **`TextLayoutResult` of the rendered body** on the emulator, in both layouts. Better still, the Gate-5 screenshot (§12) — a per-line right-edge x-coordinate comparison is the only thing that proves a glyph moved. |
-| **AC-2** MD headings not justified | `chunkTextAlign(true) == Start` (pure function; says nothing about the render site wiring) | **C2**: a **wrapping** (≥2-line) heading in the rendered output. A one-line heading passes under *both* the correct and the broken implementation, because the last-line rule already leaves it alone — a single-line heading test is worthless here. |
+| **AC-2** MD headings not justified (scroll) | `chunkTextAlign(true) == Start` (pure function; says nothing about the render site wiring). Worse: a **one-line** heading test, which passes under *both* the correct and the broken implementation because the last-line rule already leaves it alone — a single-line heading test is worthless here. | **C2**: a **wrapping** (≥2-line) heading in the rendered scroll output. |
+| **AC-2b** paged MD limitation | Silence — a limitation that lives only in prose rots the moment the paginator changes | **C2b**: a characterisation test that *fails* if paged MD ever gains per-paragraph alignment, forcing the note to be revisited |
 | **AC-3** Paged page boundaries unchanged | "the paged suite still passes" — it would also pass if justify were silently dropped | **T5** (per-line char ranges, both alignments, CJK+Latin) **and C3** (real-book page count/boundaries). T5 is the one that fails loudly if a future Compose version ever makes justification affect breaking. |
 | **AC-4** EPUB prose is justified | `assertEquals(TextAlign.JUSTIFY, prefs.textAlign)` — **this is the trap**: it passes with `publisherStyles` unset, i.e. when ReadiumCSS emits the variable and no rule consumes it (W10). It also passes on the CJK book where the rule does not exist at all (W12). | **C4**: `getComputedStyle(p).textAlign` in the WebView DOM. Pair with **T6** asserting `textAlign` **and** `publisherStyles` in one test so neither can drift alone. |
 | **AC-5** CJK behaviour | Any test asserting the *setting* — every one of them passes while zero CJK glyphs move (§4.3) | **WI-0 + C5**: measured on-target against the two real CJK books, and recorded as a finding. This criterion is deliberately an **observation**, not a pass/fail (§12). |
@@ -467,10 +567,32 @@ setting persisted" and "the composable recomposed" both pass without a single gl
 Rule 47's binding clause: a behavioral WI must be exercised through a **production entry point in a
 release-configured build**, and the evidence file must name the user-visible path.
 
-**The path (verified, W18)**: *Library → tap a book → tap centre to reveal chrome → bottom bar
-"Display" (Aa) → adjust a setting → observe the body*. `ReaderBottomChrome.kt:149` renders the slot;
-`ReaderActivity.kt:1071` and `TxtReaderActivity.kt:979` open the sheet. No DEBUG launcher, no
-`src/debug/` source set, no direct composable invocation is used as the entry point.
+### 9.1 — Two different entry points, and which criteria need which (revised in v2)
+
+The v1 plan routed every WI through the Display sheet. **That was wrong for AZW3, which has no
+Display control** (W18b) — a Gate-2 round-2 HIGH, and precisely the class that put four Android
+features into `VERIFIED` with UI nobody could open. Corrected:
+
+| Entry point | Verified | Covers | Available on |
+|---|---|---|---|
+| **P1 — "Library → tap the book"** | W18c | **Every justification criterion** (AC-1, AC-2, AC-4, AC-7). Display settings are applied at open with no user action, and justify-by-default is a **constant**, not a user-varying setting — so simply opening the book and looking at the body text fully exercises it. | **All hosts, AZW3 included** |
+| **P2 — "… → tap centre → bottom bar Display (Aa)"** | W18a | Only the criteria that need a setting to *change*: AC-6 (EPUB line spacing, bug #367) and the §7.2 E2–E4 side-effect matrix; plus the live-re-submission check. | EPUB, TXT/MD only |
+
+**This dissolves the AZW3 problem** (the coordinator's option (a)): because this feature ships
+justify-by-default with **no toggle**, AZW3 needs no Display control to receive it — the CSS is
+injected unconditionally at `Azw3ReaderActivity.kt:394`, and P1 is a genuine production path a real
+user takes. WI-3's Gate-5 uses P1 and names it in the evidence file. **No `needs-design` filing is
+required, and no prerequisite is being assumed away**: WI-3 depends on nothing that does not exist
+today.
+
+To be explicit about what AZW3 does *not* get, so nothing is papered over: an AZW3 reader cannot
+change theme/font/size/spacing/margin from within the reader. That is a **pre-existing** #129/#132
+gap, entirely independent of #156 — this feature neither creates nor widens it, and #156 does not
+depend on it. It is out of scope here and is flagged to the orchestrator as an observation (§13 Q6),
+not smuggled in as a #156 prerequisite.
+
+No DEBUG launcher, no `src/debug/` source set, and no direct composable invocation is used as an
+entry point for any WI.
 
 Per WI: emulator (`scripts/run-android-verify.sh`, `ANDROID_SERIAL=emulator-5554`), real books from
 `test-books/books/` pushed to the device, and a **screenshot** per format — because a right-edge
@@ -516,7 +638,8 @@ AGENTS.md is binding here. Every verification fixture is a **real** book already
 | **R1** | Justification shifts line breaks → page boundaries drift → saved positions land on the wrong page | Low (justification is applied *after* line breaking in both `StaticLayout` and CSS) | **Not assumed — proven** by T5 (per-line char ranges identical, both alignments, CJK+Latin+mixed) and C3 (real-book page count). This is the iOS #92 precedent; the difference is Android's paged index is a persisted structure, so drift would be worse. |
 | **R2** | **The feature is a visible no-op on CJK** — the books it was filed for | **High** (predicted by W12–W14 + W16) | WI-0 measures it **before** production code (§7); AC-5 is an observation, not a pass (§12); a CJK follow-up feature is filed in the same session if confirmed (§13 Q4). This is the plan's headline risk and it is surfaced, not buried. |
 | **R3** | Paged TXT page-bottom mid-paragraph lines stay ragged (the defect that DEFERRED iOS #92 WI-2) | Unknown — Android's paged path differs structurally (§4.2) | Explicitly an **observation** in WI-1's Gate-5, not an assumption either way. If it reproduces, it is documented as a known limitation exactly as iOS did (cosmetic, one line per page) — **not** silently fixed by extending the rendered range, which is precisely what leaked off-page text into iOS's selection surface (`20260605-...:148-160`) and would be far worse on Android where paged selection/highlights/bookmarks are all live. |
-| **R4** | **`publisherStyles = false` changes far more than alignment** — line-height starts applying (W11), the advanced type scale engages, paragraph font sizes flatten to `1rem` | **Certain**, by construction | WI-2 is its own PR, its own audit, its own Gate-5 slice on **both** EPUBs, with before/after screenshots. AC-6 explicitly verifies line spacing now works. The change is disclosed in the PR body as "this also fixes a latent #129 defect", not presented as a pure justify change. |
+| **R4** | **`publisherStyles = false` changes far more than alignment** — line-height starts applying (W11 → bug #367), the advanced type scale engages, paragraph font sizes flatten to `1rem` | **Certain**, by construction | **Bounded and enumerated in §7.2 (E1–E5)**, not left as a vague "blast radius": the gated properties we never set (`paraSpacing`, `paraIndent`, `wordSpacing`, `letterSpacing`, `bodyHyphens`) emit no variable and cannot fire, so exactly five effects are possible and each has its own computed-style verification. WI-2 is its own PR, own audit, own Gate-5 slice on **both** EPUBs with before/after screenshots. §7.2 also argues why the flag cannot be split into its own feature (`textAlign` is inert without it). Disclosed in the PR body + release note as "EPUB typography that was silently inert now applies". |
+| **R11** | The paged-MD heading limitation (§5.2b) rots — a future paginator change makes per-paragraph alignment possible and nobody notices the note is stale | Medium (the paginator is actively developed — #137/#138/#139) | **C2b is a characterisation test**, so the limitation is executable: it fails loudly the moment the constraint stops holding. A prose-only limitation would rot silently. |
 | **R5** | Cross-engine divergence: EPUB auto-hyphenates under justify, TXT/MD and AZW3 do not → Latin looks smoother on EPUB | Medium (cosmetic) | Accepted and documented, exactly as iOS accepted it (`20260609-...:121-125`). `hyphens` for the other engines is a named follow-up, deliberately unbundled (§5, out of scope). |
 | **R6** | Latin justification looks gappy on short lines without hyphenation (TXT/MD, AZW3) | Medium (cosmetic) | Standard justified-without-hyphenation behaviour; matches Apple Books / Kindle defaults and the committed design. Accepted, as on iOS (`20260605-...:222`). |
 | **R7** | AZW3 CSS guards are heuristics — verse-as-`<p>`, blockquote inner prose, faux-headings with unusual classes get force-justified | Medium | Carried over from #95 with its caveats intact (§5.4); Gate-5 runs on a real AZW3 with headings/epigraphs and narrows the selector if a real regression shows, before `VERIFIED`. |
@@ -529,20 +652,30 @@ AGENTS.md is binding here. Every verification fixture is a **real** book already
 ## 12. Acceptance criteria
 
 1. **AC-1** — TXT and MD **prose** renders justified (flush right margin) in **both** Scroll and Paged
-   layouts, on a real book, reached through the production Display path.
-2. **AC-2** — A **wrapping** Markdown heading is **not** justified; the prose following it is.
-3. **AC-3** — Paged pagination is **byte-identical** before and after: same page count, same per-page
+   layouts, on a real book, reached through **P1** (§9.1). Measured by `getLineRight` on non-final
+   lines, not by inspecting the style object.
+2. **AC-2 (scroll)** — In **scroll** mode a **wrapping** Markdown heading is **not** justified; the
+   prose following it is.
+3. **AC-2b (paged)** — In **paged** MD, a wrapping heading **is** justified. This is a **documented
+   known limitation**, not a defect to fix in #156 (§5.2b): `renderPage` concatenates multiple chunks
+   into one `AnnotatedString` rendered by one `Text`, which carries a single `textAlign`. The
+   criterion is met by the limitation being **stated in the evidence file and the row's Notes**, and
+   by AC-3 confirming nothing else regressed. A one-line paged heading remains unaffected.
+4. **AC-3** — Paged pagination is **byte-identical** before and after: same page count, same per-page
    character ranges (T5 + C3). No saved-position drift.
-4. **AC-4** — EPUB body paragraphs compute `text-align: justify` **in the DOM** on the Latin real
+5. **AC-4** — EPUB body paragraphs compute `text-align: justify` **in the DOM** on the Latin real
    EPUB, in both scroll and paged overflow, at open **and** after a live settings change.
-5. **AC-5** — **CJK is measured and recorded, not promised.** The evidence file states, for both
-   `黑暗血时代.txt` and `道诡异仙 - 狐尾的笔.epub`, whether justification is visibly applied, with a
-   screenshot each. If it is not (the predicted outcome, §4.3), the criterion is met by the
-   **recorded finding plus a filed follow-up feature** — not by a claim that CJK justifies.
-6. **AC-6** — EPUB line spacing demonstrably applies after `publisherStyles = false` (computed
-   `line-height` changes with the slider), and no theme/font/size/margin regression is introduced.
-7. **AC-7** — AZW3 prose renders justified while headings do not (WI-3, pending Q2).
-8. **AC-8** — Rule 51: zero new UI. `ReaderSettingsSheet.kt` is untouched; the Display sheet's control
+6. **AC-5** — **CJK is measured and recorded, not promised.** The evidence file states, for both
+   `黑暗血时代.txt` and `道诡异仙 - 狐尾的笔.epub`, whether justification is visibly applied, citing the
+   WI-0 M1/M3 numbers plus a screenshot each. If it is not (the predicted outcome, §4.3), the
+   criterion is met by the **recorded finding plus a filed follow-up feature** — not by a claim that
+   CJK justifies.
+7. **AC-6** — EPUB line spacing demonstrably applies after `publisherStyles = false` (computed
+   `line-height` changes with the slider via **P2**) — i.e. **bug #367 is fixed** — and the §7.2
+   E3/E4 effects are measured and recorded, with no theme/font/size/margin regression.
+8. **AC-7** — AZW3 prose renders justified while headings do not, verified through **P1** with **no
+   Display control involved** (WI-3; see Q2).
+9. **AC-8** — Rule 51: zero new UI. `ReaderSettingsSheet.kt` is untouched; the Display sheet's control
    set is unchanged from `vreader-panels.jsx:61-186`.
 
 ---
@@ -556,10 +689,23 @@ is false on both counts (iOS has no such control; the control is not designed). 
 `BLOCKED: needs-design (#N)`, and #156 does not enter Gate 3 until the bundle lands. The row text
 should be corrected either way, since it currently misstates what iOS shipped.
 
-**Q2 — Is AZW3 in scope?** The row says "TXT/MD + EPUB". But AZW3 is the third reflowable reader, its
-CSS seam already receives `ReaderSettings` (W17), iOS #95 covered the Foliate leg, and the change is
-one rule plus one JVM assertion. Excluding it ships an app where EPUB is justified and AZW3 is ragged.
-**Recommendation: include (WI-3).**
+**Q2 — AZW3 scope: RESOLVED in favour of your ruling; the objection dissolves.** You ruled AZW3 in
+scope; Gate-2 round 2 objected that WI-3's Gate-5 was routed through a Display control AZW3 does not
+have (W18b — true, and my v1 W18 overstated it). **The conflict is not real**, and the resolution is
+your option (a): because #156 ships justify-**by-default with no toggle**, AZW3 needs no Display
+control to receive it — `foliateDisplayCss()` is injected unconditionally at
+`Azw3ReaderActivity.kt:394`, and "Library → open the AZW3 book → look at the body" (**P1**, §9.1) is a
+genuine production entry point. WI-3 stands, its Gate-5 uses P1, and **nothing is assumed as a
+prerequisite**. AZW3's lack of an in-reader Display control is a pre-existing #129/#132 gap that #156
+neither creates, widens, nor depends on → Q6.
+
+**Q6 — AZW3 has no in-reader Display control at all (observation, not a #156 blocker).** An AZW3
+reader cannot change theme/font/size/spacing/margin from within the reader (W18b); the settings apply
+only as whatever the store already holds. That is a genuine parity gap against the TXT/MD/EPUB hosts,
+but it is **pre-existing, independent of #156, and not a rule-51 `needs-design` case** — the Display
+sheet is already designed (`vreader-panels.jsx:61-186`) and already built; what is missing is a
+*call site* in the AZW3 chrome, i.e. code, not design. Flagging it so you can file it as its own
+bug/feature row if you want it tracked. **#156 does not wait on it.**
 
 **Q3 — iOS #95's CJK evidence.** #95's row claims a device-verified CJK EPUB computing
 `text-align: justify` on Readium. W12–W14 say that should be impossible for a publication Readium
@@ -621,3 +767,38 @@ preference mapping.
   7. (5) and (6) together mean the feature is predicted to be a **visible no-op on CJK — the case it
      was filed for**. WI-0 is a measurement spike placed *before* any production code so this is
      discovered at Gate 1/3, not at Gate 5b.
+
+- **v2 (2026-08-05)** — Gate-2 round 1 (Codex gpt-5.5/high, independent). The auditor verified the v1
+  research in substance (no iOS Display control; `publisherStyles` unset; the advanced + CJK gates
+  real; Compose inter-word only) and endorsed WI-0-as-a-measurement-gate. **Two HIGH findings, both
+  reproduced in code before fixing, both closed:**
+  - **HIGH 1 — W18 overstated production reachability.** v1 asserted the Display path covered every
+    host; **AZW3 has no Display control** (`Azw3ReaderActivity.kt:11-12`, still true post-#140-WI-5 at
+    `Azw3ReaderChrome.kt:6/:88/:133-134`), so WI-3's Gate-5 was wired to a control that does not
+    exist — the #114/#118/#120/#122 failure class. **Fixed** by splitting W18 into W18a (Display path
+    = EPUB/TXT-MD only), W18b (AZW3 has none), W18c (opening a book is itself a production entry
+    point), and by adding §9.1's two-entry-point model. The AZW3 leg now verifies through **P1**
+    ("Library → open the book"), which is sound *precisely because* the feature ships
+    justify-by-default with no toggle — the coordinator's option (a). WI-3 survives with no assumed
+    prerequisite; AZW3's missing Display control is recorded as a pre-existing, independent gap
+    (Q6), not a #156 dependency.
+  - **HIGH 2 — paged Markdown cannot satisfy the heading criterion.** Verified: `TxtPaginator.renderPage`
+    (`:331-376`) concatenates multiple chunks into ONE `AnnotatedString`, rendered by ONE `Text`
+    (`TxtReaderBody.kt:789-792`); `renderPage`'s `style` parameter is literally
+    `@Suppress("UNUSED_PARAMETER")` (`:335`); no heading metadata exists in `MarkdownRendered`,
+    `ChunkTextMapper`, or `PageOffsetMap`. **Fixed** by scoping the exclusion to scroll mode (§5.2),
+    stating the paged behaviour plainly as a known limitation with its narrow blast radius (§5.2b),
+    splitting AC-2 into AC-2 (scroll, asserted) and AC-2b (paged, documented), and adding **C2b as a
+    characterisation test** so the limitation cannot rot silently (R11). The `ParagraphStyle`-span
+    alternative is analysed and rejected *with its specific hazard* — span boundaries force paragraph
+    breaks, which unlike `textAlign` **do** affect line breaking, against a phase-1 measurer that
+    works per chunk and a phase-2 render that works per page.
+  - **Tightened per the verdict**: §7.1 rewrites WI-0's acceptance as four measurements (M1–M4) of
+    **pixels (`getLineRight`) and computed style**, explicitly excluding "a preference was
+    submitted", with a Latin positive control (M2) that invalidates M1 if it fails. §7.2 replaces
+    WI-2's vague "large blast radius" with the **bounded, enumerated** effect set E1–E5, derived from
+    which `--USER__*` variables `toEpubPreferences()` actually emits, each individually verified —
+    plus the argument for why the flag cannot be split into its own feature (`textAlign` is inert
+    without it).
+  - **Folded in**: bug **#367 / GH #2074** now referenced from the header, W11, §7.2 E2, and AC-6;
+    WI-0's M4 settles it in the same emulator run.
