@@ -201,6 +201,10 @@ class PdfReaderActivity : ComponentActivity() {
                             controller = annotationsIo,
                             bookKey = bookKey,
                             bookTitle = s.book.title,
+                            // The MERGE must survive this reader being finished/rotated (Gate-4
+                            // round 1, High) — the applier rethrows CancellationException, so a
+                            // composition-scoped apply would roll the transaction back silently.
+                            applyScope = container.appScope,
                             onLaunching = { chromeState.value = chromeState.value.copy(sheet = ReaderSheet.None) },
                             onApplied = { annotationsRefresh++ },
                         )

@@ -39,6 +39,19 @@ import java.io.File
  *     activity must carry the expected fingerprint key in the very intent extra the production
  *     Library route put there. A title-substring match against the wrong row would otherwise assert
  *     against a different document.
+ *
+ * **Push the real fixtures before EVERY connected run** — the connected task uninstalls the app at
+ * the end, which wipes `/sdcard/Android/data/com.vreader.app/`:
+ *
+ * ```
+ * adb -s emulator-5554 shell mkdir -p /sdcard/Android/data/com.vreader.app/files
+ * adb -s emulator-5554 push 'test-books/books/epub/The Half Second - Li Xiaolai.epub' \
+ *     /sdcard/Android/data/com.vreader.app/files/wi7-real.epub
+ * adb -s emulator-5554 push 'test-books/books/txt/黑暗血时代.txt' \
+ *     /sdcard/Android/data/com.vreader.app/files/wi7-real.txt
+ * adb -s emulator-5554 push 'test-books/books/azw3/Bei Tao Yan De Yong Qi - Zi Wo.azw3' \
+ *     /sdcard/Android/data/com.vreader.app/files/wi7-real.azw3
+ * ```
  */
 object AnnotationImportProductionPath {
 

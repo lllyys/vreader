@@ -956,6 +956,10 @@ class ReaderActivity : AppCompatActivity() {
                     controller = annotationsIo,
                     bookKey = book?.fingerprintKey.orEmpty(),
                     bookTitle = chromeModel.value.title,
+                    // The MERGE must survive this reader being finished/rotated: once the user has
+                    // tapped `Import N items` the work is committed as far as they are concerned,
+                    // and the applier rethrows CancellationException (Gate-4 round 1, High).
+                    applyScope = container.appScope,
                     onLaunching = { chromeState.value = chromeState.value.copy(sheet = ReaderSheet.None) },
                     onApplied = ::refreshAnnotationsSnapshot,
                 )

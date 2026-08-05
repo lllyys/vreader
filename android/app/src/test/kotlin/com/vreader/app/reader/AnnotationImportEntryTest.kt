@@ -6,11 +6,21 @@ import com.vreader.app.annotations.ImportFailure
 import com.vreader.app.annotations.ImportParseResult
 import com.vreader.app.annotations.ImportPreview
 import com.vreader.app.annotations.ImportPreviewRow
+import com.vreader.app.annotations.KindCounts
+import com.vreader.app.annotations.RestoreAnnotationsReport
 import com.vreader.app.imports.IncomingBookResolver
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import vreader.contracts.backup.BackupAnnotationsEnvelope
 import vreader.contracts.backup.BackupSchema
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -54,6 +64,12 @@ class AnnotationImportEntryTest {
         val RLO = 0x202E.toChar()   // RIGHT-TO-LEFT OVERRIDE
         val RLM = 0x200F.toChar()   // RIGHT-TO-LEFT MARK
     }
+
+    private fun emptyReport() = RestoreAnnotationsReport(
+        highlights = KindCounts(0, 0, 0),
+        notes = KindCounts(0, 0, 0),
+        bookmarks = KindCounts(0, 0, 0),
+    )
 
     private fun preview(
         fileName: String = "annotations.json",
@@ -177,6 +193,79 @@ class AnnotationImportEntryTest {
     fun applyFailure_ofAnUntypedThrowable_reportsUnreadable_notASilentSuccess() {
         val state = importApplyFailureState(IOException("db went away"), fileName = "annotations.json")
         assertEquals(ImportFailure.Unreadable, state.reason)
+    }
+
+    // ---- 4. the merge runs on the scope it was handed, not on the caller's ---------------------
+
+    @Test
+    fun applyRunsToCompletion_onTheHandedScope_afterTheCallersScopeIsCancelled() = runBlocking {
+        // The Gate-4 round-1 High, as a seam test: once the user has tapped `Import N items` the
+        // merge must not be killed by the composition going away. `AnnotationsImportApplier`
+        // rethrows `CancellationException`, so a cancelled apply rolls its transaction back and
+        // NOTHING lands — with no surface to say so.
+        val durable = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val composition = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val started = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val settled = CompletableDeferred<AnnotationImportSheetState?>()
+        try {
+            launchAnnotationImportApply(
+                scope = durable,
+                preview = preview(),
+                apply = {
+                    started.complete(Unit)
+                    release.await()
+                    Result.success(emptyReport())
+                },
+                onSettled = { settled.complete(it) },
+            )
+            withTimeout(5_000) { started.await() }
+            // The composition dies mid-merge — a rotation, a back press, a finish().
+            composition.cancel()
+            release.complete(Unit)
+            val next = withTimeout(5_000) { settled.await() }
+            assertNull("a successful merge dismisses the sheet", next)
+        } finally {
+            durable.cancel()
+            composition.cancel()
+        }
+    }
+
+    @Test
+    fun applyOnTheHandedScope_mapsAFailureToTheDesignedErrorBranch() = runBlocking {
+        val durable = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val settled = CompletableDeferred<AnnotationImportSheetState?>()
+        try {
+            launchAnnotationImportApply(
+                scope = durable,
+                preview = preview(fileName = "picked.json"),
+                apply = { Result.failure(AnnotationImportFailedException(ImportFailure.BookMissing)) },
+                onSettled = { settled.complete(it) },
+            )
+            val next = withTimeout(5_000) { settled.await() }
+            val failed = next as AnnotationImportSheetState.Failed
+            assertEquals(ImportFailure.BookMissing, failed.reason)
+            assertEquals("picked.json", failed.fileName)
+        } finally {
+            durable.cancel()
+        }
+    }
+
+    @Test
+    fun applyNeverStartsOnACancelledScope_soAStaleEntryCannotWriteHalfAMerge() = runBlocking {
+        // The other half of the contract: handing a DEAD scope must not run the merge at all
+        // (rather than run it and drop the result), so a caller that wires the wrong scope fails
+        // loudly in this test instead of silently in production.
+        val dead = CoroutineScope(SupervisorJob() + Dispatchers.Default).also { it.cancel() }
+        var applied = false
+        val job = launchAnnotationImportApply(
+            scope = dead,
+            preview = preview(),
+            apply = { applied = true; Result.success(emptyReport()) },
+            onSettled = {},
+        )
+        job.join()
+        assertFalse("a cancelled scope must not run the merge", applied)
     }
 
     @Test

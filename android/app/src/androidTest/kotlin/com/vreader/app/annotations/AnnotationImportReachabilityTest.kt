@@ -58,18 +58,8 @@ import org.junit.runners.MethodSorters
  * **Fixtures — real books first, and the fallback is FAILURE, not a skip.** EPUB / TXT / AZW3 use the
  * real local books, digest-pinned; PDF uses the committed 3-page asset under the stated exception
  * (`test-books/books/` holds no PDF at all). Nothing here calls `assumeTrue` — an absent fixture must
- * go RED, not exit 0 like a pass (bug #369's shape). The connected task uninstalls the app at run
- * end, so re-push before EVERY run:
- *
- * ```
- * adb -s emulator-5554 shell mkdir -p /sdcard/Android/data/com.vreader.app/files
- * adb -s emulator-5554 push 'test-books/books/epub/The Half Second - Li Xiaolai.epub' \
- *     /sdcard/Android/data/com.vreader.app/files/wi7-real.epub
- * adb -s emulator-5554 push 'test-books/books/txt/黑暗血时代.txt' \
- *     /sdcard/Android/data/com.vreader.app/files/wi7-real.txt
- * adb -s emulator-5554 push 'test-books/books/azw3/Bei Tao Yan De Yong Qi - Zi Wo.azw3' \
- *     /sdcard/Android/data/com.vreader.app/files/wi7-real.azw3
- * ```
+ * go RED, not exit 0 like a pass (bug #369's shape). The `adb push` commands live once, on
+ * [AnnotationImportProductionPath]; re-push before EVERY run.
  *
  * Run ONE class per connected invocation (a comma-joined `class=A,B` fast-fails with `tests=0`), and
  * never drive the emulator while the run is in flight (rule 52 Cause D).

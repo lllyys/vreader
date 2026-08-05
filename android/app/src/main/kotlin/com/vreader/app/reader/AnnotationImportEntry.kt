@@ -34,6 +34,14 @@
 //  - THE PREVIEW TRAVELS BY IDENTITY. `onConfirm` hands back the very `ImportPreview` object the
 //    reader produced, so "the number the user approves is the number they get" (section 6.4) is an
 //    object-identity property rather than a re-derivation that could disagree.
+//  - THE MERGE RUNS ON A SCOPE THAT OUTLIVES THE COMPOSITION, THE PREVIEW DOES NOT. Once the user
+//    has tapped `Import N items` the work is committed as far as they are concerned, and
+//    `AnnotationsImportApplier` rethrows `CancellationException` — so an apply started on a
+//    `rememberCoroutineScope()` is cancelled by a rotation, a back press, or a `finish()`, the
+//    transaction rolls back, and NOTHING lands with no surface to say so. The hosts therefore pass
+//    the process-lifetime `container.appScope` for the apply (Gate-4 round 1, High). The PREVIEW
+//    stays on the composition scope deliberately: it writes nothing, and a user who leaves before
+//    the sheet appears wants it abandoned.
 //  - APPLY FAILURE RE-RENDERS THE SAME DESIGNED ERROR BRANCH (section 3.2 / D-10b), keeping the
 //    typed reason. The transaction is atomic, so the honest choice really is "all, or the blob".
 //
@@ -52,6 +60,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import com.vreader.app.annotations.AnnotationImportFailedException
 import com.vreader.app.annotations.AnnotationImportPreviewSheet
@@ -60,9 +69,14 @@ import com.vreader.app.annotations.AnnotationsIoController
 import com.vreader.app.annotations.ImportFailure
 import com.vreader.app.annotations.ImportParseResult
 import com.vreader.app.annotations.ImportPreview
+import com.vreader.app.annotations.RestoreAnnotationsReport
 import com.vreader.app.imports.IncomingBookResolver
 import com.vreader.app.reader.settings.ReaderTheme
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * The MIME hint handed to the system picker.
@@ -92,10 +106,13 @@ class AnnotationImportEntry internal constructor(
 /**
  * Registers the production SAF launcher for [bookKey] and drives the designed preview sheet.
  *
+ * [applyScope] MUST outlive this composition — production passes `container.appScope`. It carries
+ * only the MERGE; see this file's header for why the two phases get different scopes.
+ *
  * [onLaunching] runs immediately before the picker opens — the hosts use it to close the Details
- * sheet the row was tapped in. [onApplied] runs after a successful merge; hosts that keep a
- * one-shot annotations snapshot use it to refresh, and hosts whose snapshot is a live Flow need
- * nothing.
+ * sheet the row was tapped in. [onApplied] runs on the main thread after a successful merge; hosts
+ * that keep a one-shot annotations snapshot use it to refresh, and hosts whose snapshot is a live
+ * Flow need nothing.
  *
  * Must be called from a composition hosted by a `ComponentActivity`
  * (`rememberLauncherForActivityResult`'s requirement) — every reader host is one.
@@ -105,17 +122,21 @@ internal fun rememberAnnotationImportEntry(
     controller: AnnotationsIoController,
     bookKey: String,
     bookTitle: String,
+    applyScope: CoroutineScope,
     onLaunching: () -> Unit = {},
     onApplied: () -> Unit = {},
 ): AnnotationImportEntry {
-    val scope = rememberCoroutineScope()
+    val previewScope = rememberCoroutineScope()
     var sheet by remember(bookKey) { mutableStateOf<AnnotationImportSheetState?>(null) }
+    // The host callback is read at CALL time, not at registration time: the merge can settle after
+    // a recomposition handed us a newer one.
+    val latestOnApplied by rememberUpdatedState(onApplied)
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         // A cancelled pick is silent — no state, no surface (see this file's header).
         if (uri == null) return@rememberLauncherForActivityResult
         val fallbackName = importPickerFileName(uri.lastPathSegment)
-        scope.launch {
+        previewScope.launch {
             sheet = importSheetStateFor(controller.preview(uri, bookKey, bookTitle), fallbackName)
         }
     }
@@ -128,18 +149,41 @@ internal fun rememberAnnotationImportEntry(
         },
         dismiss = { sheet = null },
         confirm = { preview ->
-            scope.launch {
-                controller.apply(preview)
-                    .onSuccess {
-                        // The observable result is the designed annotations list itself (section
-                        // 3.2) — no "42 imported!" banner is invented here.
-                        sheet = null
-                        onApplied()
-                    }
-                    .onFailure { error -> sheet = importApplyFailureState(error, preview.fileName) }
+            launchAnnotationImportApply(applyScope, preview, controller::apply) { next ->
+                // Back onto the main thread for the state write + the host's refresh. If this
+                // composition is already gone the write lands on an orphaned state (harmless) and
+                // the host's refresh is a no-op on its cancelled lifecycle scope — but the MERGE
+                // itself has already committed, which is the point.
+                withContext(Dispatchers.Main) {
+                    sheet = next
+                    // On success the observable result is the designed annotations list itself
+                    // (section 3.2) — no "42 imported!" banner is invented here.
+                    if (next == null) latestOnApplied()
+                }
             }
         },
     )
+}
+
+/**
+ * Run the approved merge on [scope] and hand the sheet's next state to [onSettled] (null = the
+ * sheet dismisses; a [AnnotationImportSheetState.Failed] re-renders the designed error blob).
+ *
+ * Extracted from the composable so the scope choice is a value a test can supply: the whole point
+ * of this seam is that the work continues on the scope it was HANDED, whatever happens to the
+ * caller's own scope.
+ */
+internal fun launchAnnotationImportApply(
+    scope: CoroutineScope,
+    preview: ImportPreview,
+    apply: suspend (ImportPreview) -> Result<RestoreAnnotationsReport>,
+    onSettled: suspend (AnnotationImportSheetState?) -> Unit,
+): Job = scope.launch {
+    val next = apply(preview).fold(
+        onSuccess = { null },
+        onFailure = { error -> importApplyFailureState(error, preview.fileName) },
+    )
+    onSettled(next)
 }
 
 /**
