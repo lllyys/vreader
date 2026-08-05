@@ -68,6 +68,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import kotlin.coroutines.cancellation.CancellationException
 
 @RunWith(RobolectricTestRunner::class)
 class IncomingImportCoordinatorTest {
@@ -138,6 +139,59 @@ class IncomingImportCoordinatorTest {
         assertEquals(OVERFLOW_BATCH, outcomes.size)
         assertEquals(IncomingImportOutcome.Unsupported("f1.xyz"), outcomes.first())
         assertEquals(IncomingImportOutcome.Unsupported("f$OVERFLOW_BATCH.xyz"), outcomes.last())
+    }
+
+    @Test
+    fun `undelivered outcomes are BOUNDED, keeping the oldest, and never stall the worker`() = runTest {
+        val fixture = fixture()
+        val ceiling = IncomingImportCoordinator.MAX_PENDING_OUTCOMES
+        // An exported entry point can be launched in a loop; with no collector this must not grow
+        // without limit. Past the bound the contract degrades EXPLICITLY, and only that far.
+        fixture.coordinator.enqueue(
+            (1..ceiling + 100).map { IncomingItem.PreResolved(IncomingImportOutcome.Unsupported("f$it.xyz")) },
+        )
+        testScheduler.runCurrent()
+        // ... and the worker is still alive behind all of that.
+        fixture.coordinator.enqueue(listOf(fixture.readyItem("after.epub")))
+        testScheduler.runCurrent()
+
+        val outcomes = fixture.collectOutcomes()
+        assertEquals(ceiling, outcomes.size)
+        assertEquals("the OLDEST are kept", IncomingImportOutcome.Unsupported("f1.xyz"), outcomes.first())
+        assertEquals("the import still ran", 1, importer.calls.size)
+        assertEquals(0, fixture.coordinator.outstandingSlots)
+    }
+
+    @Test
+    fun `concurrent callers can never hold more than MAX_IN_FLIGHT slots at once`() = runTest {
+        // The other admission tests are single-threaded; production `appScope` is
+        // Dispatchers.Default and ImportActivity instances are genuinely concurrent.
+        val coordinator = fixture().coordinator
+        val peak = AtomicInteger(0)
+        val held = AtomicInteger(0)
+        val start = CountDownLatch(1)
+        val threads = (1..8).map {
+            Thread {
+                start.await()
+                repeat(200) {
+                    val slot = coordinator.acquireSlot()
+                    if (slot != null) {
+                        // The increment stays OUTSIDE updateAndGet: that lambda re-runs on CAS
+                        // contention, so a side effect inside it would count the same slot twice.
+                        val depth = held.incrementAndGet()
+                        peak.updateAndGet { p -> maxOf(p, depth) }
+                        held.decrementAndGet()
+                        slot.release()
+                        slot.release()          // the idempotent double release, under contention
+                    }
+                }
+            }.apply { isDaemon = true; start() }
+        }
+        start.countDown()
+        threads.forEach { it.join(30_000) }
+
+        assertTrue("the cap held under contention: peak=${peak.get()}", peak.get() <= IncomingImportCoordinator.MAX_IN_FLIGHT)
+        assertEquals("and every slot came back", 0, coordinator.outstandingSlots)
     }
 
     @Test
@@ -476,9 +530,9 @@ class IncomingImportCoordinatorTest {
     }
 
     @Test
-    fun `a stream whose close throws an Error does not kill the single worker`() = runTest {
+    fun `a stream whose close throws a non-fatal Error does not kill the single worker`() = runTest {
         val fixture = fixture()
-        val hostile = HostileCloseStream()
+        val hostile = HostileCloseStream { AssertionError("hostile close") }
         fixture.coordinator.enqueue(
             listOf(fixture.readyItem("hostile.epub", stream = hostile), fixture.readyItem("after.epub")),
         )
@@ -489,6 +543,46 @@ class IncomingImportCoordinatorTest {
         assertEquals("the queue survived it", 2, outcomes.size)
         assertTrue("and the NEXT item still imported", outcomes[1] is IncomingImportOutcome.Imported)
         assertEquals(0, fixture.coordinator.outstandingSlots)
+    }
+
+    @Test
+    fun `a stream whose close throws CancellationException does not kill the single worker`() = runTest {
+        // The nastiest shape: from a NON-SUSPENDING cleanup path this is just a throwable the
+        // provider chose, but a cleanup that rethrows "cancellation" unconditionally would
+        // mistake it for its own coroutine dying and take the whole queue with it.
+        val fixture = fixture()
+        val hostile = HostileCloseStream { CancellationException("provider says cancelled") }
+        fixture.coordinator.enqueue(
+            listOf(fixture.readyItem("hostile.epub", stream = hostile), fixture.readyItem("after.epub")),
+        )
+        testScheduler.runCurrent()
+
+        val outcomes = fixture.collectOutcomes()
+        assertTrue("close() was attempted", hostile.closeAttempts.get() > 0)
+        assertEquals("the queue survived it", 2, outcomes.size)
+        assertTrue("and the NEXT item still imported", outcomes[1] is IncomingImportOutcome.Imported)
+        assertEquals(0, fixture.coordinator.outstandingSlots)
+    }
+
+    @Test
+    fun `a queued stream throwing from close at shutdown still releases the items behind it`() = runTest {
+        val fixture = fixture()
+        importer.gate = CompletableDeferred()               // item 1 never finishes
+        val hostile = HostileCloseStream { AssertionError("hostile close") }
+        val trailing = List(2) { RecordingStream(bytes(32)) }
+        fixture.coordinator.enqueue(
+            listOf(fixture.readyItem("running.epub")) +
+                listOf(fixture.readyItem("hostile.epub", stream = hostile)) +
+                trailing.mapIndexed { i, s -> fixture.readyItem("t$i.epub", stream = s) },
+        )
+        testScheduler.runCurrent()
+
+        fixture.appScope.cancel()
+        testScheduler.runCurrent()
+
+        assertTrue("the hostile item was reached", hostile.closeAttempts.get() > 0)
+        assertTrue("one bad close must not strand the queue behind it", trailing.all { it.closed })
+        assertEquals("and every slot came back", 0, fixture.coordinator.outstandingSlots)
     }
 
     // ── the .part sweep ──────────────────────────────────────────────────────────
@@ -752,9 +846,10 @@ class IncomingImportCoordinatorTest {
         }
     }
 
-    /** Throws an `Error` — not an Exception — from close(). There is exactly ONE worker, and a
-     *  provider-supplied stream is not obliged to be well-behaved. */
-    private class HostileCloseStream : InputStream() {
+    /** Throws whatever a hostile provider might throw from close() — an `Error` or, nastier, a
+     *  `CancellationException`, which a naive cleanup would mistake for ITS OWN coroutine being
+     *  cancelled and rethrow, killing the single worker. */
+    private class HostileCloseStream(private val thrown: () -> Throwable) : InputStream() {
         val closeAttempts = AtomicInteger(0)
         private var remaining = 32
 
@@ -762,7 +857,7 @@ class IncomingImportCoordinatorTest {
 
         override fun close() {
             closeAttempts.incrementAndGet()
-            throw OutOfMemoryError("hostile close")
+            throw thrown()
         }
     }
 

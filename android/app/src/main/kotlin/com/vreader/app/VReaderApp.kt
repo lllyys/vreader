@@ -360,9 +360,16 @@ class AppContainer(
      * A SECOND [BookImporter] over the SAME [booksDir] and the SAME [repository] singleton —
      * identical storage and identity, differing only in being pinned to [inboundLane].
      * `importStream` switches dispatchers internally, so reusing the SAF-path importer would
-     * park an untrusted read on shared IO no matter what the coordinator does. Two instances
-     * are safe: the importer is stateless, and a concurrent same-key import already relies on
-     * a unique temp file plus an ATOMIC_MOVE.
+     * park an untrusted read on shared IO no matter what the coordinator does.
+     *
+     * A second instance adds no state: the importer holds none, each copy gets its own temp
+     * file, and promotion is an ATOMIC_MOVE. It does NOT make concurrent same-key imports
+     * transactional — BookImporter's promote -> upsert -> conditional-rollback sequence is not
+     * atomic per key, so two concurrent same-key imports where one upsert FAILS can leave the
+     * winner's row pointing at a deleted artifact. That hazard is pre-existing and instance-
+     * independent (two concurrent calls on ONE instance race identically); fixing it needs a
+     * per-key lock inside BookImporter, which is outside this WI's write-set. Reported as a
+     * follow-up by Gate-4 round 2.
      */
     private val inboundImporter: BookImporter by lazy {
         BookImporter(booksDir, repository, inboundLane)

@@ -24,10 +24,11 @@
 //     app has, and starving them would take the whole app down with the import. The lane is
 //     elastic, so a parked thread never denies a fresh import; the number of simultaneously
 //     parked calls is bounded instead by [BoundedCallGate]'s abandoned-call ceiling.
-//   * OUTCOMES GO THROUGH AN UNLIMITED CHANNEL, not a non-replaying SharedFlow and not a
-//     dropping buffer: an outcome raised before MainActivity collects (cold start / rotation)
-//     must survive, and the one-outcome-per-input contract must not be silently violated by a
-//     buffer policy (D9).
+//   * OUTCOMES GO THROUGH A GENEROUSLY-BOUNDED CHANNEL, never a non-replaying SharedFlow: an
+//     outcome raised before MainActivity collects (cold start / rotation) must survive (D9).
+//     The bound is >12x a full inbound batch, so one-outcome-per-input holds for every realistic
+//     case; past it delivery degrades explicitly rather than either suspending the worker or
+//     letting an exported entry point grow memory without limit.
 //
 // Known limitation: `wasAlreadyPresent` is a heuristic — see its KDoc. The exact signal needs
 // BookImporter to report it, which is outside this WI's write-set.
@@ -45,6 +46,7 @@ import kotlinx.coroutines.ExecutorCoroutineDispatcher
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.async
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -275,6 +277,14 @@ internal fun dedicatedThreadDispatcher(name: String): CoroutineDispatcher =
         Thread(runnable, "vreader-$name-${laneThreads.incrementAndGet()}").apply { isDaemon = true }
     }.asCoroutineDispatcher()
 
+/**
+ * Errors that mean the VM itself is compromised. Everything else an attacker-supplied stream
+ * can raise is contained per item; these are rethrown, because swallowing them would hide real
+ * process corruption behind a "one import failed" toast.
+ */
+internal fun Throwable.isFatal(): Boolean =
+    this is VirtualMachineError || this is ThreadDeath || this is LinkageError
+
 /** Thrown by [CountingGuardStream] past the byte cap; mapped to [IncomingImportOutcome.TooLarge]. */
 internal class ImportSizeCapExceeded(limit: Long) : IOException("import exceeded $limit bytes")
 
@@ -373,14 +383,29 @@ class IncomingImportCoordinator internal constructor(
     /** UNLIMITED so `enqueue` never suspends the caller; admission is bounded by slots. */
     private val queue = Channel<IncomingItem>(Channel.UNLIMITED)
 
-    // UNLIMITED, and written with `trySend`, so emitting an outcome can NEITHER suspend the one
-    // worker (which a full buffer would, wedging every later import) NOR silently drop an
-    // outcome (which a dropping buffer would, breaking one-outcome-per-input and D9's
-    // cold-start guarantee). Growth without a collector is bounded in practice: every inbound
-    // batch is capped at MAX_BATCH and WI-5 brings MainActivity — the collector — to the front.
-    private val outcomeChannel = Channel<IncomingImportOutcome>(Channel.UNLIMITED)
+    // Written with `trySend`, so emitting can never suspend the ONE worker — a buffer that made
+    // the worker wait for a collector would wedge every later import.
+    //
+    // The capacity is a REAL bound, spelled out, with DROP_LATEST: an exported entry point can
+    // be launched in a loop, and neither this channel nor the input queue is otherwise bounded
+    // (PreResolved items hold no slot), so an unlimited buffer is a memory-exhaustion surface
+    // (Gate-4 round 2, High). MAX_PENDING_OUTCOMES is >12x a full inbound batch, so the
+    // one-outcome-per-input contract holds for every realistic cold start; past it the contract
+    // degrades EXPLICITLY to "the oldest MAX_PENDING_OUTCOMES are delivered". That costs at most
+    // an advisory failure toast — library state is unaffected either way (D9's accepted Low) —
+    // and it is the only degradation that keeps both liveness and memory bounded.
+    //
+    // The capacity is also spelled out because `Channel(Channel.BUFFERED, <non-SUSPEND policy>)`
+    // does NOT mean "64 with that policy": it builds a ConflatedBufferedChannel of capacity ONE,
+    // which silently reduces a whole batch to its last outcome. (Caught by test, not by review.)
+    private val outcomeChannel =
+        Channel<IncomingImportOutcome>(MAX_PENDING_OUTCOMES, BufferOverflow.DROP_LATEST)
 
     val outcomes: Flow<IncomingImportOutcome> = outcomeChannel.receiveAsFlow()
+
+    private fun emit(outcome: IncomingImportOutcome) {
+        outcomeChannel.trySend(outcome)
+    }
 
     /** Slots (queued + running) held process-wide; reserved by WI-5 BEFORE it opens a stream. */
     private val outstanding = AtomicInteger(0)
@@ -400,7 +425,8 @@ class IncomingImportCoordinator internal constructor(
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Throwable) {
-                    outcomeChannel.trySend(IncomingImportOutcome.Failed)
+                    if (e.isFatal()) throw e
+                    emit(IncomingImportOutcome.Failed)
                 }
             }
         }
@@ -421,8 +447,16 @@ class IncomingImportCoordinator internal constructor(
      * A refused reservation is `PreResolved(Failed)` with nothing opened.
      */
     fun acquireSlot(): ImportSlot? {
-        // Parked calls hold a thread + an fd each; admitting past this ceiling would let a
-        // hostile provider convert recycled slots into an unbounded pile of them.
+        // Parked calls hold a thread + an fd each; without this, a hostile provider could
+        // convert recycled slots into an unbounded pile of them.
+        //
+        // This is a THRESHOLD, not a strict ceiling, and the difference is deliberate: it is
+        // read separately from the slot CAS, so up to [MAX_IN_FLIGHT] already-admitted items can
+        // still convert after the last check. The provable worst case is therefore
+        // MAX_ABANDONED_CALLS + MAX_IN_FLIGHT parked calls (Gate-4 round 2, Medium — the earlier
+        // "strict 20" claim was false). Folding both into ONE budget would make it strict, and
+        // was rejected: 20 permanently-stuck providers would then deny every future import,
+        // which is exactly the silent-denial failure D8 rejected the caller-local pool for.
         if (boundedCalls.abandonedCalls >= MAX_ABANDONED_CALLS) return null
         while (true) {
             val n = outstanding.get()
@@ -454,7 +488,7 @@ class IncomingImportCoordinator internal constructor(
                     owned.decrementAndGet()
                     reject(ready)
                 } else {
-                    outcomeChannel.trySend((item as IncomingItem.PreResolved).outcome)
+                    emit((item as IncomingItem.PreResolved).outcome)
                 }
             }
         }
@@ -462,9 +496,9 @@ class IncomingImportCoordinator internal constructor(
 
     private suspend fun process(item: IncomingItem) {
         when (item) {
-            is IncomingItem.PreResolved -> outcomeChannel.trySend(item.outcome)
+            is IncomingItem.PreResolved -> emit(item.outcome)
             is IncomingItem.Ready -> try {
-                outcomeChannel.trySend(runImport(item.pending))
+                emit(runImport(item.pending))
             } finally {
                 // Runs on EVERY exit incl. cancellation: the slot is released when the WORKER
                 // is done with the item, never when a leaked thread finally dies.
@@ -542,7 +576,7 @@ class IncomingImportCoordinator internal constructor(
     private fun reject(item: IncomingItem.Ready) {
         closeQuietly(item.pending.stream)
         item.slot.release()
-        outcomeChannel.trySend(IncomingImportOutcome.Failed)
+        emit(IncomingImportOutcome.Failed)
     }
 
     private fun tryOwn(): Boolean {
@@ -553,17 +587,25 @@ class IncomingImportCoordinator internal constructor(
         }
     }
 
-    /** Stops admission and releases every item the dead worker will never process. */
+    /**
+     * Stops admission and releases every item the dead worker will never process.
+     *
+     * Each item is isolated: this runs inside a completion handler, so one hostile stream
+     * throwing from `close()` must not abort the drain and strand every item behind it
+     * (Gate-4 round 2, High). The slot is released in a `finally` for the same reason.
+     */
     private fun shutdown() {
         queue.close()
         while (true) {
             when (val item = queue.tryReceive().getOrNull()) {
                 null -> return
-                is IncomingItem.Ready -> {
+                is IncomingItem.Ready -> try {
                     owned.decrementAndGet()
                     reject(item)
+                } finally {
+                    item.slot.release()
                 }
-                is IncomingItem.PreResolved -> outcomeChannel.trySend(item.outcome)
+                is IncomingItem.PreResolved -> emit(item.outcome)
             }
         }
     }
@@ -581,16 +623,21 @@ class IncomingImportCoordinator internal constructor(
         }
     }
 
-    /** Swallows EVERY non-cancellation throwable, `Error` included: this runs in the single
-     *  worker's `finally`, and a hostile stream must not be able to kill the queue by throwing
-     *  from `close()`. There is nothing a caller could do with the failure anyway. */
+    /**
+     * Contains everything a provider's `close()` can throw — including a
+     * `CancellationException`, which from a NON-SUSPENDING cleanup path is just another
+     * throwable an attacker-supplied stream chose to raise, NOT this coroutine being cancelled.
+     * Rethrowing it here would replace the item's outcome, propagate out of the single worker
+     * and wedge the queue (Gate-4 round 2, High). Only genuinely process-fatal errors pass
+     * through: hiding those would obscure real VM corruption, and the process is going down
+     * regardless.
+     */
     private fun closeQuietly(stream: InputStream) {
         try {
             stream.close()
-        } catch (e: CancellationException) {
-            throw e
         } catch (e: Throwable) {
-            // Nothing actionable: the fd is the provider's to release.
+            if (e.isFatal()) throw e
+            // Otherwise nothing actionable: the fd is the provider's to release.
         }
     }
 
@@ -601,10 +648,15 @@ class IncomingImportCoordinator internal constructor(
         /** PROCESS-WIDE in-flight cap (queued + running), distinct from ImportActivity's per-intent MAX_BATCH. */
         const val MAX_IN_FLIGHT = 20
 
-        /** Ceiling on calls the app has walked away from that are still parked (one thread + one
-         *  fd each). Separate from [MAX_IN_FLIGHT] so a handful of stuck providers cannot deny
-         *  ordinary imports, and self-healing, so denial lasts only as long as the stall. */
+        /** Admission threshold on calls the app has walked away from that are still parked (one
+         *  thread + one fd each) — see [acquireSlot] for why it is a threshold rather than a
+         *  strict ceiling, and for the provable worst case. Separate from [MAX_IN_FLIGHT] so a
+         *  handful of stuck providers cannot deny ordinary imports, and self-healing, so denial
+         *  lasts only as long as the stall does. */
         const val MAX_ABANDONED_CALLS = 20
+
+        /** Undelivered outcomes retained while nothing is collecting — see [outcomeChannel]. */
+        const val MAX_PENDING_OUTCOMES = 256
 
         val IMPORT_TIMEOUT: Duration = 5.minutes
         val STALL_TIMEOUT: Duration = 60.seconds
