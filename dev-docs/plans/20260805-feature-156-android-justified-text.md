@@ -442,7 +442,7 @@ desktop-JVM-vs-on-target 100× miss).
 | WI | Tier | Scope | Est. PR size | Gate-5 requirement |
 |---|---|---|---|---|
 | **WI-0** | **foundational** (measurement spike; **no production code**) | Measure, on the emulator, against the real CJK fixtures — **pixels and computed style, never a submitted preference** (§7.1). Settles the CJK question **and bug #367** in one run. | tiny (throwaway connected test + WebView JS evaluations; nothing merged beyond the recorded findings) | n/a (no behaviour change) — the emulator measurement **is** the deliverable |
-| **WI-1** | **behavioral** | §5.1 + §5.2 — TXT/MD justify at the `bodyTextStyle()` seam, **scroll-mode** MD heading exclusion, paged-MD limitation documented (§5.2b), pagination-invariance proof. Re-run the #137/#138 paged connected suites as regression (the row calls this out). | small–medium | required: real TXT, **both** layouts, via **Library → open the book** (§9.1) |
+| **WI-1** | **behavioral** | §5.1 + §5.2 — TXT/MD justify at the `bodyTextStyle()` seam, **scroll-mode** MD heading exclusion, paged-MD limitation documented (§5.2b), pagination-invariance proof. Re-run the #137/#138 paged connected suites as regression (the row calls this out). | small–medium | required, **both** layouts, via **Library → open the book** (§9.1): synthetic Latin fixture **asserted** (AC-1a), real CJK `黑暗血时代.txt` **recorded** (AC-1b) |
 | **WI-2** | **behavioral** | §5.3 — EPUB `textAlign = JUSTIFY` **+ `publisherStyles = false`**, with the **bounded** side-effect set each individually verified (§7.2). Fixes bug #367 / GH #2074. | small (2 properties) / bounded-but-real blast radius | required: **both** real EPUBs (`en` and `zh-CN`), scroll and paged overflow; **plus** the §7.2 side-effect matrix via Library → book → Display |
 | **WI-3** | **behavioral**, **FINAL** — *see Q2* | §5.4 — AZW3 foliate CSS justify. Completes the reflowable set and matches iOS #95's Foliate leg. Flips the row to `DONE`. | small | required: real AZW3, via **Library → open the book** — **no Display control is needed or used** (§9.1, W18b/W18c) |
 
@@ -455,10 +455,17 @@ exclude that evidence class. It is **not** satisfied by asserting a `ReaderSetti
 
 | Measurement | Method | What "no-op" looks like |
 |---|---|---|
-| **M1 — CJK TXT pixels** | Render `黑暗血时代.txt` body, capture `TextLayoutResult` via `onTextLayout`, and read `getLineRight(i)` for every **non-final** line. Run twice: `textAlign = Start` vs `Justify`. | Identical `getLineRight` values across both runs ⇒ **zero glyphs moved** ⇒ Compose inter-word justification is inert on CJK (the §4.3(a) prediction). A justified Latin control (`The Half Second`) must show `getLineRight ≈ content-box right edge` — this is the positive control proving the measurement itself works. |
-| **M2 — Latin TXT pixels (positive control)** | Same, on Latin prose. | If M2 *also* shows no movement, the measurement or the wiring is broken — not the CJK hypothesis. M2 failing invalidates M1. |
+| **M1 — CJK TXT pixels** | Render `黑暗血时代.txt` (the **real** CJK book) through the TXT body, capture `TextLayoutResult` via `onTextLayout`, and read `getLineRight(i)` for every **non-final** line. Run twice: `textAlign = Start` vs `Justify`. | Identical `getLineRight` values across both runs ⇒ **zero glyphs moved** ⇒ Compose inter-word justification is inert on CJK (the §4.3(a) prediction). Interpretable **only if M2 passes** — see M2. |
+| **M2 — Latin TXT pixels (positive control)** | Same measurement, same Compose path, on a **synthetic Latin TXT fixture** (§10 exception 3) — **not** an EPUB. Long Latin prose paragraphs, no CJK. | With `Justify`, non-final lines' `getLineRight` must reach the content-box right edge, and must **differ** from the `Start` run. **If M2 shows no movement, the measurement or the wiring is broken — M1 is uninterpretable and WI-0 has failed, not the CJK hypothesis.** M2 is a gate on M1, so it must exercise the identical code path; an EPUB control cannot serve here because it is a different engine (Chromium, §4.1) and would prove nothing about the Compose text stack. |
 | **M3 — EPUB computed style** | `evaluateJavascript("getComputedStyle(document.querySelector('p')).textAlign")` in the Readium WebView, for the `en` and the `zh-CN` book, each with `publisherStyles` unset vs `false`. | `zh-CN` returning `start`/`left` with `publisherStyles=false` ⇒ the CJK stylesheet gate (§4.3(b), W12–W14) confirmed. `en` must return `justify` with the flag and **not** without it — that pair is the W10 proof. |
 | **M4 — bug #367** | Same evaluation for `line-height`, before/after a line-spacing slider change, with `publisherStyles` unset vs `false`. | `line-height` unchanged by the slider while the flag is unset ⇒ **bug #367 confirmed**; changing once the flag is set ⇒ WI-2 is its fix. |
+
+**Why M2's fixture is synthetic (AGENTS.md exception, stated).** M2 must run through the **Compose
+TXT path** with **Latin** text. The repo's entire real TXT set is one CJK book
+(`ls test-books/books/txt/` → `黑暗血时代.txt`), so **no real book satisfies the condition** — the
+first of AGENTS.md's allowed exceptions. `The Half Second - Li Xiaolai.epub` is Latin but is an
+**EPUB**: wrong engine, so it cannot be the control for a Compose measurement. It stays as the real
+Latin fixture under **M3**, where it does real work on the engine it belongs to.
 
 M1/M2 use `TextLayoutResult.getLineRight` rather than screenshot diffing because it is a
 deterministic number, robust to font/AA differences, and assertable in a connected test. Screenshots
@@ -527,7 +534,8 @@ extended rather than created, per the rule-55 "new files are awkward" guidance.
 
 | # | Test | File | Asserts |
 |---|---|---|---|
-| C1 | `txtBody_rendersJustified_scrollAndPaged` | `TxtDisplaySettingsUiTest.kt` (existing) | after opening a real TXT through **P1**, non-final lines' `getLineRight` reach the content-box right edge, in **both** layouts. (Asserting `TextLayoutResult.layoutInput.style.textAlign == Justify` is *necessary but not sufficient* — it passes on CJK where nothing moves; the `getLineRight` assertion is the discriminating one.) |
+| C1a | `txtBody_latinJustified_scrollAndPaged` | `TxtDisplaySettingsUiTest.kt` (existing) | **AC-1a**: on the **synthetic Latin** fixture (§10 exception 3) opened through **P1**, non-final lines' `getLineRight` reach the content-box right edge in **both** layouts, and differ from the `Start` run. (Asserting `TextLayoutResult.layoutInput.style.textAlign == Justify` is *necessary but not sufficient* — it passes on CJK where nothing moves; the `getLineRight` delta is the discriminating one.) |
+| C1b | `txtBody_cjkAlignment_recorded` | same | **AC-1b**: on the **real** CJK `黑暗血时代.txt`, record `getLineRight` for non-final lines under `Start` vs `Justify`. Written as a **characterisation test** asserting whatever WI-0 M1 established — so if a future Compose/AGP upgrade starts justifying CJK, this test fails and forces §4.3(a) and AC-1b to be revisited rather than silently rotting. It does **not** assert flush-right. |
 | C2 | `mdHeading_isNotJustified_scrollMode` | same | **scroll mode only**: a **wrapping** MD heading's `Text` reports a non-justify alignment while the following prose chunk reports justify. Paged MD is covered by C2b. |
 | C2b | `mdPagedHeading_knownLimitation` | same | **paged mode**: documents the §5.2b limitation as an executable fact — a page containing a wrapping heading renders with a single justified alignment. Written as a **characterisation test** so that if a future change makes per-paragraph alignment possible, this test fails and forces the limitation note to be revisited rather than silently rotting. |
 | C3 | `pagedPageBoundaries_unchanged` | `TxtPagedWindowedConnectedTest.kt` (existing, extended) | the paged index over a real book yields the same page count / boundaries as before the change (regression, per the row's explicit "re-run the #137/#138 paged connected suites") |
@@ -549,7 +557,8 @@ the assertion that actually discriminates.
 
 | Criterion | Green-on-broken (do **not** rely on) | Discriminating assertion |
 |---|---|---|
-| **AC-1** TXT/MD prose is justified | `assertEquals(TextAlign.Justify, settings.bodyTextStyle().textAlign)` — passes even if no host consumes `bodyTextStyle`, and even if Compose renders it as a no-op | **C1**: read `textAlign` back off the **`TextLayoutResult` of the rendered body** on the emulator, in both layouts. Better still, the Gate-5 screenshot (§12) — a per-line right-edge x-coordinate comparison is the only thing that proves a glyph moved. |
+| **AC-1a** Latin TXT/MD prose is justified | `assertEquals(TextAlign.Justify, settings.bodyTextStyle().textAlign)` — passes even if no host consumes `bodyTextStyle`, and even if Compose renders it as a no-op. Also: reading `textAlign` back off the rendered `TextLayoutResult` — still only proves the *request* reached layout, not that a glyph moved. | **C1a**: the `getLineRight` **delta** between the `Start` and `Justify` runs on Latin prose. A per-line right-edge x-coordinate comparison is the only thing that proves a glyph moved. |
+| **AC-1b** CJK TXT behaviour | Requiring CJK to flush right — which would fail on the plan's own predicted outcome (§4.3(a)); or asserting nothing at all, which lets the prediction rot | **C1b**: a characterisation test pinning the measured M1 result, so a future toolchain change that *starts* justifying CJK fails the test and forces the plan's prediction to be revisited |
 | **AC-2** MD headings not justified (scroll) | `chunkTextAlign(true) == Start` (pure function; says nothing about the render site wiring). Worse: a **one-line** heading test, which passes under *both* the correct and the broken implementation because the last-line rule already leaves it alone — a single-line heading test is worthless here. | **C2**: a **wrapping** (≥2-line) heading in the rendered scroll output. |
 | **AC-2b** paged MD limitation | Silence — a limitation that lives only in prose rots the moment the paginator changes | **C2b**: a characterisation test that *fails* if paged MD ever gains per-paragraph alignment, forcing the note to be revisited |
 | **AC-3** Paged page boundaries unchanged | "the paged suite still passes" — it would also pass if justify were silently dropped | **T5** (per-line char ranges, both alignments, CJK+Latin) **and C3** (real-book page count/boundaries). T5 is the one that fails loudly if a future Compose version ever makes justification affect breaking. |
@@ -610,14 +619,25 @@ emulator detached from a foreground call, never inside a backgrounded task.
 
 ## 10. Fixtures — real books first
 
-AGENTS.md is binding here. Every verification fixture is a **real** book already in the repo:
+AGENTS.md is binding here. **The full real-fixture inventory, verified by listing the directories**
+(not assumed) — this is a small set, and knowing its exact shape is what determines which criteria
+can be asserted against a real book and which cannot:
 
-| Purpose | Fixture |
-|---|---|
-| CJK TXT (the motivating case, 14 MB) | `test-books/books/txt/黑暗血时代.txt` |
-| CJK EPUB (`zh-CN` → CjkHorizontal, W14) | `test-books/books/epub/道诡异仙 - 狐尾的笔.epub` |
-| Latin EPUB (`en` → Default stylesheet, W15) | `test-books/books/epub/The Half Second - Li Xiaolai.epub` |
-| AZW3 (WI-3) | the existing real book under `test-books/books/azw3/` |
+| Purpose | Fixture | Script |
+|---|---|---|
+| CJK TXT (the motivating case, 14 MB) — **the only real TXT in the repo** | `test-books/books/txt/黑暗血时代.txt` | CJK |
+| CJK EPUB (`zh-CN` → CjkHorizontal, W14) | `test-books/books/epub/道诡异仙 - 狐尾的笔.epub` | CJK |
+| Latin EPUB (`en` → Default stylesheet, W15) — **the only real Latin book, and it is an EPUB** | `test-books/books/epub/The Half Second - Li Xiaolai.epub` | Latin |
+| AZW3 (WI-3) — **the only real AZW3, also CJK** | `test-books/books/azw3/Bei Tao Yan De Yong Qi - Zi Wo.azw3` | CJK |
+
+**Two consequences fall straight out of that inventory**, and both were Gate-2 round-3 HIGHs caused
+by not writing it down explicitly in v1/v2:
+
+- There is **no real Latin TXT**, so the Compose-path positive control must be synthetic
+  (exception 3 below) — an EPUB cannot stand in, because it is a different engine.
+- There is **no real Latin TXT**, so **AC-1 cannot demand that a real TXT flush right** — the only
+  real one is CJK, which the plan itself predicts will not move (§4.3(a)). Hence the AC-1a / AC-1b
+  split.
 
 **Stated exceptions** (the only synthetic inputs, each justified against the rule's allowed cases):
 
@@ -628,6 +648,14 @@ AGENTS.md is binding here. Every verification fixture is a **real** book already
    Exception: *"the format has no real book"*. MD verification therefore uses a small hand-written
    `.md` containing a deliberately **long, wrapping** heading plus CJK and Latin prose — the wrapping
    heading is the specific structure C2 needs and is not something a real book would reliably supply.
+3. **A synthetic Latin TXT fixture** for WI-0's M2 positive control and AC-1a / C1a. Exception:
+   *"the format has no real book **satisfying the condition**"* — the condition is *Latin prose on the
+   Compose TXT path*, and the repo's entire real TXT set is one CJK book
+   (`ls test-books/books/txt/` → `黑暗血时代.txt`, verified). The Latin real book
+   (`The Half Second - Li Xiaolai.epub`) is an **EPUB**, i.e. the Chromium engine, so it cannot
+   control a Compose measurement; it remains the real Latin fixture for **M3/AC-4**, on its own
+   engine. A few paragraphs of long Latin prose suffice — the control only has to prove that
+   justification moves `getLineRight` at all on this code path.
 
 ---
 
@@ -651,31 +679,41 @@ AGENTS.md is binding here. Every verification fixture is a **real** book already
 
 ## 12. Acceptance criteria
 
-1. **AC-1** — TXT and MD **prose** renders justified (flush right margin) in **both** Scroll and Paged
-   layouts, on a real book, reached through **P1** (§9.1). Measured by `getLineRight` on non-final
-   lines, not by inspecting the style object.
-2. **AC-2 (scroll)** — In **scroll** mode a **wrapping** Markdown heading is **not** justified; the
+1. **AC-1a (Latin — asserted)** — TXT and MD **Latin** prose renders justified (non-final lines'
+   `getLineRight` reaches the content-box right edge, and differs from the `Start` run) in **both**
+   Scroll and Paged layouts, reached through **P1** (§9.1). Uses the synthetic Latin fixture (§10
+   exception 3) for the reason given at §7.1 M2: the repo has no real Latin TXT book. Measured by
+   `getLineRight`, never by inspecting the style object.
+2. **AC-1b (CJK — observed, not promised)** — On the **real** CJK TXT `黑暗血时代.txt`, the evidence
+   file **records** whether justification moves glyphs, citing the WI-0 M1 numbers. It does **not**
+   require flush-right. **Rationale**: §4.3(a) predicts Compose's inter-word justification is inert
+   on space-free CJK, so requiring CJK TXT to flush right would make WI-1 fail on the plan's own
+   expected WI-0 outcome. This mirrors the posture AC-5 already takes — v2 applied it to the CJK
+   *feature question* but inconsistently left AC-1 demanding the opposite (Gate-2 round-3 HIGH 4).
+   If WI-0 M1 shows CJK **does** move, AC-1b is upgraded to an assertion in WI-1 and the §4.3(a)
+   prediction is struck from the plan.
+3. **AC-2 (scroll)** — In **scroll** mode a **wrapping** Markdown heading is **not** justified; the
    prose following it is.
-3. **AC-2b (paged)** — In **paged** MD, a wrapping heading **is** justified. This is a **documented
+4. **AC-2b (paged)** — In **paged** MD, a wrapping heading **is** justified. This is a **documented
    known limitation**, not a defect to fix in #156 (§5.2b): `renderPage` concatenates multiple chunks
    into one `AnnotatedString` rendered by one `Text`, which carries a single `textAlign`. The
    criterion is met by the limitation being **stated in the evidence file and the row's Notes**, and
    by AC-3 confirming nothing else regressed. A one-line paged heading remains unaffected.
-4. **AC-3** — Paged pagination is **byte-identical** before and after: same page count, same per-page
+5. **AC-3** — Paged pagination is **byte-identical** before and after: same page count, same per-page
    character ranges (T5 + C3). No saved-position drift.
-5. **AC-4** — EPUB body paragraphs compute `text-align: justify` **in the DOM** on the Latin real
+6. **AC-4** — EPUB body paragraphs compute `text-align: justify` **in the DOM** on the Latin real
    EPUB, in both scroll and paged overflow, at open **and** after a live settings change.
-6. **AC-5** — **CJK is measured and recorded, not promised.** The evidence file states, for both
+7. **AC-5** — **CJK is measured and recorded, not promised.** The evidence file states, for both
    `黑暗血时代.txt` and `道诡异仙 - 狐尾的笔.epub`, whether justification is visibly applied, citing the
    WI-0 M1/M3 numbers plus a screenshot each. If it is not (the predicted outcome, §4.3), the
    criterion is met by the **recorded finding plus a filed follow-up feature** — not by a claim that
    CJK justifies.
-7. **AC-6** — EPUB line spacing demonstrably applies after `publisherStyles = false` (computed
+8. **AC-6** — EPUB line spacing demonstrably applies after `publisherStyles = false` (computed
    `line-height` changes with the slider via **P2**) — i.e. **bug #367 is fixed** — and the §7.2
    E3/E4 effects are measured and recorded, with no theme/font/size/margin regression.
-8. **AC-7** — AZW3 prose renders justified while headings do not, verified through **P1** with **no
+9. **AC-7** — AZW3 prose renders justified while headings do not, verified through **P1** with **no
    Display control involved** (WI-3; see Q2).
-9. **AC-8** — Rule 51: zero new UI. `ReaderSettingsSheet.kt` is untouched; the Display sheet's control
+10. **AC-8** — Rule 51: zero new UI. `ReaderSettingsSheet.kt` is untouched; the Display sheet's control
    set is unchanged from `vreader-panels.jsx:61-186`.
 
 ---
@@ -802,3 +840,38 @@ preference mapping.
     without it).
   - **Folded in**: bug **#367 / GH #2074** now referenced from the header, W11, §7.2 E2, and AC-6;
     WI-0's M4 settles it in the same emulator run.
+
+- **v3 (2026-08-05)** — Gate-2 round 3 confirmed both v2 fixes sound (P1 is a real production path;
+  unconditional `foliateDisplayCss()` injection means AZW3 needs no Display control; the paged-MD
+  scoping matches the code; the rejected `ParagraphStyle` route has a real determinism hazard). It
+  then found **two new HIGHs — one defect seen twice: the plan's own prediction contradicted its own
+  acceptance criteria.** Round 4 sanctioned by the coordinator, scoped to exactly these two.
+  - **HIGH 3 — WI-0's positive control was not executable.** M2 named `The Half Second` as the Latin
+    TXT control, but that book is an **EPUB**; the entire real TXT set is one CJK book (verified:
+    `ls test-books/books/txt/` → `黑暗血时代.txt` only). Since M2 gates M1, WI-0 could not
+    distinguish "the engine genuinely doesn't move CJK glyphs" from "my measurement is broken" — the
+    one question WI-0 exists to answer. **Fixed**: M2 now uses a **synthetic Latin TXT fixture** under
+    a stated AGENTS.md exception (§10 exception 3 — *no real book satisfies the condition*), with the
+    reason an EPUB cannot substitute made explicit (different engine, §4.1). `The Half Second` is
+    retained as a **real** Latin fixture under M3/AC-4, on the engine it belongs to.
+  - **HIGH 4 — AC-1 demanded what the plan predicts will not happen.** AC-1/C1 required real TXT
+    lines to flush right, but the only real TXT is CJK and §4.3(a) predicts CJK TXT is a visible
+    no-op — so WI-1 would have failed on the *expected* WI-0 outcome. **Fixed** by splitting into
+    **AC-1a (Latin, asserted** via the synthetic fixture + `getLineRight` delta**)** and **AC-1b
+    (CJK, observed and recorded)**, with C1 split into C1a/C1b. AC-1b is a **characterisation test**,
+    so if a future toolchain change starts justifying CJK the test fails and forces §4.3(a) and
+    AC-1b to be revisited rather than rotting. This makes AC-1 consistent with the posture AC-5
+    already had — v1 got it right for the CJK *feature question* and inconsistently wrong for the
+    TXT criterion.
+  - **§10 rewritten to state the full verified fixture inventory** rather than a partial list. Both
+    HIGHs trace to the same root cause: the inventory's exact shape (one CJK TXT, one Latin EPUB, one
+    CJK AZW3) was never written down, so criteria were drafted against fixtures that do not exist.
+    The two consequences are now stated directly beneath the table.
+  - **Observation recorded, NOT acted on (out of round-4 scope; for the coordinator to rule on).**
+    The only real AZW3 is **also CJK** (`Bei Tao Yan De Yong Qi - Zi Wo.azw3`), so **AC-7** rests on a
+    CJK fixture too. Unlike AC-1, this is probably fine: AZW3 renders through **Chromium** with our
+    **own** injected CSS (§5.4) — CSS justification does handle CJK, and the `text-align` suppression
+    that defeats EPUB is a **ReadiumCSS** policy (W12), which does not apply to the foliate path. So
+    AC-7 is expected to hold. But it is the same *shape* as HIGH 4 and is only sound because the
+    engine differs, so it should be confirmed rather than assumed — cheaply, by adding an AZW3
+    computed-`text-align` reading to WI-0. Flagged rather than changed, per the round-4 scope.
