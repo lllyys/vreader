@@ -4,8 +4,13 @@
 // OpenDocument picker → BookImporter. Opening a book is the reader host (#1745),
 // resumed against vreader-reader.jsx.
 //
+// It is also where feature #155's inbound imports SURFACE: ImportActivity does the
+// resolving and hands off here, and this screen collects the coordinator's outcomes
+// and shows the already-shipped import-failure toast for the failing ones.
+//
 // @coordinates-with: AndroidManifest.xml (the launcher activity), VReaderApp.kt
-//   (the DI container), library/LibraryViewModel.kt, library/LibraryScreen.kt
+//   (the DI container), library/LibraryViewModel.kt, library/LibraryScreen.kt,
+//   imports/ImportActivity.kt + imports/IncomingImportCoordinator.kt (#155)
 package com.vreader.app
 
 import android.os.Bundle
@@ -34,10 +39,29 @@ import com.vreader.app.reader.Azw3ReaderActivity
 import com.vreader.app.reader.ReaderActivity
 import com.vreader.app.reader.PdfReaderActivity
 import com.vreader.app.reader.TxtReaderActivity
+import com.vreader.app.imports.IncomingImportOutcome
 import com.vreader.app.search.SearchScreen
 import com.vreader.app.ui.theme.VReaderTheme
+import kotlinx.coroutines.launch
 import vreader.contracts.BookFormat
 import androidx.compose.runtime.LaunchedEffect
+
+/**
+ * The user-visible text for ONE inbound-import outcome (feature #155), or null when that outcome
+ * is silent.
+ *
+ * RULE 51 — every string here is the ALREADY-SHIPPED SAF-import copy from
+ * `LibraryViewModel.import`, reused verbatim; nothing new is introduced. Success is SILENT for a
+ * new book AND for a duplicate, matching iOS. The designed in-progress / added / already-in-library
+ * / unsupported treatments are BLOCKED on needs-design #2030 and are not invented here — which is
+ * also why a too-large document reports the generic failure copy rather than a bespoke message.
+ */
+fun importFailureMessage(outcome: IncomingImportOutcome): String? = when (outcome) {
+    is IncomingImportOutcome.Imported -> null
+    is IncomingImportOutcome.Unsupported -> "Unsupported format: ${outcome.displayName}"
+    IncomingImportOutcome.Unreadable -> "Couldn't open the file"
+    IncomingImportOutcome.TooLarge, IncomingImportOutcome.Failed -> "Import failed"
+}
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -64,12 +88,26 @@ class MainActivity : ComponentActivity() {
                 ) { uri -> uri?.let(viewModel::import) }
 
                 LaunchedEffect(Unit) {
-                    viewModel.events.collect { event ->
-                        val message = when (event) {
-                            is LibraryEvent.ImportFailed -> event.message
-                            is LibraryEvent.CollectionOpFailed -> event.message
+                    launch {
+                        viewModel.events.collect { event ->
+                            val message = when (event) {
+                                is LibraryEvent.ImportFailed -> event.message
+                                is LibraryEvent.CollectionOpFailed -> event.message
+                            }
+                            Toast.makeText(this@MainActivity, message, Toast.LENGTH_SHORT).show()
                         }
-                        Toast.makeText(this@MainActivity, message, Toast.LENGTH_SHORT).show()
+                    }
+                    // feature #155 — inbound "Open with VReader" / "Share to VReader" results. The
+                    // coordinator buffers them, so an import that finished before this screen even
+                    // existed (cold start from ImportActivity's hand-off) is still reported. A
+                    // sibling collector, not a second LaunchedEffect: `collect` never returns, so
+                    // the two must run concurrently.
+                    launch {
+                        container.incomingImportCoordinator.outcomes.collect { outcome ->
+                            importFailureMessage(outcome)?.let { message ->
+                                Toast.makeText(this@MainActivity, message, Toast.LENGTH_SHORT).show()
+                            }
+                        }
                     }
                 }
 
