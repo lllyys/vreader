@@ -26,13 +26,23 @@ sealed interface FoliateMessage {
         val toc: List<FoliateTocItem> = emptyList(),
     ) : FoliateMessage
 
-    /** Reading position changed. `cfi` is foliate's platform-local CFI (lossy cross-platform);
-     *  `fraction` is the 0..1 progress (the canonical resume anchor). */
+    /**
+     * Reading position changed. `cfi` is foliate's platform-local CFI (lossy cross-platform);
+     * `fraction` is the 0..1 progress (the canonical resume anchor).
+     *
+     * `tocHref` is the href of the TOC item foliate's own `TOCProgress` resolved for this position
+     * (feature #140 WI-4), carried VERBATIM so `foliateTocIndexFor` can match it against the parsed
+     * TOC by exact string equality — no trimming, case folding, re-encoding or Unicode normalization
+     * on either side. `null` means "unknown chapter" — the field was absent, JSON `null`
+     * (foliate posts `tocItem?.href ?? null`), blank, or not a string — never "no TOC". It defaults
+     * to `null` so every pre-#140 construction site still compiles and behaves identically.
+     */
     data class Relocate(
         val cfi: String?,
         val fraction: Double?,
         val sectionIndex: Int,
         val sectionTotal: Int,
+        val tocHref: String? = null,
     ) : FoliateMessage
 
     /** A JS-side error (bundle init failure, open failure, unhandled rejection). */
