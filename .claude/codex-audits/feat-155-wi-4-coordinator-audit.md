@@ -1,9 +1,37 @@
 ---
 branch: feat/155-wi-4-coordinator
 threadId: 019fd039-ec53-7ae1-9426-bb72f0c867ea
-rounds: 5
-final_verdict: block-recommended
+rounds: 6
+final_verdict: ship-as-is
 ---
+
+## Round 6 — orchestrator-run confirming round (2026-08-05): **VERDICT: clean**
+
+The lane fixed round 4's two HIGHs and then returned `blocked` rather than certify its own fix to an
+independent auditor's finding a second time. That was the right call and it had already paid for
+itself once — **round 4 found two HIGHs inside the round-3 fix**. Run by the orchestrator
+(`scripts/run-codex.sh`, gpt-5.5/high, read-only), scoped to the `e0e72fa8` delta.
+
+**Zero findings at any severity.**
+
+1. **Admission is atomic.** `tryReserveDepth()` is a real CAS reservation with no check-then-act
+   window; reserved depth is released on worker receive, failed send, and shutdown drain, and inline
+   over-cap handling reserves nothing. No path leaks a reservation upward — which mattered, because a
+   leaked reservation wedges admission permanently *closed*, worse than the unbounded queue it replaced.
+2. **The one-outcome-per-input-URI contract is total** at the coordinator emission point, with **no
+   duplicate path** found for Ready, PreResolved, over-cap, post-shutdown, or contained-exception
+   cases. Checked for exactly-one, not at-least-one.
+3. **All three lane-flagged nuances ruled sound**: (a) an inline-refused envelope emitting ahead of
+   queued items degrades input *order* but never loses an outcome — the right trade, and well-defined
+   rather than arbitrary; (b) worst-case depth `MAX_PENDING_ITEMS + MAX_IN_FLIGHT` = 276 is bounded,
+   since a `Ready` item owns an fd and is counted but never refused for depth; (c) the rewritten
+   delivery-buffer test still tests the bound rather than quietly weakening it, and what it stopped
+   covering is genuinely covered by the new refusal test.
+4. **No regression** from rounds 1–5: streams close on every path including inline handling, the
+   GUARANTEED timeout liveness holds, and `BoundedCallGate`'s late-result disposal is intact.
+
+Verdict updated to `ship-as-is` on a **clean independent confirmation**, not on an override.
+
 
 # Gate-4 audit — feature #155 WI-4 (`IncomingImportCoordinator` + `BoundedCallGate`)
 
