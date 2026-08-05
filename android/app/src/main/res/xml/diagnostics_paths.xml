@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  feature #164 WI-7 — DiagnosticsFileProvider grant scope (plan section 6.4).
+  Grants read access to ONLY filesDir/diagnostics (where DiagnosticsExportWriter promotes the
+  single redacted export — DiagnosticsExportWriter.DIRECTORY_NAME). This is a SEPARATE paths file
+  from @xml/file_paths on purpose: the book provider keeps granting books/ and nothing else, this
+  one grants diagnostics/ and nothing else, so neither feature can widen the other's scope.
+  A FileProvider.getUriForFile for any path outside diagnostics/ throws IllegalArgumentException,
+  which shareDiagnosticsIntent maps to a silent no-op. Do NOT widen this to <files-path path="."/>.
+-->
+<paths>
+    <files-path name="diagnostics" path="diagnostics/" />
+</paths>
