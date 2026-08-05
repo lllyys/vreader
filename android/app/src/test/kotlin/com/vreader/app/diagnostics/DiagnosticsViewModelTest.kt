@@ -3,6 +3,7 @@ package com.vreader.app.diagnostics
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -480,6 +481,80 @@ class DiagnosticsViewModelTest {
         assertEquals(6, vm.state.value.totalCount)
         vm.load()
         assertEquals(6, vm.state.value.totalCount)
+    }
+
+    @Test
+    fun aReloadOntoASmallerBatchDropsTheStaleExpandedRow() = runTest {
+        // Identities are POSITIONAL, so an id held across a reload can point at an unrelated row —
+        // or at no row at all when the new batch is shorter.
+        val batches = ArrayDeque(listOf(sixLevels, listOf(sixLevels.first())))
+        val vm = viewModel(source = object : DiagnosticsLogSource {
+            override suspend fun recentEntries(sinceMillis: Long?, limit: Int) =
+                SourceResult.Available(batches.removeFirst())
+        })
+
+        vm.load()
+        vm.toggleExpanded(5)
+        assertEquals(5, vm.state.value.expandedEntryId)
+
+        vm.load()
+
+        assertEquals(1, vm.state.value.totalCount)
+        assertNull(vm.state.value.expandedEntryId)
+    }
+
+    @Test
+    fun overlappingLoadsAreSerialisedAndTheSpinnerOutlastsTheFirstOne() = runTest {
+        // `DiagnosticsLogStore` documents that loads are expected to be SINGLE-FLIGHT: its
+        // `lastLoadDegraded` is a store-WIDE latch, so two concurrent reads let one batch inherit
+        // the other's capture-source verdict — an export that names the wrong provenance.
+        val probe = SerialisingProbe(listOf(sixLevels, listOf(sixLevels.first())))
+        val vm = viewModel(source = probe)
+
+        val first = launch { vm.load() }
+        probe.entered[0].await()
+
+        val second = launch { vm.load() }
+        runCurrent()
+        // The second read has NOT begun — it is queued behind the first.
+        assertEquals(1, probe.startedCount)
+        assertTrue(vm.state.value.isLoading)
+
+        probe.gates[0].complete(Unit)
+        probe.entered[1].await()
+        // The FIRST load's `finally` has already run here; it must not have lowered the spinner
+        // while a second load is still in flight.
+        assertTrue(vm.state.value.isLoading)
+
+        probe.gates[1].complete(Unit)
+        first.join()
+        second.join()
+
+        assertEquals(1, probe.maxConcurrent)
+        assertFalse(vm.state.value.isLoading)
+        assertEquals(1, vm.state.value.totalCount)   // the last-completing load's batch wins
+    }
+
+    /** Serves [batches] in order, one gate per call, recording how many reads ever overlapped. */
+    private class SerialisingProbe(private val batches: List<List<DiagnosticsLogEntry>>) :
+        DiagnosticsLogSource {
+        val entered = List(batches.size) { CompletableDeferred<Unit>() }
+        val gates = List(batches.size) { CompletableDeferred<Unit>() }
+        var startedCount = 0
+            private set
+        var maxConcurrent = 0
+            private set
+        private var active = 0
+
+        override suspend fun recentEntries(sinceMillis: Long?, limit: Int): SourceResult {
+            val index = startedCount++
+            active++
+            maxConcurrent = maxOf(maxConcurrent, active)
+            entered[index].complete(Unit)
+            gates[index].await()
+            active--
+            return SourceResult.Available(batches[index])
+        }
     }
 
     // ── day sections are the grouper's, wired to the injected clock ─────────────────────────────
