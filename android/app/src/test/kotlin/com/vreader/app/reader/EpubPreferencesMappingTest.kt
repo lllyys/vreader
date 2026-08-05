@@ -3,10 +3,17 @@
 // Readium 3.3.0 API assumption (EpubPreferences fontSize/fontFamily/lineHeight/pageMargins/backgroundColor/
 // textColor are unitless Double multipliers + Readium Color/FontFamily value types, NOT sp/dp). Pure JVM
 // (Readium value classes load without an Android runtime) — the RED test that leads WI-5.
+//
+// feature #156 WI-2 (+ bug #367 / GH #2074) adds the justify pair: `textAlign = JUSTIFY` AND
+// `publisherStyles = false`, asserted TOGETHER because either alone is inert (ReadiumCSS gates
+// `--USER__textAlign` — and `--USER__lineHeight` — behind `readium-advanced-on`, which only
+// `publisherStyles = false` turns on). These are UNIT assertions on the mapper's output and are NOT
+// evidence that a glyph moved — that is EpubJustifyConnectedTest's job (computed style in the live DOM).
 package com.vreader.app.reader
 
 import androidx.compose.ui.graphics.toArgb
 import com.vreader.app.reader.settings.ReaderFontFamily
+import com.vreader.app.reader.settings.ReaderLayout
 import com.vreader.app.reader.settings.ReaderSettings
 import com.vreader.app.reader.settings.ReaderTheme
 import org.junit.Assert.assertEquals
@@ -14,6 +21,7 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 import org.readium.r2.navigator.preferences.Color as ReadiumColor
 import org.readium.r2.navigator.preferences.FontFamily as ReadiumFontFamily
+import org.readium.r2.navigator.preferences.TextAlign as ReadiumTextAlign
 
 class EpubPreferencesMappingTest {
 
@@ -115,5 +123,98 @@ class EpubPreferencesMappingTest {
         // The mapper must NOT force a layout — WI-5 owns typography/theme only; the reader's
         // scroll default is set once at open (EpubPreferences(scroll = true) in ReaderActivity).
         assertNull(ReaderSettings().toEpubPreferences().scroll)
+    }
+
+    // ---- feature #156 WI-2 / bug #367: the justify pair is INSEPARABLE ----
+
+    /**
+     * The plan's T6, and deliberately ONE test asserting BOTH properties: `textAlign = JUSTIFY` with
+     * `publisherStyles` unset emits `--USER__textAlign` that no ReadiumCSS rule consumes (measured on
+     * device by WI-0's M3), and `publisherStyles = false` alone justifies nothing. Splitting these into
+     * two tests would let either drift alone and still show green.
+     */
+    @Test
+    fun justifyAndPublisherStylesFalse_areSetTogether() {
+        val prefs = ReaderSettings().toEpubPreferences()
+        assertEquals(
+            "feature #156: EPUB body text must request justification",
+            ReadiumTextAlign.JUSTIFY,
+            prefs.textAlign,
+        )
+        assertEquals(
+            "feature #156 / bug #367: publisherStyles=false is what turns ReadiumCSS's " +
+                "`readium-advanced-on` gate on — without it BOTH --USER__textAlign and --USER__lineHeight " +
+                "are emitted and ignored",
+            false,
+            prefs.publisherStyles,
+        )
+    }
+
+    /**
+     * Alignment is orthogonal to every other display setting (the plan's T8 edge matrix): no theme, font,
+     * size, spacing, margin or layout may switch it off — including the clamp boundaries.
+     */
+    @Test
+    fun justifyPair_isInvariantAcrossEveryOtherSetting() {
+        val sizes = listOf(ReaderSettings.MIN_FONT_SIZE, ReaderSettings.DEFAULT_FONT_SIZE, ReaderSettings.MAX_FONT_SIZE)
+        val spacings = listOf(ReaderSettings.MIN_LINE_SPACING, ReaderSettings.DEFAULT_LINE_SPACING, ReaderSettings.MAX_LINE_SPACING)
+        val margins = listOf(ReaderSettings.MIN_MARGIN, ReaderSettings.DEFAULT_MARGIN, ReaderSettings.MAX_MARGIN)
+        var cases = 0
+        for (theme in ReaderTheme.entries) {
+            for (family in ReaderFontFamily.entries) {
+                for (size in sizes) {
+                    for (spacing in spacings) {
+                        for (margin in margins) {
+                            for (layout in ReaderLayout.entries) {
+                                val s = ReaderSettings(theme, family, size, spacing, margin, layout)
+                                val p = s.toEpubPreferences()
+                                assertEquals("textAlign for $s", ReadiumTextAlign.JUSTIFY, p.textAlign)
+                                assertEquals("publisherStyles for $s", false, p.publisherStyles)
+                                cases++
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assertEquals("the matrix must actually have run", 5 * 2 * 3 * 3 * 3 * 2, cases)
+    }
+
+    /** Adding the pair must not have dropped any property #129 already mapped (the #92 analog). */
+    @Test
+    fun justifyPair_doesNotDropAnyExistingMapping() {
+        val s = ReaderSettings(
+            theme = ReaderTheme.Sepia,
+            fontFamily = ReaderFontFamily.Sans,
+            fontSizeSp = 22f,
+            lineSpacing = 1.8f,
+            marginDp = 32f,
+        )
+        val p = s.toEpubPreferences()
+        assertEquals(22.0 / 18.0, p.fontSize!!, eps)
+        assertEquals(1.8, p.lineHeight!!, eps)
+        assertEquals(32.0 / 20.0, p.pageMargins!!, eps)
+        assertEquals(ReadiumFontFamily.SANS_SERIF, p.fontFamily)
+        assertEquals(ReadiumColor(ReaderTheme.Sepia.background.toArgb()), p.backgroundColor)
+        assertEquals(ReadiumColor(ReaderTheme.Sepia.ink.toArgb()), p.textColor)
+        assertNull("scroll still unset — the host owns layout", p.scroll)
+    }
+
+    /**
+     * The BOUND on `publisherStyles = false`'s blast radius, expressed as code rather than prose (plan
+     * §7.2). Every remaining `readium-advanced-on`-gated ReadiumCSS rule ALSO requires its own `--USER__*`
+     * variable to be present; Readium only emits a variable for a preference that is set. So as long as
+     * these stay null, those rules cannot fire and the observable effect set stays E1–E5. If a future WI
+     * sets one of them, this test fails and forces the effect enumeration to be re-verified.
+     */
+    @Test
+    fun advancedGatedPreferencesWeNeverSet_stayNull_soTheirRulesCannotFire() {
+        val p = ReaderSettings().toEpubPreferences()
+        assertNull("paraSpacing must stay unset", p.paragraphSpacing)
+        assertNull("paraIndent must stay unset", p.paragraphIndent)
+        assertNull("wordSpacing must stay unset", p.wordSpacing)
+        assertNull("letterSpacing must stay unset", p.letterSpacing)
+        assertNull("bodyHyphens must stay unset (ReadiumCSS auto-enables hyphens under justify — E5)", p.hyphens)
+        assertNull("typeScale must stay unset (the advanced default 1.2 applies — E3)", p.typeScale)
     }
 }
