@@ -78,13 +78,16 @@ fun columnIndices(lines: List<LineBox>, tolerancePx: Double = 60.0): List<Int> {
 fun liveVreaderCss(probe: JSONObject): String {
     val list = probe.optJSONArray("styleList")
         ?: throw AssertionError("the probe returned no style elements — cannot reconstruct the live CSS")
+    // Selected by the production OWNERSHIP sentinel, not by a rule's text. Gate-4 round 2 (Low): a
+    // content signature is guessable — a publisher stylesheet carrying the same shape would make this
+    // throw, or pick the book's blob instead of ours.
     val candidates = (0 until list.length()).map { list.optString(it) }
-        .filter { it.contains("body * { font-family:") && it.contains("!important") }
+        .filter { it.contains(VREADER_CSS_SENTINEL) }
     if (candidates.size != 1) {
         throw AssertionError(
-            "expected exactly ONE injected vreader style blob in the section document, found " +
-                "${candidates.size} of ${list.length()} style elements — the control arm must be derived " +
-                "from the live production CSS, not guessed",
+            "expected exactly ONE injected vreader style blob (marked $VREADER_CSS_SENTINEL) in the " +
+                "section document, found ${candidates.size} of ${list.length()} style elements — the " +
+                "control arm must be derived from the live production CSS, not guessed",
         )
     }
     return candidates.single()

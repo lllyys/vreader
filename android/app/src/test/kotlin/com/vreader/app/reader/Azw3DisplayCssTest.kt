@@ -140,10 +140,40 @@ class Azw3DisplayCssTest {
         assertTrue(
             "expected a guarded p justify rule, got:\n$css",
             css.contains(
-                "p:not([style*='text-align' i]):not([align]):not([class*='center' i]):not([class*='right' i]) " +
+                "p:not([style*='text-align' i]):not([align])" +
+                    ":not([class*='center' i])" +
+                    ":not([class~='right' i]):not([class*='text-right' i])" +
+                    ":not([class*='align-right' i]):not([class*='right-align' i]) " +
                     "{ text-align: justify !important; }",
             ),
         )
+    }
+
+    @Test
+    fun rightGuard_isTokenMatched_soCopyrightProseStillJustifies() {
+        // `copyright` CONTAINS `right`. A substring guard therefore silently skipped justification on
+        // every `<p class="copyright">` — ordinary prose in a very common front-matter class. The guard
+        // must be a token match plus explicit alignment-shaped patterns, never a bare `[class*=right]`.
+        val css = ReaderSettings().foliateDisplayCss()
+        val rule = css.lines().single { it.contains("text-align: justify") }
+        assertFalse(
+            "a bare substring guard on 'right' also matches 'copyright', got: $rule",
+            rule.contains("[class*='right'"),
+        )
+        assertTrue("expected a token match on right, got: $rule", rule.contains("[class~='right' i]"))
+        for (shape in listOf("[class*='text-right' i]", "[class*='align-right' i]", "[class*='right-align' i]")) {
+            assertTrue("expected alignment-shaped guard $shape, got: $rule", rule.contains(shape))
+        }
+    }
+
+    @Test
+    fun cssCarriesTheOwnershipSentinel() {
+        // The connected control arm reconstructs "production CSS minus one rule" from the blob actually
+        // live in the section document, and has to find OURS among the book's own stylesheets.
+        val css = ReaderSettings().foliateDisplayCss()
+        assertTrue("expected the ownership sentinel, got:\n$css", css.contains(VREADER_CSS_SENTINEL))
+        assertEquals("the sentinel must appear exactly once", 1, css.split(VREADER_CSS_SENTINEL).size - 1)
+        assertTrue("the sentinel must be a CSS comment so it is inert", VREADER_CSS_SENTINEL.startsWith("/*"))
     }
 
     @Test
@@ -153,7 +183,11 @@ class Azw3DisplayCssTest {
         // `class="Center"`. Each guarded attribute must carry the flag.
         val css = ReaderSettings().foliateDisplayCss()
         val rule = css.lines().single { it.contains("text-align: justify") }
-        for (guard in listOf("[style*='text-align' i]", "[class*='center' i]", "[class*='right' i]")) {
+        val guards = listOf(
+            "[style*='text-align' i]", "[class*='center' i]", "[class~='right' i]",
+            "[class*='text-right' i]", "[class*='align-right' i]", "[class*='right-align' i]",
+        )
+        for (guard in guards) {
             assertTrue("guard $guard must be case-insensitive, got: $rule", rule.contains(guard))
         }
         // `align` is a bare presence check — it has no value to case-fold, so it takes no flag.

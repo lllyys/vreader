@@ -337,7 +337,11 @@ class Azw3JustifyConnectedTest {
             // exemption assertion below without measuring anything. Reject that state outright.
             for ((label, reading) in listOf("subject" to subject, "control" to control)) {
                 assertTrue("the probe-element $label arm reported failure: $reading", reading.optBoolean("ok"))
-                for (key in listOf("plainAlign", "inlineAlign", "attrAlign", "classAlign")) {
+                val keys = listOf(
+                    "plainAlign", "inlineAlign", "attrAlign", "classAlign",
+                    "upperAlign", "copyrightAlign", "alignRightAlign",
+                )
+                for (key in keys) {
                     assertTrue(
                         "the $label arm read no computed value for $key — an empty reading would pass the " +
                             "exemption assertions vacuously",
@@ -380,6 +384,22 @@ class Azw3JustifyConnectedTest {
             assertTrue(
                 "a center class must be exempt, got '${subject.optString("classAlign")}'",
                 subject.optString("classAlign") != "justify",
+            )
+            assertTrue(
+                "an UPPERCASE inline text-align must be exempt too (the ` i` flag), got " +
+                    "'${subject.optString("upperAlign")}'",
+                subject.optString("upperAlign") != "justify",
+            )
+            assertTrue(
+                "an explicit align-right class must be exempt, got '${subject.optString("alignRightAlign")}'",
+                subject.optString("alignRightAlign") != "justify",
+            )
+            // The counter-case, and the reason the right guard is a TOKEN match: `copyright` contains
+            // `right`, so a substring guard would silently leave ordinary front-matter prose ragged.
+            assertEquals(
+                "a `copyright` paragraph is ordinary prose and MUST justify — the right guard must not " +
+                    "match it as a substring",
+                "justify", subject.optString("copyrightAlign"),
             )
         }
     }
@@ -435,6 +455,9 @@ class Azw3JustifyConnectedTest {
                   mk('vreader-probe-inline','style','text-align:left');
                   mk('vreader-probe-attr','align','center');
                   mk('vreader-probe-class','class','center');
+                  mk('vreader-probe-upper','style','TEXT-ALIGN:center');
+                  mk('vreader-probe-copyright','class','copyright');
+                  mk('vreader-probe-alignright','class','align-right');
                   d.body.appendChild(host);
                 }
                 function el(id){return d.getElementById(id);}
@@ -455,6 +478,9 @@ class Azw3JustifyConnectedTest {
                   inlineAlign:align('vreader-probe-inline'),
                   attrAlign:align('vreader-probe-attr'),
                   classAlign:align('vreader-probe-class'),
+                  upperAlign:align('vreader-probe-upper'),
+                  copyrightAlign:align('vreader-probe-copyright'),
+                  alignRightAlign:align('vreader-probe-alignright'),
                   plain:{rects:rects('vreader-probe-plain')}});
               }catch(e){return JSON.stringify({ok:false,error:String(e)});}
             })()
