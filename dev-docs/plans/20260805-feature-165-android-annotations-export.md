@@ -741,6 +741,7 @@ flagged):**
 | `MAX_FIELD_CHARS` | **10 000** per `selectedText` / `content` / `title` / `color` | over it → **row-level failure, never truncation**. Truncating silently mutates user content. |
 | `MAX_LOCATOR_JSON_CHARS` | **4 096** | bounds the *nesting depth* of the inner `locatorJSON` string before it is handed to a second decode pass — a deeply-nested payload cannot reach the recursive decoder |
 | `DEFAULT_IO_TIMEOUT_MILLIS` | **10 000 ms** | per bounded call, not per operation |
+| `MAX_JSON_DEPTH` | **64** | **Added by WI-3 (2026-08-06); this table did not list it.** §8.5 requires that a deeply-nested payload cannot reach the recursive decoder, and the `MAX_LOCATOR_JSON_CHARS` bound above covers only the *inner* `locatorJSON` string — the **outer** envelope needed its own guard. Mutation-proved load-bearing: deleting it reddens `pathologicallyNestedJson` with a real `java.lang.StackOverflowError`. That mutation initially **survived**, because `runCatching` catches `Throwable` and silently swallowed the overflow into a `NotJson`; the parse/decode sites now catch `Exception` only, which is what makes the guard observable at all. |
 
 ### 8.3 Per-row validation gate (all must hold; any failure → that row is `skipped`)
 
