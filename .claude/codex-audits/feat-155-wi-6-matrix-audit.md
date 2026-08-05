@@ -1,9 +1,34 @@
 ---
 branch: feat/155-wi-6-matrix
 threadId: see .reports/audit-r1.txt / audit-r2.txt / audit-r3.txt (run-codex.sh, rule 53)
-rounds: 3
-final_verdict: block-recommended
+rounds: 4
+final_verdict: ship-as-is
 date: 2026-08-05
+
+## Round 4 — orchestrator-run confirming round: **VERDICT: clean**
+
+The lane fixed round 3's three Mediums and then returned `blocked` rather than certify its own fixes
+to an independent auditor's findings. Correct under rule 48, and the discipline has repeatedly paid
+this session — one such round on #155 WI-4 found two HIGHs hiding inside a previous fix.
+
+Run by the orchestrator (`scripts/run-codex.sh`, gpt-5.5/high, read-only), scoped to the three fixes
+plus a regression check on the byte-identity pinning round 1 required.
+
+**Zero findings.**
+
+- **R3-I** — no contradictory claim about fixture identity survives anywhere in the file: KDoc,
+  comments, test names or assertion messages. (An overclaiming comment in a verification test is how
+  a weaker check gets read as a stronger one later.)
+- **R3-II** — teardown is now total: no throw on any path skips a cleanup step or leaves state for
+  the next test, and the accumulated failure is surfaced rather than swallowed.
+- **R3-III** — the guard fires **before** any mutation is possible, names something actionable
+  (the key + `adb shell pm clear com.vreader.app`), and cannot be bypassed by a late registration.
+  Its self-catch during development was resolved correctly rather than by disabling the guard.
+- **No regression** in round 1's byte-identity work: `awaitBook(staged, format)` still requires the
+  exact key **and** the exact staged URI, and the artifact-digest assertion still replaces the
+  original length check.
+
+Verdict updated on a clean independent confirmation, not an override.
 ---
 
 # Codex Audit Log — feature #155 WI-6 (Gate-5 acceptance matrix)
