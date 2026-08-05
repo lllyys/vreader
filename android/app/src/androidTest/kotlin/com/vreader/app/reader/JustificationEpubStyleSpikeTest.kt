@@ -284,14 +284,24 @@ class JustificationEpubStyleSpikeTest {
      * computed values, so this is not a hypothetical. Uses the navigator's own `goForward`, i.e. the same
      * motion a reading user makes.
      */
-    private fun advanceToProse(scenario: ActivityScenario<ReaderActivity>, label: String): JSONObject {
+    private fun advanceToProse(
+        scenario: ActivityScenario<ReaderActivity>,
+        label: String,
+        require: (JSONObject) -> Boolean = { true },
+    ): JSONObject {
         var probe = settledRaw(scenario)
         for (step in 0 until 30) {
             if (probe != null && probe.optBoolean("found") && !probe.has("error") &&
                 probe.optInt("textLen") >= MIN_PROSE_CHARS
             ) {
                 Log.i(TAG, "advanceToProse $label steps=$step tag=${probe.optString("tag")} textLen=${probe.optInt("textLen")}")
-                return probe
+                // The permissive sampler above is ONLY a navigation aid — it may return a transitional
+                // sample. The BASELINE that the later comparisons are measured against must be as strict
+                // as every other measurement, or a mid-reflow baseline could coincidentally equal the
+                // post-change value and manufacture M4's "the slider is inert" result.
+                return settledProbe(scenario, "$label: settled baseline on prose") {
+                    it.optInt("textLen") >= MIN_PROSE_CHARS && require(it)
+                }
             }
             var moved = false
             scenario.onActivity { act ->
@@ -345,7 +355,8 @@ class JustificationEpubStyleSpikeTest {
             ReaderActivity.intent(instrumentation.targetContext, book.fingerprintKey),
         ).use { scenario ->
             awaitNavigator(scenario)
-            val default = advanceToProse(scenario, label)
+            // The baseline must be a SETTLED reading of the genuine production state (advanced gate off).
+            val default = advanceToProse(scenario, label) { !advancedOn(it) }
             log("M3", label, "production-default(publisherStyles-unset)", default)
             assertTrue(
                 "$label: the probe must be measuring real prose (>= $MIN_PROSE_CHARS chars), not a cover page",
@@ -381,7 +392,10 @@ class JustificationEpubStyleSpikeTest {
                 docHref = default.optString("docHref"),
                 textHead = default.optString("textHead"),
                 // All three readings must come from the same resource AND the same element, or a
-                // "nothing changed" verdict could just be two different paragraphs.
+                // "nothing changed" verdict could just be two different paragraphs. Identity is the
+                // resource path plus a 40-char text prefix rather than a stable element handle: the
+                // probe is deliberately READ-ONLY, and minting an id would mutate the very DOM under
+                // measurement. Accepted Low — path + text prefix is unambiguous for these fixtures.
                 sameContentThroughout = states.map { it.optString("docHref") }.distinct().size == 1 &&
                     states.map { it.optString("textHead") }.distinct().size == 1,
             )
@@ -478,7 +492,11 @@ class JustificationEpubStyleSpikeTest {
             ReaderActivity.intent(instrumentation.targetContext, book.fingerprintKey),
         ).use { scenario ->
             awaitNavigator(scenario)
-            val before = advanceToProse(scenario, "real:The Half Second(en)")
+            // The baseline is the value M4's whole "inert" claim is measured against, so it is settled
+            // under the SAME strictness as the post-change readings: 1.5 live, advanced gate off.
+            val before = advanceToProse(scenario, "real:The Half Second(en)") {
+                hasDecl(it, "--USER__lineHeight: 1.5") && !advancedOn(it)
+            }
             log("M4", "real:The Half Second(en)", "lineSpacing=1.5 (production, publisherStyles-unset)", before)
             val lh0 = before.optString("lineHeight")
             val bh0 = before.optString("bodyLineHeight")
