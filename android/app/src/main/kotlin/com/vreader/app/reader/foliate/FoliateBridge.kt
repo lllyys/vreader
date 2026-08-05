@@ -56,9 +56,14 @@ class FoliateBridge(
     )
 
     /**
-     * Await a jump to [target], resolving only after foliate's `view.goTo(...)` relocate settles (or a
+     * Await a jump to [target], resolving only after foliate's `view.goTo(...)` promise settles (or a
      * timeout). The request id + target are JSON-escaped ([jsString]) into the shell shim call. A
      * superseding goTo cancels the prior. Main-thread only (WebView is).
+     *
+     * **[Azw3GoToResult.Succeeded] means "foliate settled without rejecting", NOT "the reader moved".**
+     * `view.goTo` catches a failed resolution internally and returns undefined instead of rejecting, so
+     * an unresolvable cfi/href still acks `ok:true`. Actual motion is only observable in a connected
+     * WebView test (feature #140 WI-7) — no JVM test may assert movement from an ack.
      */
     suspend fun goTo(target: FoliateGoToTarget, timeoutMs: Long = DEFAULT_GOTO_TIMEOUT_MS): Azw3GoToResult =
         goToDispatcher.goTo(target, timeoutMs)
@@ -179,36 +184,62 @@ class FoliateBridge(
 
     companion object {
         const val BRIDGE_NAME = "vreaderHost"
-        /** Wall-clock budget for an awaited goTo — foliate must relocate + ack within this window. */
+        /** Wall-clock budget for an awaited goTo — foliate must ACK within this window (the ack means
+         *  its goTo promise settled, NOT that the reader relocated; see [goTo]). */
         const val DEFAULT_GOTO_TIMEOUT_MS = 3_000L
     }
 }
 
-/** feature #135 WI-2 — the outcome of an awaited [FoliateBridge.goTo]. */
+/** feature #135 WI-2 — the outcome of an awaited [FoliateBridge.goTo]. Note the deliberately narrow
+ *  meaning of each case: they describe the ACK, not observed reader movement (see [FoliateBridge.goTo]). */
 sealed interface Azw3GoToResult {
-    /** The jump landed; `cfi`/`fraction` are the reached position when the ack reported them. */
+    /** Foliate's goTo promise FULFILLED and acked; `cfi`/`fraction` are what the ack reported.
+     *  This is NOT proof the reader moved — `view.goTo` catches a failed resolution and fulfils
+     *  anyway, so an unresolvable target lands here too. Only a connected WebView test can observe
+     *  motion. */
     data class Succeeded(val cfi: String?, val fraction: Double?) : Azw3GoToResult
     /** No ack arrived within the timeout window (dead bundle / wedged renderer). */
     data object Timeout : Azw3GoToResult
-    /** Foliate acked a FAILED jump (`ok=false`) — an unresolvable target. */
+    /** The shim acked `ok=false`. That covers a REJECTED promise, a synchronous throw, a missing
+     *  `readerAPI`/target, and a target carrying no recognized field. It does NOT cover every
+     *  unresolvable target — most of those FULFIL and report [Succeeded]. */
     data object Failed : Azw3GoToResult
     /** A later goTo superseded this one before it acked (the caller should ignore this result). */
     data object Superseded : Azw3GoToResult
 }
 
-/** feature #135 WI-2 — the foliate navigation target the shim's `goTo`/`goToFraction` accepts. */
+/** feature #135 WI-2 — the foliate navigation target the shim's `goTo`/`goToFraction` accepts.
+ *  feature #140 WI-3 added [Href] — the TOC leg, which foliate resolves via `book.resolveHref`. */
 sealed interface FoliateGoToTarget {
     data class Cfi(val cfi: String) : FoliateGoToTarget
+
+    /** A book-relative destination exactly as the TOC emitted it (`text/part0007.html#ch12`, the KF8
+     *  `kindle:pos:fid:…:off:…` form, …). Carried BYTE-FOR-BYTE to `readerAPI.goTo` — never trimmed,
+     *  normalized or re-encoded: the bundle does its own `decodeURI`, and current-chapter matching is
+     *  byte-exact, so two hrefs differing only by fragment must stay distinct. */
+    data class Href(val href: String) : FoliateGoToTarget
+
     data class Fraction(val fraction: Double) : FoliateGoToTarget
 
     companion object {
         /**
-         * Derive a jump target from a canonical [vreader.contracts.Locator], CFI-FIRST then fraction
-         * (matches [Azw3Document.restoreOrInit]'s precedence). Returns null when there is nothing to
-         * jump to (no cfi + no finite progression) so the caller degrades without injecting JS.
+         * Derive a jump target from a canonical [vreader.contracts.Locator]: **cfi → href →
+         * progression** (the cfi/progression halves match [Azw3Document.restoreOrInit]'s precedence).
+         * Returns null when there is nothing to jump to (no cfi + no href + no finite progression) so
+         * the caller degrades without injecting JS.
+         *
+         * The href leg deliberately outranks progression (feature #140 §5.2 defense 1): an AZW3 TOC
+         * row's destination IS its href, and iOS's TOC converter stamps such rows with
+         * `progression = 0.0` — harmless on iOS, whose target resolution has no progression leg, but
+         * fatal here. Were progression to win, every chapter tap would resolve to `Fraction(0.0)`,
+         * jump to the START of the book, and still ack `ok:true` (foliate's `view.goTo` swallows a
+         * failed resolution), so the sheet would dismiss on a completely broken jump. Pinned by
+         * `FoliateGoToTest.from_prefersHrefOverProgression` /
+         * `from_hrefWithProgressionZero_stillYieldsHref`.
          */
         fun from(locator: vreader.contracts.Locator): FoliateGoToTarget? {
             locator.cfi?.takeIf { it.isNotBlank() }?.let { return Cfi(it) }
+            locator.href?.takeIf { it.isNotBlank() }?.let { return Href(it) }
             locator.progression?.takeIf { it.isFinite() }?.let { return Fraction(it) }
             return null
         }
@@ -290,11 +321,15 @@ class FoliateGoToDispatcher(
         )
     }
 
-    /** The JSON-escaped shell-shim call. The request id + CFI/fraction are JSON-encoded so a hostile
-     *  book-derived CFI cannot break out of the injected JS string (the [jsString] escaping seam). */
+    /** The JSON-escaped shell-shim call. The request id + CFI/href are JSON-encoded so a hostile
+     *  book-derived CFI or TOC href cannot break out of the injected JS string (the [jsString]
+     *  escaping seam — the ONLY escaper on this path; the href gets no separate treatment and is
+     *  therefore delivered byte-for-byte). */
     private fun gotoJs(id: String, target: FoliateGoToTarget): String = when (target) {
         is FoliateGoToTarget.Cfi ->
             "try{window.__vreaderGoTo&&window.__vreaderGoTo(${jsString(id)},{cfi:${jsString(target.cfi)}})}catch(e){}"
+        is FoliateGoToTarget.Href ->
+            "try{window.__vreaderGoTo&&window.__vreaderGoTo(${jsString(id)},{href:${jsString(target.href)}})}catch(e){}"
         is FoliateGoToTarget.Fraction ->
             "try{window.__vreaderGoTo&&window.__vreaderGoTo(${jsString(id)},{fraction:${target.fraction}})}catch(e){}"
     }
