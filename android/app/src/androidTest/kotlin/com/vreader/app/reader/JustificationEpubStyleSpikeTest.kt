@@ -40,9 +40,16 @@ class JustificationEpubStyleSpikeTest : ReaderSettingsIsolatedTest() {
     private companion object {
         const val TAG = "WI0-JUSTIFY"
 
-        /** Everything the production mapper sets EXCEPT the #156 pair — i.e. the pre-#156 preference set. */
+        /**
+         * A **minimal mechanism probe**, not a replica of any production state: exactly the two variables
+         * these measurements vary against (`--USER__fontSize` so the DOM has a stable 1rem basis, and
+         * `--USER__lineHeight`), with no alignment preference and no advanced gate. Deliberately smaller
+         * than [legacyPreferences] — this class characterises which ReadiumCSS rule fires for which
+         * variable, so every property it does not need is one less confound. Faithful pre-#156 production
+         * states are [EpubJustifyConnectedTest]'s job.
+         */
         @OptIn(ExperimentalReadiumApi::class)
-        fun withoutAlignment(lineHeight: Double = 1.5) = EpubPreferences(fontSize = 1.0, lineHeight = lineHeight)
+        fun mechanismProbePrefs(lineHeight: Double = 1.5) = EpubPreferences(fontSize = 1.0, lineHeight = lineHeight)
     }
 
     // ---------------------------------------------------------------- M3
@@ -71,7 +78,7 @@ class JustificationEpubStyleSpikeTest : ReaderSettingsIsolatedTest() {
             // State 1 — no alignment preference and no advanced gate. Reconstructed by submission, since
             // production (post-#156) opens WITH both.
             probe.advanceToProse(label)
-            probe.submit(withoutAlignment())
+            probe.submit(mechanismProbePrefs())
             val base = probe.settled("$label: no alignment preference, advanced gate OFF") {
                 !advancedOn(it) && !hasDecl(it, "--USER__textAlign") &&
                     it.optInt("textLen") >= EpubDomProbe.MIN_PROSE_CHARS
@@ -80,14 +87,14 @@ class JustificationEpubStyleSpikeTest : ReaderSettingsIsolatedTest() {
 
             // Each submission is followed by a probe that REQUIRES the requested variables to be live in the
             // DOM, so a reading can never be of the previous state.
-            probe.submit(withoutAlignment() + EpubPreferences(textAlign = ReadiumTextAlign.JUSTIFY))
+            probe.submit(mechanismProbePrefs() + EpubPreferences(textAlign = ReadiumTextAlign.JUSTIFY))
             val justifyOnly = probe.settled("$label: --USER__textAlign live, advanced gate OFF") {
                 hasDecl(it, "--USER__textAlign: justify") && !advancedOn(it)
             }
             probe.logState("M3", label, "textAlign=JUSTIFY,publisherStyles-unset", justifyOnly)
 
             probe.submit(
-                withoutAlignment() +
+                mechanismProbePrefs() +
                     EpubPreferences(textAlign = ReadiumTextAlign.JUSTIFY, publisherStyles = false),
             )
             val withFlag = probe.settled("$label: --USER__textAlign live, advanced gate ON") {
@@ -200,7 +207,7 @@ class JustificationEpubStyleSpikeTest : ReaderSettingsIsolatedTest() {
             probe.awaitNavigator()
             probe.advanceToProse("real:The Half Second(en)")
 
-            probe.submit(withoutAlignment(lineHeight = 1.5))
+            probe.submit(mechanismProbePrefs(lineHeight = 1.5))
             val before = probe.settled("--USER__lineHeight: 1.5 live, advanced gate OFF") {
                 hasDecl(it, "--USER__lineHeight: 1.5") && !advancedOn(it) &&
                     it.optInt("textLen") >= EpubDomProbe.MIN_PROSE_CHARS
@@ -209,13 +216,13 @@ class JustificationEpubStyleSpikeTest : ReaderSettingsIsolatedTest() {
 
             // The probe REQUIRES --USER__lineHeight to actually read 2.0 before it counts, so "the computed
             // value did not change" can never be an artifact of reading before the change landed.
-            probe.submit(withoutAlignment(lineHeight = 2.0))
+            probe.submit(mechanismProbePrefs(lineHeight = 2.0))
             val after = probe.settled("--USER__lineHeight: 2.0 live, advanced gate OFF") {
                 hasDecl(it, "--USER__lineHeight: 2.0") && !advancedOn(it)
             }
             probe.logState("M4", "en", "lineHeight=2.0, publisherStyles unset", after)
 
-            probe.submit(withoutAlignment(lineHeight = 2.0) + EpubPreferences(publisherStyles = false))
+            probe.submit(mechanismProbePrefs(lineHeight = 2.0) + EpubPreferences(publisherStyles = false))
             val fixed = probe.settled("--USER__lineHeight: 2.0 live, advanced gate ON") {
                 hasDecl(it, "--USER__lineHeight: 2.0") && advancedOn(it)
             }

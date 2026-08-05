@@ -46,7 +46,8 @@ class EpubPublisherStylesEffectsConnectedTest : ReaderSettingsIsolatedTest() {
                        bodyTextAlign:getComputedStyle(document.body).textAlign};
                 var sels={plain:'p.plain',center:'p.pub-center',quoteBox:'blockquote.pub-right',
                           quote:'blockquote.pub-right p',lastjust:'p.pub-lastjustify',
-                          h1:'h1',h2:'h2',tiny:'p.tiny'};
+                          h1:'h1',h2:'h2',h3:'h3',h4:'h4',tiny:'p.tiny',
+                          small:'small',sub:'sub',sup:'sup'};
                 for(var k in sels){
                   var e=document.querySelector(sels[k]); if(!e) continue;
                   var c=getComputedStyle(e); o[k+'_ta']=c.textAlign; o[k+'_fs']=c.fontSize;
@@ -134,13 +135,34 @@ class EpubPublisherStylesEffectsConnectedTest : ReaderSettingsIsolatedTest() {
             val rootLegacy = requireNotNull(pxOrNull(legacy.optString("rootFontSize"))) { "root font size unreadable" }
             assertEquals("the root font size must not move between the two states", rootLegacy, root, 0.01)
 
-            // E3 — the advanced type scale (1.2^n rem) replaces the publisher's heading sizes.
-            val h1 = requireNotNull(pxOrNull(withFlag.optString("h1_fs"))) { "h1 unreadable" }
-            val h2 = requireNotNull(pxOrNull(withFlag.optString("h2_fs"))) { "h2 unreadable" }
-            val h1Legacy = requireNotNull(pxOrNull(legacy.optString("h1_fs"))) { "h1 unreadable" }
-            assertEquals("control: the publisher's h1 is 3em", 3.0 * root, h1Legacy, root * 0.05)
-            assertEquals("E3: h1 becomes 1.2^3 rem under the advanced gate", 1.728 * root, h1, root * 0.03)
-            assertEquals("E3: h2 becomes 1.2^2 rem under the advanced gate", 1.44 * root, h2, root * 0.03)
+            // E3 — the advanced type scale replaces the publisher's sizes across the WHOLE set the block
+            // names (h1-h3 at 1.2^n rem, h4-h6 and small/sub/sup at their own fixed values), not just the
+            // two headings the plan's E3 row happened to quote.
+            val expectedWithFlag = mapOf(
+                "h1" to 1.728 * root, "h2" to 1.44 * root, "h3" to 1.2 * root, "h4" to root,
+                // `small` computes `smaller` (Chromium's relative-size step from the 1rem parent) and
+                // sub/sup a flat 67.5% — both replacing the publisher's inflated em sizes.
+                "small" to null, "sub" to 0.675 * root, "sup" to 0.675 * root,
+            )
+            val publisherEm = mapOf("h1" to 3.0, "h2" to 2.0, "h3" to 1.9, "h4" to 1.8, "small" to 1.7, "sub" to 1.6, "sup" to 1.55)
+            for ((key, em) in publisherEm) {
+                val legacyPx = requireNotNull(pxOrNull(legacy.optString("${key}_fs"))) { "$key unreadable in control" }
+                val flagPx = requireNotNull(pxOrNull(withFlag.optString("${key}_fs"))) { "$key unreadable" }
+                // sub/sup/small inherit the publisher's 1.7-1.6em from a parent <p> that is itself
+                // overridden to 1rem, so only their RATIO to the control is asserted for those.
+                assertTrue(
+                    "control: the publisher's $key must be larger than 1rem (was ${legacyPx}px, root ${root}px)",
+                    legacyPx > root * 1.2,
+                )
+                assertTrue(
+                    "E3: the advanced type scale must shrink $key from the publisher's ${em}em " +
+                        "(${legacyPx}px -> ${flagPx}px)",
+                    flagPx < legacyPx - 0.5,
+                )
+                expectedWithFlag[key]?.let { expected ->
+                    assertEquals("E3: $key must land on the advanced block's own size", expected, flagPx, root * 0.05)
+                }
+            }
 
             // E4 — paragraph font sizes flatten to 1rem, overriding a publisher's smaller size.
             val tiny = requireNotNull(pxOrNull(withFlag.optString("tiny_fs"))) { "tiny <p> unreadable" }

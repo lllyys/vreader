@@ -2,6 +2,7 @@ package com.vreader.app.reader
 
 import android.util.Log
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.vreader.app.reader.settings.ReaderLayout
 import com.vreader.app.reader.settings.ReaderSettings
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -120,14 +121,20 @@ class EpubJustifyConnectedTest : ReaderSettingsIsolatedTest() {
 
             // E1 on the prose itself: every substantial non-blockquote/figcaption <p> justifies.
             val census = censusOf(production)
+            val legacyCensus = censusOf(legacy)
             assertTrue("the census must have sampled real paragraphs", census.values.sum() >= 3)
+            assertEquals(
+                "the control must have sampled the SAME paragraphs — otherwise 'they were not already " +
+                    "justified' could just mean the control sampled nothing (census=$census, legacy=$legacyCensus)",
+                census.values.sum(), legacyCensus.values.sum(),
+            )
             assertEquals(
                 "every sampled prose <p> must compute justify under the production preferences — census=$census",
                 setOf("justify"), census.keys,
             )
             assertEquals(
-                "control: the same paragraphs must not already be justified — census=${censusOf(legacy)}",
-                setOf<String>(), censusOf(legacy).keys - START_ALIGNMENTS,
+                "control: the same paragraphs must all be start/left before the change — census=$legacyCensus",
+                setOf<String>(), legacyCensus.keys - START_ALIGNMENTS,
             )
 
             // NOTE — deliberately NOT asserted here: `bodyTextAlignLast == "auto"`. It reads `auto` in BOTH
@@ -140,11 +147,78 @@ class EpubJustifyConnectedTest : ReaderSettingsIsolatedTest() {
                 "E5: hyphens must compute auto on body under justify",
                 "auto", production.optString("bodyHyphens"),
             )
+            // The control must be a REAL computed value, not merely "not auto" — an empty string from a
+            // failed read would otherwise satisfy a bare inequality and manufacture the contrast.
             assertTrue(
-                "E5 control: hyphens must NOT already be auto under the pre-#156 mapping " +
+                "E5 control: hyphens must be a real non-auto computed value under the pre-#156 mapping " +
                     "(was '${legacy.optString("bodyHyphens")}')",
-                legacy.optString("bodyHyphens") != "auto",
+                legacy.optString("bodyHyphens") in setOf("manual", "none"),
             )
+        }
+    }
+
+    /**
+     * **AC-4, paged overflow.** The same acceptance in Readium's native pagination, because that is the
+     * other half of what a user can be reading in: `publisherStyles = false` and `--USER__textAlign` are
+     * emitted the same way, but paged mode reflows into columns, so "it justified in scroll mode" is not
+     * evidence for it. Also re-checks the line-spacing fix there, since column geometry is exactly where a
+     * line-height change would be most likely to be dropped.
+     */
+    @Test
+    fun enEpub_pagedOverflow_justifies_andLineSpacingStillApplies() {
+        runBlocking { EpubFixtures.app.container.readerSettingsStore.setLayout(ReaderLayout.Paged) }
+        val book = EpubFixtures.importRealEpub(EpubFixtures.EN_FILE, EpubFixtures.EN_BYTES)
+        val settings = currentSettings()
+        assertEquals("the reader must be opened in Paged layout for this test to mean anything", ReaderLayout.Paged, settings.layout)
+        launchReader(book).use { scenario ->
+            val probe = EpubDomProbe(scenario, TAG, scroll = false)
+            probe.awaitNavigator()
+
+            val production = probe.advanceToProse("real:The Half Second(en), paged") {
+                advancedOn(it) && hasDecl(it, "--USER__textAlign: justify") &&
+                    hasDecl(it, "readium-paged-on") && it.optInt("censusSampled") >= 3
+            }
+            probe.logState("PAGED", "en", "production-open (paged)", production)
+            assertEquals(
+                "AC-4 (paged): body must compute justify in Readium's native pagination too",
+                "justify", production.optString("bodyTextAlign"),
+            )
+            assertEquals(
+                "every sampled prose <p> justifies in paged overflow — census=${censusOf(production)}",
+                setOf("justify"), censusOf(production).keys,
+            )
+
+            probe.submit(legacyPreferences(settings))
+            val legacy = probe.settled("en paged: pre-#156 mapping live (advanced gate OFF)") {
+                !advancedOn(it) && hasDecl(it, "readium-paged-on")
+            }
+            probe.logState("PAGED", "en", "legacy-control (paged)", legacy)
+            assertTrue(
+                "the pre-#156 mapping must NOT justify in paged mode either " +
+                    "(was '${legacy.optString("bodyTextAlign")}')",
+                legacy.optString("bodyTextAlign") in START_ALIGNMENTS,
+            )
+
+            probe.submit(settings.toEpubPreferences())
+            val relive = probe.settled("en paged: production mapping re-submitted") {
+                advancedOn(it) && hasDecl(it, "--USER__lineHeight: 1.5") && hasDecl(it, "readium-paged-on")
+            }
+            val store = EpubFixtures.app.container.readerSettingsStore
+            runBlocking { store.setLineSpacing(ReaderSettings.MAX_LINE_SPACING) }
+            val wider = probe.settled("en paged: --USER__lineHeight: 2.0 live") {
+                advancedOn(it) && hasDecl(it, "--USER__lineHeight: 2.0") && hasDecl(it, "readium-paged-on")
+            }
+            probe.logState("PAGED", "en", "lineSpacing=2.0 (paged)", wider)
+
+            val b = requireNotNull(pxOrNull(relive.optString("bodyLineHeight"))) { "paged line-height unreadable" }
+            val a = requireNotNull(pxOrNull(wider.optString("bodyLineHeight"))) { "paged line-height unreadable" }
+            val font = requireNotNull(pxOrNull(relive.optString("bodyFontSize"))) { "paged font size unreadable" }
+            Log.i(TAG, "PAGED-SUMMARY body[justify=${production.optString("bodyTextAlign")}] lineHeight[1.5=$b 2.0=$a] font=$font")
+            assertTrue(
+                "bug #367 must be fixed in paged overflow too ($b -> $a)",
+                a > b + 0.5,
+            )
+            assertEquals("and to the requested multiple of the font size", 2.0 * font, a, 0.6)
         }
     }
 

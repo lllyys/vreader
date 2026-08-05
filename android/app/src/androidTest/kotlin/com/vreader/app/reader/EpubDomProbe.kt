@@ -32,7 +32,12 @@ import java.util.concurrent.TimeUnit
  * claims. Element identity across states is therefore the resource path plus a 40-char text prefix, which
  * is unambiguous for these fixtures.
  */
-class EpubDomProbe(private val scenario: ActivityScenario<ReaderActivity>, private val tag: String) {
+class EpubDomProbe(
+    private val scenario: ActivityScenario<ReaderActivity>,
+    private val tag: String,
+    /** The overflow every submission pins — see [submit]. Must match the layout the reader was opened in. */
+    private val scroll: Boolean = true,
+) {
 
     companion object {
         const val READER_TAG = "reader-navigator" // ReaderActivity's fragment tag
@@ -241,9 +246,9 @@ class EpubDomProbe(private val scenario: ActivityScenario<ReaderActivity>, priva
 
     /**
      * `submitPreferences` REPLACES the whole preference set rather than merging, so every submission pins
-     * `scroll = true` — the production default for a Scroll-layout install (the host opens with
-     * `scroll = layout == Scroll`). Without it a run can flip to `readium-paged-on` midway, an
-     * uncontrolled second variable in a before/after comparison.
+     * the overflow the reader was opened in (the host opens with `scroll = layout == Scroll`). Without it a
+     * run flips between `readium-scroll-on` and `readium-paged-on` midway — an uncontrolled second variable
+     * in a before/after comparison, and one that changes line box widths.
      *
      * A MISSING navigator is a hard failure, not a silent no-op: submitting nothing and then measuring
      * "no change" would manufacture exactly the negative results these tests report.
@@ -253,7 +258,7 @@ class EpubDomProbe(private val scenario: ActivityScenario<ReaderActivity>, priva
         var submitted = false
         scenario.onActivity { act ->
             val nav = act.supportFragmentManager.findFragmentByTag(READER_TAG) as? EpubNavigatorFragment
-            if (nav != null) { nav.submitPreferences(EpubPreferences(scroll = true) + prefs); submitted = true }
+            if (nav != null) { nav.submitPreferences(EpubPreferences(scroll = scroll) + prefs); submitted = true }
         }
         assertTrue("the Readium navigator must exist for a preference submission to mean anything", submitted)
     }

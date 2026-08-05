@@ -82,21 +82,25 @@ object EpubFixtures {
      *  • `<p>` with `text-align-last: justify` — the only way to discriminate the second half of that rule
      *    (`text-align-last: auto !important`), since `auto` is also the CSS initial value, so a book that
      *    never sets it would make the assertion trivially true;
-     *  • `<h1>`/`<h2>` at publisher sizes and a `<p>` at `0.75em`, for the advanced type-scale effects.
+     *  • the **whole** set of elements the advanced type-scale block names — `h1`–`h4`, `small`, `sub`,
+     *    `sup` — plus a `<p>` at `0.75em`, each at a publisher size the block overrides.
      */
     fun publisherAlignedEpubBytes(): ByteArray {
         val chapter = """<?xml version="1.0" encoding="UTF-8"?>
 <html xmlns="http://www.w3.org/1999/xhtml"><head><title>Alignment</title><style>
-h1{font-size:3em}h2{font-size:2em}p.tiny{font-size:0.75em}
+h1{font-size:3em}h2{font-size:2em}h3{font-size:1.9em}h4{font-size:1.8em}
+p.tiny{font-size:0.75em}small{font-size:1.7em}sub{font-size:1.6em}sup{font-size:1.55em}
 p.pub-center{text-align:center}blockquote.pub-right{text-align:right}
 p.pub-lastjustify{text-align:justify;text-align-last:justify}
 </style></head>
 <body><h1>Publisher alignment of a heading long enough to wrap onto a second line</h1><h2>Second level</h2>
+<h3>Third level</h3><h4>Fourth level</h4>
 <p class="plain">$PROSE</p>
 <p class="pub-center">$PROSE</p>
 <blockquote class="pub-right"><p>$PROSE</p></blockquote>
 <p class="pub-lastjustify">$PROSE</p>
 <p class="tiny">$PROSE</p>
+<p class="marks"><small>small text</small> <sub>subscript</sub> <sup>superscript</sup></p>
 </body></html>"""
         val opf = """<?xml version="1.0" encoding="UTF-8"?>
 <package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="bookid">
@@ -219,10 +223,16 @@ fun advancedOn(p: JSONObject) = p.optString("rootStyle").contains("readium-advan
 /** True when [decl] (e.g. `--USER__textAlign: justify`) is present in the live `<html>` inline style. */
 fun hasDecl(p: JSONObject, decl: String) = p.optString("rootStyle").contains(decl)
 
-/** The resource + element identity a multi-state comparison must hold constant. */
+/**
+ * The resource + element identity a multi-state comparison must hold constant. The probe is deliberately
+ * read-only (minting an id would mutate the DOM under measurement), so identity is the resource path plus
+ * the measured element's tag, text prefix and text length — the tag matters because the probe falls back
+ * from `p` to a block element, and a fallback with the same text prefix would otherwise read as "the same
+ * element" while being a different one.
+ */
 fun sameContent(states: List<JSONObject>) =
-    states.map { it.optString("docHref") }.distinct().size == 1 &&
-        states.map { it.optString("textHead") }.distinct().size == 1
+    listOf("docHref", "textHead", "tag").all { key -> states.map { it.optString(key) }.distinct().size == 1 } &&
+        states.map { it.optInt("textLen") }.distinct().size == 1
 
 /** A CSS `<length>px` reading, or null when the DOM returned something unusable (e.g. `normal`, ""). */
 fun pxOrNull(v: String): Double? = v.removeSuffix("px").toDoubleOrNull()?.takeIf { v.endsWith("px") }
