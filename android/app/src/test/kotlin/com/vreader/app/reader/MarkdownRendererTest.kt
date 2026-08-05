@@ -4,6 +4,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -236,5 +237,76 @@ class MarkdownRendererTest {
     @Test fun crlf_preserved() {
         val a = render("plain\r\n")
         assertEquals("plain\r\n", a.text)
+    }
+
+    // --- feature #156 WI-1: the SCROLL-mode heading predicate the body's alignment branch reads. ---
+
+    @Test fun isHeadingChunk_recognisesEveryAtxLevel() {
+        for (level in 1..6) {
+            val chunk = "#".repeat(level) + " Heading text"
+            assertTrue("h$level must be a heading chunk", MarkdownRenderer.isHeadingChunk(chunk))
+        }
+    }
+
+    @Test fun isHeadingChunk_rejectsNonHeadings() {
+        // Every one of these renders as prose/bullet, so the body must justify it.
+        val notHeadings = listOf(
+            "",                       // empty chunk
+            "\n", "\r\n",             // EOL-only
+            "   ", "\t",              // whitespace only
+            "#NoSpace",               // CommonMark needs whitespace after the hash run
+            "####### seven hashes",   // >6 hashes is not ATX
+            " # leading space",       // ATX is anchored at the chunk start
+            "- bullet item", "* bullet item",
+            "plain prose that happens to mention # in the middle",
+            "**bold prose**",
+            "`# code span`",
+        )
+        for (chunk in notHeadings) {
+            assertFalse("must NOT be a heading chunk: ${'"'}$chunk${'"'}", MarkdownRenderer.isHeadingChunk(chunk))
+        }
+    }
+
+    @Test fun isHeadingChunk_toleratesEolAndCjkAndTabSeparator() {
+        assertTrue(MarkdownRenderer.isHeadingChunk("# Heading\n"))
+        assertTrue(MarkdownRenderer.isHeadingChunk("## Heading\r\n"))
+        assertTrue(MarkdownRenderer.isHeadingChunk("#\tTab separated"))
+        assertTrue(MarkdownRenderer.isHeadingChunk("# 第一章 黑暗血时代"))     // CJK heading
+        assertTrue(MarkdownRenderer.isHeadingChunk("# **bold** heading"))    // inline markup inside
+    }
+
+    /**
+     * The predicate and the RENDERER must not drift: for every chunk the predicate calls a heading, the
+     * renderer must emit the bold em-relative heading span — and for every chunk it calls prose, it must
+     * not. A predicate that disagreed with the render would align a chunk as a heading while it draws as
+     * prose (or the reverse), which no alignment assertion on either side alone would catch.
+     */
+    @Test fun isHeadingChunk_agreesWithWhatTheRendererActuallyStyles() {
+        val chunks = listOf(
+            "# Heading", "###### Small heading", "## Heading\n", "# 標題",
+            "#NoSpace", "####### seven", " # leading space", "- bullet", "* bullet",
+            "prose line", "**bold**", "", "\n", "   ",
+        )
+        for (chunk in chunks) {
+            val styledAsHeading = render(chunk).spanStyles.any {
+                it.item.fontWeight == FontWeight.Bold && it.item.fontSize.isEm
+            }
+            assertEquals(
+                "predicate vs render disagree for ${'"'}$chunk${'"'}",
+                styledAsHeading, MarkdownRenderer.isHeadingChunk(chunk),
+            )
+        }
+    }
+
+    /**
+     * The one ATX-shaped chunk the predicate and the renderer legitimately differ on: `"# "` has no
+     * heading TEXT, so the renderer emits no span (and no glyphs). It is pinned rather than papered
+     * over — with an empty render there is nothing to justify either way, so the alignment branch is
+     * moot and `true` is the honest answer for "this chunk is an ATX heading".
+     */
+    @Test fun isHeadingChunk_emptyHeadingText_isAtxShapedButRendersNothing() {
+        assertTrue(MarkdownRenderer.isHeadingChunk("# "))
+        assertEquals("", render("# ").text)
+        assertTrue("no heading span when there is no heading text", render("# ").spanStyles.isEmpty())
     }
 }
