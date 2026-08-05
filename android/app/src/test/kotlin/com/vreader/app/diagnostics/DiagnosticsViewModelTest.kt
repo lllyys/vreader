@@ -535,6 +535,34 @@ class DiagnosticsViewModelTest {
         assertEquals(1, vm.state.value.totalCount)   // the last-completing load's batch wins
     }
 
+    @Test
+    fun aThrowingClockDoesNotLeakTheOutstandingLoadCount() = runTest {
+        // The outstanding-load count gates the spinner, so anything that can throw must sit inside
+        // the `finally`'s reach. `publish()` calls the injected clock, and a leaked count would
+        // leave a LATER, perfectly healthy load reporting isLoading == true forever.
+        var failing = true
+        val vm = DiagnosticsViewModel(
+            store = DiagnosticsLogStore(FakeSource(sixLevels)),
+            clock = { if (failing) throw ClockFailure() else now },
+            zone = { zone },
+            locale = { Locale.ENGLISH },
+        )
+
+        try {
+            vm.load()
+        } catch (expected: ClockFailure) {
+            // The publish path blew up; the count must still have been released.
+        }
+
+        failing = false
+        vm.load()
+
+        assertFalse(vm.state.value.isLoading)
+        assertEquals(DiagnosticsContent.Entries, vm.state.value.content)
+    }
+
+    private class ClockFailure : RuntimeException("simulated clock failure")
+
     /** Serves [batches] in order, one gate per call, recording how many reads ever overlapped. */
     private class SerialisingProbe(private val batches: List<List<DiagnosticsLogEntry>>) :
         DiagnosticsLogSource {

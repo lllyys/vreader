@@ -103,10 +103,13 @@ class DiagnosticsViewModel(
      * last-completing load's batch is the one on screen.
      */
     suspend fun load(sinceMillis: Long? = null, limit: Int? = null) {
+        // The increment is the ONLY statement outside the `try`, and `AtomicInteger` cannot throw:
+        // everything that can fail — including the first `publish()`, which calls the injected
+        // clock/zone/locale — is inside it, so the count can never leak and strand the spinner.
         pendingLoads.incrementAndGet()
-        isLoading = true
-        publish()
         try {
+            isLoading = true
+            publish()
             loadMutex.withLock {
                 loadedEntries = store.load(sinceMillis, limit)
                 hasLoaded = true
