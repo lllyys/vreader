@@ -82,6 +82,19 @@ private val ERROR_INK = Color(0xFFA43A14)
  *  Exactly one format is importable, so the badge is a constant rather than a per-source lookup. */
 private const val SOURCE_BADGE = "VREADER JSON"
 
+// A note on the size of a hostile provider name, because two audit rounds landed on it.
+//
+// Round 2 asked for a bound before `sanitizeDisplayName`, and round 2's fix took the raw name's
+// last 4096 characters. Round 3 showed that trade was bad: for a LEAF longer than the bound it
+// keeps the leaf's suffix, while the sanitizer's own contract keeps the leaf's PREFIX plus its
+// extension — so the local bound changed the visible name to defend against something the
+// sanitizer had already handled. `IncomingBookResolver.boundedLeaf` is index-based precisely so an
+// attacker-sized leaf is never materialised, and it is documented as such. The local heuristic was
+// deleted rather than tuned: what remains is one O(n) `lastIndexOf` over a string that is already
+// resident, which is the shared sanitizer's shipped design and is paid identically by the app's
+// other SAF caller. If that scan ever needs bounding it belongs in `imports/` — read-only for
+// #165 by plan §5.3 — and not in a second, divergent copy here.
+
 /** The designed file header (`:449-475`): tinted JSON glyph, title, file name, source badge. */
 @Composable
 internal fun ImportFileHeader(theme: ReaderTheme, fileName: String) {

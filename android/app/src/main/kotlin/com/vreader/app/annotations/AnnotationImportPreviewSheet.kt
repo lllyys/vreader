@@ -38,7 +38,6 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -139,10 +138,17 @@ fun AnnotationImportPreviewSheetContent(
         // The scrolling region. The action pair below it is pinned, so no amount of body content —
         // a 10 000-character book title in the merge line, a three-row sample of long CJK quotes —
         // can push Cancel / Import out of reach.
+        //
+        // `weight(1f, fill = false)` and NOT a fixed `heightIn(max = …)`: the body must take the
+        // space that is LEFT after the header and the actions, which is a different number on a
+        // compact screen at a large font scale than on a tall one. A constant cap looks correct on
+        // a roomy host and silently pushes both actions off a 320x480 viewport at fontScale 2 —
+        // Gate-4 round 2 predicted that and `actionsStayReachableOnACompactViewportAtDoubleFontScale`
+        // reproduced it. `fill = false` keeps the sheet wrap-height when the content is short.
         Column(
             Modifier
                 .fillMaxWidth()
-                .heightIn(max = 460.dp)
+                .weight(1f, fill = false)
                 .verticalScroll(rememberScrollState()),
         ) {
             when (state) {

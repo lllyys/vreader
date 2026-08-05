@@ -64,8 +64,15 @@ internal fun ReaderTheme.neutralButton(): Color = ink.copy(alpha = if (isDark) 0
 private val JSON_GLYPH_PATHS = listOf(
     "M7 3h8l4 4v14H7z",
     "M15 3v4h4",
-    "M10 13c-1 0-1 2-2 2M14 13c1 0 1 2 2 2",
 )
+
+/**
+ * The braces (`:48`). Split from [JSON_GLYPH_PATHS] because the artboard strokes it differently:
+ * the page outline and the fold carry `strokeLinejoin="round"` only, so their ends keep SVG's
+ * default butt cap, while the braces carry `strokeLinecap="round"` and no join. Applying round
+ * caps to all three thickened the fold's free ends — Gate-4 round 2.
+ */
+private const val JSON_GLYPH_BRACES = "M10 13c-1 0-1 2-2 2M14 13c1 0 1 2 2 2"
 
 /** The artboard's 24-unit viewBox; the paths above are expressed in it. */
 private const val JSON_GLYPH_VIEWPORT = 24f
@@ -76,10 +83,12 @@ private const val JSON_GLYPH_STROKE = 1.7f
 /** The designed JSON-file glyph (`:44-50`, used by the sheet header at `:455`), stroked in [tint]. */
 @Composable
 internal fun ImportJsonFileIcon(tint: Color, size: Dp) {
-    val paths = remember { JSON_GLYPH_PATHS.map { PathParser().parsePathString(it).toPath() } }
-    val stroke = remember {
-        Stroke(width = JSON_GLYPH_STROKE, cap = StrokeCap.Round, join = StrokeJoin.Round)
-    }
+    val outline = remember { JSON_GLYPH_PATHS.map { PathParser().parsePathString(it).toPath() } }
+    val braces = remember { PathParser().parsePathString(JSON_GLYPH_BRACES).toPath() }
+    // `strokeLinejoin="round"`, default butt cap — the page outline and the fold (`:46-47`).
+    val joinStroke = remember { Stroke(width = JSON_GLYPH_STROKE, join = StrokeJoin.Round) }
+    // `strokeLinecap="round"`, default miter join — the braces (`:48`).
+    val capStroke = remember { Stroke(width = JSON_GLYPH_STROKE, cap = StrokeCap.Round) }
     Canvas(
         Modifier
             .size(size)
@@ -87,7 +96,8 @@ internal fun ImportJsonFileIcon(tint: Color, size: Dp) {
     ) {
         val factor = this.size.minDimension / JSON_GLYPH_VIEWPORT
         scale(factor, factor, pivot = Offset.Zero) {
-            paths.forEach { drawPath(it, color = tint, style = stroke) }
+            outline.forEach { drawPath(it, color = tint, style = joinStroke) }
+            drawPath(braces, color = tint, style = capStroke)
         }
     }
 }

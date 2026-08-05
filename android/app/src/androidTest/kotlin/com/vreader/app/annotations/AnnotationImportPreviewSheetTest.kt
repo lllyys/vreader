@@ -1,8 +1,15 @@
 package com.vreader.app.annotations
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.requiredSize
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.semantics.SemanticsProperties
@@ -29,15 +36,9 @@ import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
-import vreader.contracts.Locator
-import vreader.contracts.backup.BackupAnnotationsEnvelope
 import vreader.contracts.backup.BackupBookmark
 import vreader.contracts.backup.BackupHighlight
-import vreader.contracts.backup.BackupJson
 import vreader.contracts.backup.BackupNote
-import vreader.contracts.backup.BackupSchema
-import java.io.ByteArrayInputStream
-import java.time.Instant
 
 /**
  * Feature #165 WI-5 — the designed annotations-import preview/confirm sheet
@@ -63,113 +64,35 @@ import java.time.Instant
 class AnnotationImportPreviewSheetTest {
     @get:Rule val compose = createComposeRule()
 
-    private val bookKey = "epub:" + "a".repeat(64) + ":1000"
-    private val t0: Instant = Instant.parse("2026-08-05T10:00:00Z")
+    // The wire fixtures live in `AnnotationImportSheetFixtures.kt` (SheetFx) — every preview here
+    // is produced by the REAL AnnotationsImportReader from encoded bytes, never hand-built.
+    private fun uuid(n: Int) = SheetFx.uuid(n)
 
-    private fun uuid(n: Int) = "00000000-0000-4000-8000-" + n.toString().padStart(12, '0')
+    private fun highlight(id: String, offset: Int, text: String = "quote $offset") =
+        SheetFx.highlight(id, offset, text)
 
-    private fun locatorJson(offset: Int): String = BackupJson.encode(
-        Locator(
-            contentSHA256 = "a".repeat(64),
-            fileByteCount = 1000,
-            format = "epub",
-            charOffsetUTF16 = offset,
-        ),
-    )
+    private fun note(id: String, offset: Int, content: String = "note $offset") =
+        SheetFx.note(id, offset, content)
 
-    private fun highlight(id: String, offset: Int, text: String = "quote $offset") = BackupHighlight(
-        highlightId = id,
-        bookFingerprintKey = bookKey,
-        locatorJSON = locatorJson(offset),
-        selectedText = text,
-        color = "yellow",
-        note = null,
-        createdAt = t0,
-        updatedAt = t0,
-    )
-
-    private fun note(id: String, offset: Int, content: String = "note $offset") = BackupNote(
-        annotationId = id,
-        bookFingerprintKey = bookKey,
-        locatorJSON = locatorJson(offset),
-        content = content,
-        createdAt = t0,
-        updatedAt = t0,
-    )
-
-    private fun bookmark(id: String, offset: Int, title: String? = "mark $offset") = BackupBookmark(
-        bookmarkId = id,
-        bookFingerprintKey = bookKey,
-        locatorJSON = locatorJson(offset),
-        title = title,
-        createdAt = t0,
-        updatedAt = t0,
-    )
+    private fun bookmark(id: String, offset: Int, title: String? = "mark $offset") =
+        SheetFx.bookmark(id, offset, title)
 
     private fun envelopeJson(
         highlights: List<BackupHighlight> = emptyList(),
         notes: List<BackupNote> = emptyList(),
         bookmarks: List<BackupBookmark> = emptyList(),
-    ): String = BackupJson.encode(
-        BackupAnnotationsEnvelope(
-            schemaVersion = BackupSchema.CURRENT_SCHEMA_VERSION,
-            highlights = highlights,
-            bookmarks = bookmarks,
-            notes = notes,
-        ),
-    )
+    ) = SheetFx.envelopeJson(highlights, notes, bookmarks)
 
     private fun previewOf(
         json: String,
         fileName: String = "pride-and-prejudice.annotations.json",
         bookTitle: String = "Pride and Prejudice",
         existing: ExistingAnnotationState = ExistingAnnotationState.EMPTY,
-    ): ImportPreview {
-        val result = AnnotationsImportReader.parse(
-            ByteArrayInputStream(json.toByteArray(Charsets.UTF_8)),
-            fileName,
-            bookKey,
-            bookTitle,
-            existing,
-        )
-        assertTrue("fixture must parse: $result", result is ImportParseResult.Ok)
-        return (result as ImportParseResult.Ok).preview
-    }
+    ) = SheetFx.previewOf(json, fileName, bookTitle, existing)
 
-    /**
-     * 5 good highlights + 7 rows that fail the UUID gate, 3 notes, 2 bookmarks.
-     *
-     * Raw rows 17 · highlights 5 · notes 3 · bookmarks 2 · skipped 7 · sample 3 · importable 10.
-     * Every one of those numbers is distinct, so an implementation that renders any of them in the
-     * primary button's place is caught by name.
-     */
-    private fun mixedPreview(): ImportPreview {
-        val good = (1..5).map { highlight(uuid(it), offset = it * 10, text = "highlight $it") }
-        val badIds = (1..7).map { highlight("not-a-uuid-$it", offset = 500 + it) }
-        return previewOf(
-            envelopeJson(
-                highlights = good + badIds,
-                notes = (1..3).map { note(uuid(100 + it), offset = 1000 + it) },
-                bookmarks = (1..2).map { bookmark(uuid(200 + it), offset = 2000 + it) },
-            ),
-        )
-    }
+    private fun mixedPreview(): ImportPreview = SheetFx.mixedPreview()
 
-    /** 12 raw rows, 3 of which collide intra-file (F-1 duplicate ids) → 9 importable. */
-    private fun duplicatePreview(): ImportPreview = previewOf(
-        envelopeJson(
-            highlights = listOf(
-                highlight(uuid(1), 10), highlight(uuid(2), 20),
-                highlight(uuid(3), 30), highlight(uuid(4), 40),
-                highlight(uuid(1), 50), highlight(uuid(2), 60),
-            ),
-            notes = listOf(
-                note(uuid(11), 110), note(uuid(12), 120),
-                note(uuid(13), 130), note(uuid(11), 140),
-            ),
-            bookmarks = listOf(bookmark(uuid(21), 210), bookmark(uuid(22), 220)),
-        ),
-    )
+    private fun duplicatePreview(): ImportPreview = SheetFx.duplicatePreview()
 
     private fun setSheet(
         state: AnnotationImportSheetState,
@@ -363,6 +286,41 @@ class AnnotationImportPreviewSheetTest {
         compose.onAllNodesWithText(hostile, useUnmergedTree = true).assertCountEquals(0)
     }
 
+    @Test fun failureState_survivesAnEnormousProviderName() {
+        // A 200 000-character DISPLAY_NAME with a small leaf: the shared sanitizer's index-based
+        // leaf extraction never materialises the directory text.
+        val huge = "/" + "d".repeat(200_000) + "/annotations.json"
+        setSheet(AnnotationImportSheetState.Failed(huge, ImportFailure.Unreadable))
+
+        compose.onNodeWithTag("annot-import-filename", useUnmergedTree = true)
+            .assertTextEquals("annotations.json")
+    }
+
+    @Test fun failureState_keepsALongLeafsPrefixAndExtension() {
+        // The oversized-LEAF case, which round 2's local `takeLast` bound got wrong by keeping the
+        // leaf's SUFFIX. Deferring to the shared sanitizer restores its contract: the leaf's first
+        // characters plus its real extension. A surrogate pair sits astride the 200-character cap
+        // so a naive substring would split it; the sanitizer must not emit a lone surrogate.
+        // The sanitizer caps at MAX_NAME_CHARS = 200 INCLUDING the preserved extension, so the
+        // surrogate pair is placed exactly at the resulting prefix boundary (200 - ".json" = 195).
+        val emoji = "📘" // U+1F4D8, one astral code point = two UTF-16 units
+        val leaf = "a".repeat(194) + emoji + "b".repeat(5_000) + ".json"
+        setSheet(AnnotationImportSheetState.Failed("/tmp/" + leaf, ImportFailure.Unreadable))
+
+        val shown = compose.onNodeWithTag("annot-import-filename", useUnmergedTree = true)
+            .fetchSemanticsNode()
+            .config[SemanticsProperties.Text]
+            .single()
+            .text
+        assertTrue("kept the leaf's PREFIX, not its suffix: $shown", shown.startsWith("a".repeat(194)))
+        assertTrue("kept the real extension: $shown", shown.endsWith(".json"))
+        assertTrue("stayed within the sanitizer's cap: ${shown.length}", shown.length <= 200)
+        assertTrue(
+            "a lone surrogate reached a pixel: $shown",
+            shown.none { it.isHighSurrogate() || it.isLowSurrogate() } || shown.contains(emoji),
+        )
+    }
+
     @Test fun failureState_survivesAnAllStrippedFileName() {
         // Nothing usable left → the shared sanitizer's FALLBACK_NAME, not a blank header.
         setSheet(AnnotationImportSheetState.Failed(0x202E.toChar().toString(), ImportFailure.Busy))
@@ -514,6 +472,39 @@ class AnnotationImportPreviewSheetTest {
 
         compose.onNodeWithTag("annot-import-cancel").assertIsDisplayed()
         compose.onNodeWithTag("annot-import-confirm").assertIsDisplayed().assertIsEnabled()
+        compose.onNodeWithTag("annot-import-confirm").performClick()
+        compose.waitForIdle()
+        assertSame(preview, confirmed)
+    }
+
+    @Test fun actionsStayReachableOnACompactViewportAtDoubleFontScale() {
+        // The long-title test above runs at the host's own size and density, which is generous. A
+        // 320x480 viewport at fontScale 2.0 is the hostile combination: a fixed-height body cap
+        // plus header plus actions overflows it and the actions leave the screen. The body must
+        // take the space that is LEFT, not a constant.
+        val preview = previewOf(
+            envelopeJson(highlights = (1..5).map { highlight(uuid(it), offset = it * 10) }),
+            bookTitle = "書".repeat(2_000),
+        )
+        var confirmed: ImportPreview? = null
+        compose.setContent {
+            val base = LocalDensity.current
+            CompositionLocalProvider(
+                LocalDensity provides Density(density = base.density, fontScale = 2f),
+            ) {
+                Box(Modifier.requiredSize(320.dp, 480.dp)) {
+                    AnnotationImportPreviewSheetContent(
+                        theme = ReaderTheme.Paper,
+                        state = AnnotationImportSheetState.Ready(preview),
+                        onCancel = {},
+                        onConfirm = { confirmed = it },
+                    )
+                }
+            }
+        }
+
+        compose.onNodeWithTag("annot-import-cancel").assertIsDisplayed()
+        compose.onNodeWithTag("annot-import-confirm").assertIsDisplayed()
         compose.onNodeWithTag("annot-import-confirm").performClick()
         compose.waitForIdle()
         assertSame(preview, confirmed)
