@@ -1,5 +1,6 @@
 package com.vreader.app.reader
 
+import android.webkit.WebView
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
@@ -20,12 +21,14 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.click
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
 import com.vreader.app.annotations.AnnotationColor
 import com.vreader.app.annotations.AnnotationsSnapshot
 import com.vreader.app.annotations.HighlightRecord
 import com.vreader.app.annotations.NoteRecord
 import com.vreader.app.reader.chrome.ReaderChromeState
 import com.vreader.app.reader.chrome.ReaderSheet
+import com.vreader.app.reader.foliate.Azw3Document
 import com.vreader.app.reader.nav.JumpResult
 import com.vreader.app.reader.nav.TocEntry
 import com.vreader.app.reader.settings.ReaderTheme
@@ -36,6 +39,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import java.io.File
 
 /**
  * Feature #132 WI-7-hosts, extended by **feature #140 WI-6** — the AZW3 host's chrome wiring.
@@ -308,13 +312,59 @@ class Azw3ReaderChromeUiTest {
         assertEquals(JumpResult.Failed, azw3TocJumpDecision(document = null, entries = chapters, index = 3))
     }
 
-    /** A tap against an index the TOC no longer has (a stale sheet) degrades the same way — never an
-     *  IndexOutOfBounds, never a dismiss on a row that does not exist. */
+    /**
+     * A tap against an index the TOC no longer has (a stale sheet) degrades the same way — never an
+     * IndexOutOfBounds, never a dismiss on a row that does not exist.
+     *
+     * Asserted against a LIVE document (Gate-4 R2 Low): with `document = null` every leg returns Failed
+     * for the null-document reason alone, so a null-only fixture would false-green on an implementation
+     * that never validated the index at all. The in-range control in the same test is what proves the
+     * Failed results come from the index, not from the document.
+     */
     @Test fun tocJumpDecision_withAnOutOfRangeIndex_fails() {
-        assertEquals(JumpResult.Failed, azw3TocJumpDecision(null, chapters, -1))
-        assertEquals(JumpResult.Failed, azw3TocJumpDecision(null, chapters, chapters.size))
-        assertEquals(JumpResult.Failed, azw3TocJumpDecision(null, chapters, Int.MAX_VALUE))
-        assertEquals(JumpResult.Failed, azw3TocJumpDecision(null, emptyList(), 0))
+        withLiveDocument { doc ->
+            // Control: in range + live document → Succeeded. Without this the Failed cases prove nothing.
+            assertEquals(JumpResult.Succeeded, azw3TocJumpDecision(doc, chapters, 0))
+            assertEquals(JumpResult.Succeeded, azw3TocJumpDecision(doc, chapters, chapters.size - 1))
+            // Out of range, same live document → Failed.
+            assertEquals(JumpResult.Failed, azw3TocJumpDecision(doc, chapters, -1))
+            assertEquals(JumpResult.Failed, azw3TocJumpDecision(doc, chapters, chapters.size))
+            assertEquals(JumpResult.Failed, azw3TocJumpDecision(doc, chapters, Int.MAX_VALUE))
+            assertEquals(JumpResult.Failed, azw3TocJumpDecision(doc, emptyList(), 0))
+            // A row with no href at all has no derivable target → Failed even though the index is valid.
+            val hrefless = listOf(
+                TocEntry(
+                    title = "Untitled", depth = 0, pageLabel = null,
+                    canonicalLocator = Locator(
+                        contentSHA256 = "d".repeat(64), fileByteCount = 8192L, format = "azw3",
+                    ),
+                    epubReadiumLocator = null,
+                ),
+            )
+            assertEquals(JumpResult.Failed, azw3TocJumpDecision(doc, hrefless, 0))
+        }
+    }
+
+    /**
+     * Runs [block] with a real, non-null [Azw3Document] on the main thread. The document is CONSTRUCTED
+     * only — never `run()`/attached — so no bundle loads, no book is read and no bridge traffic occurs;
+     * it exists purely to be a non-null instance, which is all [azw3TocJumpDecision] inspects.
+     */
+    private fun withLiveDocument(block: (Azw3Document) -> Unit) {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val context = instrumentation.targetContext
+        var doc: Azw3Document? = null
+        var webView: WebView? = null
+        instrumentation.runOnMainSync {
+            val wv = WebView(context)
+            webView = wv
+            doc = Azw3Document(wv, File(context.cacheDir, "no-such-book.azw3"), context)
+        }
+        try {
+            block(requireNotNull(doc) { "the document was not constructed" })
+        } finally {
+            instrumentation.runOnMainSync { webView?.destroy() }
+        }
     }
 
     // ---- unchanged #132 behaviour ---------------------------------------------------------------

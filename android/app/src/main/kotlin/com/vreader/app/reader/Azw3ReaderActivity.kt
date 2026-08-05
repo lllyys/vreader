@@ -256,10 +256,11 @@ class Azw3ReaderActivity : ComponentActivity() {
                             // Decide the sheet's dismiss SYNCHRONOUSLY from target validity: an unjumpable
                             // bookmark (no cfi + no finite progression) → Failed (sheet stays open, no
                             // invented error surface — rule 51); a jumpable one → Succeeded (dismiss). The
-                            // ACTUAL landing is the awaited Azw3Document.goTo (CFI-first→fraction) launched
-                            // off the jump scope — it blocks ~3s on the bundle relocate ack, so it CANNOT run
-                            // on the tap thread (that would ANR). render-death mid-jump is carried across by
-                            // the host's recreate path (takePendingGoTo → run(pendingGoTo=)); goTo re-lands once.
+                            // awaited Azw3Document.goTo (CFI-first→fraction) is ISSUED off the jump scope —
+                            // it blocks ~3s on the bundle ack, so it CANNOT run on the tap thread (that
+                            // would ANR) — and its Succeeded means ACKNOWLEDGED, not moved. render-death
+                            // mid-jump is carried across by the host's recreate path (takePendingGoTo →
+                            // run(pendingGoTo=)); the jump is then re-issued exactly once.
                             val decision = azw3JumpDecision(doc, record.locator)
                             if (decision == JumpResult.Succeeded && doc != null) {
                                 jumpScope.launch {

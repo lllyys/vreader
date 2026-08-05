@@ -168,8 +168,10 @@ class Azw3Document(
 
     /**
      * feature #135 WI-2 — jump to a persisted bookmark's canonical position (CFI-first→fraction). The
-     * awaited result lets the host decide dismiss-vs-stay: [Azw3GoToResult.Succeeded] landed;
-     * [Azw3GoToResult.Failed]/[Azw3GoToResult.Timeout] did not (the sheet stays open). If the book
+     * awaited result lets the host decide dismiss-vs-stay: [Azw3GoToResult.Succeeded] means the bundle
+     * ACKNOWLEDGED the jump — not, on its own, that the reader moved, since foliate's `view.goTo`
+     * catches a failed resolution and settles anyway (only a later relocate's reported position proves
+     * motion); [Azw3GoToResult.Failed]/[Azw3GoToResult.Timeout] did not (the sheet stays open). If the book
      * isn't ready yet (or a render restart is in flight), the target is HELD and re-issued exactly
      * once after the next book-ready — a jump survives a renderer death mid-flight. Main-thread only.
      */
