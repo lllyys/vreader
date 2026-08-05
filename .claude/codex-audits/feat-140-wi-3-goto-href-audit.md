@@ -1,9 +1,48 @@
 ---
 branch: feat/140-wi-3-goto-href
 threadId: 019fd0fd-d0ba-7881-ab2d-9727ec7e2e8f
-rounds: 3
-final_verdict: block-recommended
+rounds: 4
+final_verdict: ship-as-is
 ---
+
+## Round 4 — orchestrator-run confirming round: **VERDICT: clean**
+
+Round 3 ended at the rule-47 cap with `block-recommended`, but the block was **procedural, not
+substantive**: all three round-3 findings were fixed in `5161765`, and re-auditing its own fixes
+would have been self-certification. Run by the orchestrator (`scripts/run-codex.sh`, gpt-5.5/high,
+read-only). **Zero findings.**
+
+- **The three fixes are correctly transcribed.** No wording anywhere in the changed files still
+  equates an ack with having landed; the stale "asserted below" parenthetical is gone; the
+  whitespace guard is pinned.
+- **The shipped precedence is `cfi → href → progression`** with `isNotBlank()` guards on both cfi
+  and href, and the tests assert href-over-progression rather than the withdrawn round-1/2
+  expectation.
+- **No regression**: the href is still byte-preserving through the existing `jsString` JSON seam
+  (no second escaper), `reader.html`'s cfi and fraction branches are unchanged apart from the
+  inserted href branch, and **no `Succeeded OR Timeout` assertion shape exists** in
+  `FoliateGoToTest.kt`.
+
+### On the withdrawn High — orchestrator adjudication
+
+Rounds 1 and 2 recommended **changing** the precedence; round 3 **withdrew** that on the merits.
+Because a reversal should not be accepted on an auditor's say-so, the orchestrator verified the iOS
+source directly:
+
+> `vreader/Services/Foliate/FoliateNavSeek.swift` — `navigationTarget(for:)` returns `cfi` (blank-
+> trimmed), else `href` (blank-trimmed), else `nil`. **There is no progression leg.**
+
+So Android's `cfi → href → progression` matches iOS for every case iOS handles and merely adds a
+fallback iOS lacks. The withdrawal is correct, plan §5.2 defense 1 needs no amendment, and **rounds 1
+and 2 were the ones in error**. Accepted.
+
+### Mutation note worth preserving
+
+Mutation 7 — moving the shim branch into a **trailing** comment — **initially SURVIVED**. That forced
+`executableJsOf` to strip trailing comment tails, not merely whole-line comments. Without it, a
+commented-out navigation branch would have read as shipped.
+
+Verdict updated on a clean independent confirmation, not an override.
 
 # Gate-4 implementation audit — feature #140 WI-3 (`FoliateGoToTarget.Href`)
 
