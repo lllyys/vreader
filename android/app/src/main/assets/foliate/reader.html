@@ -61,6 +61,10 @@ foliate-view { display: block; width: 100vw; height: 100vh; height: 100dvh; }
                 if (!window.readerAPI || !target) { ack(false, null, null); return; }
                 var p;
                 if (target.cfi != null) { p = window.readerAPI.goTo(target.cfi); }
+                // feature #140 WI-3: the TOC leg. readerAPI.goTo takes an href too (view.goTo ->
+                // resolveNavigation -> book.resolveHref). Ordered BEFORE fraction so the host's
+                // cfi -> href -> fraction precedence also holds here.
+                else if (target.href != null) { p = window.readerAPI.goTo(target.href); }
                 else if (target.fraction != null) { p = window.readerAPI.goToFraction(target.fraction); }
                 else { ack(false, null, null); return; }
                 Promise.resolve(p).then(function () {

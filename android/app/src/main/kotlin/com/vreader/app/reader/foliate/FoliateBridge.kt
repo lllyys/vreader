@@ -196,19 +196,38 @@ sealed interface Azw3GoToResult {
     data object Superseded : Azw3GoToResult
 }
 
-/** feature #135 WI-2 — the foliate navigation target the shim's `goTo`/`goToFraction` accepts. */
+/** feature #135 WI-2 — the foliate navigation target the shim's `goTo`/`goToFraction` accepts.
+ *  feature #140 WI-3 added [Href] — the TOC leg, which foliate resolves via `book.resolveHref`. */
 sealed interface FoliateGoToTarget {
     data class Cfi(val cfi: String) : FoliateGoToTarget
+
+    /** A book-relative destination exactly as the TOC emitted it (`text/part0007.html#ch12`, the KF8
+     *  `kindle:pos:fid:…:off:…` form, …). Carried BYTE-FOR-BYTE to `readerAPI.goTo` — never trimmed,
+     *  normalized or re-encoded: the bundle does its own `decodeURI`, and current-chapter matching is
+     *  byte-exact, so two hrefs differing only by fragment must stay distinct. */
+    data class Href(val href: String) : FoliateGoToTarget
+
     data class Fraction(val fraction: Double) : FoliateGoToTarget
 
     companion object {
         /**
-         * Derive a jump target from a canonical [vreader.contracts.Locator], CFI-FIRST then fraction
-         * (matches [Azw3Document.restoreOrInit]'s precedence). Returns null when there is nothing to
-         * jump to (no cfi + no finite progression) so the caller degrades without injecting JS.
+         * Derive a jump target from a canonical [vreader.contracts.Locator]: **cfi → href →
+         * progression** (the cfi/progression halves match [Azw3Document.restoreOrInit]'s precedence).
+         * Returns null when there is nothing to jump to (no cfi + no href + no finite progression) so
+         * the caller degrades without injecting JS.
+         *
+         * The href leg deliberately outranks progression (feature #140 §5.2 defense 1): an AZW3 TOC
+         * row's destination IS its href, and iOS's TOC converter stamps such rows with
+         * `progression = 0.0` — harmless on iOS, whose target resolution has no progression leg, but
+         * fatal here. Were progression to win, every chapter tap would resolve to `Fraction(0.0)`,
+         * jump to the START of the book, and still ack `ok:true` (foliate's `view.goTo` swallows a
+         * failed resolution), so the sheet would dismiss on a completely broken jump. Pinned by
+         * `FoliateGoToTest.from_prefersHrefOverProgression` /
+         * `from_hrefWithProgressionZero_stillYieldsHref`.
          */
         fun from(locator: vreader.contracts.Locator): FoliateGoToTarget? {
             locator.cfi?.takeIf { it.isNotBlank() }?.let { return Cfi(it) }
+            locator.href?.takeIf { it.isNotBlank() }?.let { return Href(it) }
             locator.progression?.takeIf { it.isFinite() }?.let { return Fraction(it) }
             return null
         }
@@ -290,11 +309,15 @@ class FoliateGoToDispatcher(
         )
     }
 
-    /** The JSON-escaped shell-shim call. The request id + CFI/fraction are JSON-encoded so a hostile
-     *  book-derived CFI cannot break out of the injected JS string (the [jsString] escaping seam). */
+    /** The JSON-escaped shell-shim call. The request id + CFI/href are JSON-encoded so a hostile
+     *  book-derived CFI or TOC href cannot break out of the injected JS string (the [jsString]
+     *  escaping seam — the ONLY escaper on this path; the href gets no separate treatment and is
+     *  therefore delivered byte-for-byte). */
     private fun gotoJs(id: String, target: FoliateGoToTarget): String = when (target) {
         is FoliateGoToTarget.Cfi ->
             "try{window.__vreaderGoTo&&window.__vreaderGoTo(${jsString(id)},{cfi:${jsString(target.cfi)}})}catch(e){}"
+        is FoliateGoToTarget.Href ->
+            "try{window.__vreaderGoTo&&window.__vreaderGoTo(${jsString(id)},{href:${jsString(target.href)}})}catch(e){}"
         is FoliateGoToTarget.Fraction ->
             "try{window.__vreaderGoTo&&window.__vreaderGoTo(${jsString(id)},{fraction:${target.fraction}})}catch(e){}"
     }
