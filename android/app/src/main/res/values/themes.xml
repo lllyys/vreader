@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- feature #155 — the theme for the exported inbound-document router
+     (`imports.ImportActivity`). It draws NOTHING, but it is deliberately NOT
+     `Theme.NoDisplay`: a no-display activity must finish before it would become
+     visible, whereas this one has to stay alive long enough to open every incoming
+     stream while its FLAG_GRANT_READ_URI_PERMISSION grant is still valid (plan D2/D6).
+     Translucent + transparent window is what buys "invisible yet alive". -->
+<resources>
+    <style name="Theme.VReader.Import" parent="@android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowIsFloating">false</item>
+        <item name="android:backgroundDimEnabled">false</item>
+    </style>
+</resources>
