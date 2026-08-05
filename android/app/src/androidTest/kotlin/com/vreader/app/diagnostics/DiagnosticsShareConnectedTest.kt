@@ -15,11 +15,14 @@ import android.content.ClipData
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
+import android.system.ErrnoException
+import android.system.Os
 import androidx.core.content.FileProvider
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import kotlinx.coroutines.runBlocking
 import org.junit.After
+import org.junit.Assume
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -60,9 +63,30 @@ class DiagnosticsShareConnectedTest {
         diagnosticsDir.listFiles()?.forEach { it.delete() }
     }
 
-    /** Writes a real export through the production writer and returns the promoted file. */
-    private fun writeExport(payload: String = "diagnostics payload"): File =
-        runBlocking { DiagnosticsExportWriter(diagnosticsDir).write(payload) }
+    /**
+     * Writes a real export through the production writer — wired exactly as `AppContainer` wires
+     * it, i.e. rendering through the store's REDACTING `exportText`, so the tests below exercise
+     * the shipped chain rather than a hand-rolled payload.
+     */
+    private fun writeExport(vararg messages: String): File {
+        val store = DiagnosticsLogStore(EmptySource)
+        val writer = DiagnosticsExportWriter(diagnosticsDir, renderPayload = store::exportText)
+        val entries = (messages.takeIf { it.isNotEmpty() } ?: arrayOf("diagnostics payload"))
+            .map {
+                DiagnosticsLogEntry(
+                    timeMillis = 1_700_000_000_000L,
+                    level = DiagnosticsLevel.ERROR,
+                    category = DiagnosticsCategory.SYNC.tag,
+                    message = it,
+                )
+            }
+        return runBlocking { writer.write(entries) }
+    }
+
+    private object EmptySource : DiagnosticsLogSource {
+        override suspend fun recentEntries(sinceMillis: Long?, limit: Int) =
+            SourceResult.Available(emptyList())
+    }
 
     private fun stray(dir: File, name: String, content: String): File {
         dir.mkdirs()
@@ -161,17 +185,35 @@ class DiagnosticsShareConnectedTest {
         assertEquals("the ClipData URI matches EXTRA_STREAM", uri, clip.getItemAt(0).uri)
     }
 
+    /**
+     * Both probes are NAMED exactly like a real export, so the name check cannot be what rejects
+     * them — the DIRECTORY guard is the assertion under test.
+     */
     @Test fun shareDiagnosticsIntent_returnsNullForAFileOutsideTheDiagnosticsDirectory() {
-        val book = stray(booksDir, "share-probe-${UUID.randomUUID()}.epub", "book bytes")
-        val loose = stray(context.filesDir, "share-probe-${UUID.randomUUID()}.txt", "loose bytes")
+        val book = stray(booksDir, "vreader-log-2026-08-05.txt", "book bytes wearing an export's name")
+        val loose = stray(context.filesDir, "vreader-log-2026-08-04.txt", "loose bytes wearing an export's name")
 
-        assertNull("a book file is not a diagnostics export", shareDiagnosticsIntent(context, book))
+        assertNull("a file under books/ is not a diagnostics export", shareDiagnosticsIntent(context, book))
         assertNull("a loose filesDir file is not a diagnostics export", shareDiagnosticsIntent(context, loose))
+    }
+
+    /**
+     * Being IN the export directory is not enough — the file must also be NAMED like an export.
+     * Without this, any file some other code dropped there could be granted to another app, which
+     * is a wider door than "share the diagnostics export" needs.
+     */
+    @Test fun shareDiagnosticsIntent_returnsNullForAFileInTheDirectoryThatIsNotAnExport() {
+        val notAnExport = stray(diagnosticsDir, "raw-${UUID.randomUUID()}.txt", "raw bytes nobody redacted")
+
+        assertNull(shareDiagnosticsIntent(context, notAnExport))
+        // Control: a real export in the same directory IS shareable, so this is the name, not the place.
+        assertNotNull(shareDiagnosticsIntent(context, writeExport()))
     }
 
     /** The path-traversal shape specifically: a name that ESCAPES the directory it starts in. */
     @Test fun shareDiagnosticsIntent_returnsNullForATraversalPath() {
-        val loose = stray(context.filesDir, "traversal-probe-${UUID.randomUUID()}.txt", "loose bytes")
+        // Named like an export, so only the canonical-directory guard can reject it.
+        val loose = stray(context.filesDir, "vreader-log-2026-08-03.txt", "loose bytes")
         diagnosticsDir.mkdirs()   // the intermediate segment must exist for the path to resolve
         val traversal = File(diagnosticsDir, "../${loose.name}")
 
@@ -180,6 +222,59 @@ class DiagnosticsShareConnectedTest {
             "a path that only LOOKS like it is inside diagnostics/ must be rejected",
             shareDiagnosticsIntent(context, traversal),
         )
+    }
+
+    /**
+     * A HARD LINK planted in the export directory is a second name for bytes that live elsewhere —
+     * canonicalisation cannot see it (there is no target to resolve), so the directory check alone
+     * would hand another app a book file through the diagnostics grant. Same-uid code could read
+     * those bytes itself; what must not happen is OUR grant carrying them across the app boundary.
+     *
+     * Recorded observation rather than a silent skip: on this AVD (API 35) `Os.link` inside
+     * app-private storage fails with **EACCES**, i.e. the platform refuses hard-link creation from
+     * the untrusted-app domain, so the vector is not constructible here at all. That is a stronger
+     * property than the guard provides — but it is the PLATFORM's property, not ours, and it varies
+     * by kernel/SELinux configuration, so the `st_nlink` check stays as defence in depth and this
+     * test activates wherever the vector does exist. The `Assume` failure surfaces as a SKIP in the
+     * XML, so the platform verdict stays visible instead of being asserted away.
+     */
+    @Test fun shareDiagnosticsIntent_returnsNullForAHardLinkIntoAnotherDirectory() {
+        val book = stray(booksDir, "hardlink-target-${UUID.randomUUID()}.epub", "book bytes")
+        diagnosticsDir.mkdirs()
+        val link = File(diagnosticsDir, "vreader-log-2026-08-05.txt")
+        link.delete()
+        try {
+            Os.link(book.absolutePath, link.absolutePath)
+        } catch (e: ErrnoException) {
+            Assume.assumeNoException(
+                "this build refuses hard-link creation from the app domain (errno ${e.errno}), so " +
+                    "the vector the st_nlink guard covers cannot be constructed here",
+                e,
+            )
+        }
+        strays += link
+
+        assertTrue("precondition: the link exists and reads the linked bytes", link.exists())
+        assertEquals("book bytes", link.readText())
+        assertNull(
+            "a hard link is not an export, however plausible its name and location",
+            shareDiagnosticsIntent(context, link),
+        )
+    }
+
+    /**
+     * A symlink INSIDE the export directory, pointing at a real export and NAMED like one, is still
+     * not an export: it is a second name for the file, and `lstat` is what sees that.
+     */
+    @Test fun shareDiagnosticsIntent_returnsNullForASymlinkAlias() {
+        val export = writeExport()
+        val alias = File(diagnosticsDir, "vreader-log-2026-08-02.txt")
+        alias.delete()
+        Os.symlink(export.absolutePath, alias.absolutePath)
+        strays += alias
+
+        assertNull(shareDiagnosticsIntent(context, alias))
+        assertNotNull("the real export is still shareable", shareDiagnosticsIntent(context, export))
     }
 
     @Test fun shareDiagnosticsIntent_returnsNullForAMissingFile() {
@@ -234,23 +329,10 @@ class DiagnosticsShareConnectedTest {
      */
     @Test fun grantedUri_streamsTheRedactedExport_withoutTheSeededSecret() {
         val secret = "connected-s3cret-${UUID.randomUUID()}"
-        val store = DiagnosticsLogStore(
-            object : DiagnosticsLogSource {
-                override suspend fun recentEntries(sinceMillis: Long?, limit: Int) =
-                    SourceResult.Available(
-                        listOf(
-                            DiagnosticsLogEntry(
-                                timeMillis = 1_700_000_000_000L,
-                                level = DiagnosticsLevel.ERROR,
-                                category = DiagnosticsCategory.SYNC.tag,
-                                message = "backup failed password=$secret",
-                            ),
-                        ),
-                    )
-            },
-        )
-        val payload = runBlocking { store.exportText(store.load(), generatedAt = 1_700_000_000_000L) }
-        val export = writeExport(payload)
+        // The entry goes in RAW: redaction happens inside the writer's store renderer, which is how
+        // production is wired. A test that pre-rendered the payload would prove only that one
+        // correct call sequence is safe.
+        val export = writeExport("backup failed password=$secret")
 
         val uri = FileProvider.getUriForFile(context, DIAGNOSTICS_AUTHORITY, export)
         val streamed = context.contentResolver.openInputStream(uri)!!.use {

@@ -17,11 +17,14 @@ import androidx.test.core.app.ApplicationProvider
 import com.vreader.app.diagnostics.DiagnosticsCategory
 import com.vreader.app.diagnostics.DiagnosticsExportWriter
 import com.vreader.app.diagnostics.DiagnosticsLevel
+import com.vreader.app.diagnostics.DiagnosticsLogEntry
 import com.vreader.app.diagnostics.DiagnosticsLogStore
+import com.vreader.app.diagnostics.DiagnosticsRedactor
 import com.vreader.app.diagnostics.SourceResult
 import com.vreader.app.diagnostics.VLog
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNotSame
 import org.junit.Assert.assertSame
@@ -91,7 +94,7 @@ class AppContainerDiagnosticsWiringTest {
      * flow would silently start returning null on device.
      */
     @Test fun exportWriter_writesUnderFilesDirDiagnostics() {
-        val written = runBlocking { app.container.diagnosticsExportWriter.write("probe payload") }
+        val written = runBlocking { app.container.diagnosticsExportWriter.write(listOf(probeEntry("probe payload"))) }
 
         val expected = File(app.filesDir, DiagnosticsExportWriter.DIRECTORY_NAME).canonicalFile
         assertEquals(
@@ -99,8 +102,36 @@ class AppContainerDiagnosticsWiringTest {
             expected,
             written.canonicalFile.parentFile,
         )
-        assertEquals("probe payload", written.readText())
+        assertTrue("the payload carries the entry", written.readText().contains("probe payload"))
     }
+
+    /**
+     * The container must wire the writer's `renderPayload` to the SHARED store's redacting
+     * `exportText`. This is the assertion that makes redaction structural rather than a caller
+     * convention: it goes through the production graph, and the test never renders anything itself.
+     */
+    @Test fun exportWriter_isWiredToTheRedactingStoreRenderer() {
+        val secret = "container-s3cret-${UUID.randomUUID()}"
+
+        val written = runBlocking {
+            app.container.diagnosticsExportWriter.write(listOf(probeEntry("sync failed password=$secret")))
+        }
+        val onDisk = written.readText()
+
+        assertFalse("the container's writer must redact before any byte reaches disk", onDisk.contains(secret))
+        assertTrue(onDisk.contains(DiagnosticsRedactor.PLACEHOLDER))
+        assertTrue(
+            "the payload is the store's export format, not a raw dump",
+            onDisk.startsWith("vreader diagnostics"),
+        )
+    }
+
+    private fun probeEntry(message: String) = DiagnosticsLogEntry(
+        timeMillis = 1_700_000_000_000L,
+        level = DiagnosticsLevel.WARN,
+        category = DiagnosticsCategory.SYNC.tag,
+        message = message,
+    )
 
     /** The store the container hands the viewer reads through the wired sources, not a fresh one. */
     @Test fun diagnosticsStore_readsTheContainersRing() {

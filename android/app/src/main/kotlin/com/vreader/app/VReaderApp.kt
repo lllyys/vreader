@@ -422,12 +422,17 @@ class AppContainer(
     val diagnosticsStore: DiagnosticsLogStore by lazy { DiagnosticsLogStore(diagnosticsSource) }
 
     /**
-     * Writes the redacted export into `filesDir/diagnostics` — the ONE directory
-     * `@xml/diagnostics_paths` grants, single-sourced through [DiagnosticsExportWriter.DIRECTORY_NAME].
+     * Writes the export into `filesDir/diagnostics` — the ONE directory `@xml/diagnostics_paths`
+     * grants, single-sourced through [DiagnosticsExportWriter.DIRECTORY_NAME].
+     *
+     * `renderPayload` is the SHARED store's `exportText`, which redacts every entry: that wiring is
+     * what makes redaction structural rather than a caller convention, so no code path can put an
+     * unredacted byte in a file that is about to be handed to another app.
      */
     val diagnosticsExportWriter: DiagnosticsExportWriter by lazy {
         DiagnosticsExportWriter(
             dir = File(appContext.filesDir, DiagnosticsExportWriter.DIRECTORY_NAME),
+            renderPayload = diagnosticsStore::exportText,
             ioDispatcher = Dispatchers.IO,
         )
     }
