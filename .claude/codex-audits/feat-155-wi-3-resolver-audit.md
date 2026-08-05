@@ -1,8 +1,8 @@
 ---
 branch: feat/155-wi-3-resolver
 threadId: 019fcfbd-6112-7473-aad6-d661f9ccb4e0
-rounds: 3
-final_verdict: block-recommended
+rounds: 4
+final_verdict: follow-up-recommended
 date: 2026-08-05
 ---
 
@@ -17,6 +17,55 @@ Three rounds, `scripts/run-codex.sh -e high` (rule 53), read-only sandbox.
 | 1 | `019fcf92-2d2f-77b1-a24d-5d7b6a85b3cf` | block-recommended | 0 / 2 / 3 |
 | 2 | `019fcfa9-d8d9-7560-972a-7ea86aa15017` | block-recommended | 0 / 1 / 4 |
 | 3 | `019fcfbd-6112-7473-aad6-d661f9ccb4e0` | block-recommended | 0 / 1 / 0 |
+| 4 | orchestrator-run adjudication (gpt-5.5 / high) | **follow-up-recommended** (condition met) | 0 / 0 / 0 |
+
+## Round 4 — orchestrator-run disposition adjudication (2026-08-05)
+
+The lane escalated correctly rather than certifying its own disposition (rule 48). Rounds 2 and 3
+had each been asked directly whether the open HIGH could be fixed inside WI-3's write-set; both said
+no and both endorsed escalation. So the question put to round 4 was **not** "is the stall HIGH
+fixed?" — it is accepted, not disputed — but the genuinely different question the orchestrator's
+ruling raises:
+
+> Given the gap is (1) unreachable at this HEAD and (2) tracked with WI-5 gated, is merging WI-3 as a
+> foundational WI an acceptable disposition?
+
+Scoped to three questions: reachability, whether the tracking is accurate and complete enough that a
+WI-4/WI-5 implementer cannot miss it, and the disposition itself.
+
+**Findings:**
+
+1. **Reachability — NOT reachable, verified by call-site search, not assumption.** `IncomingBookResolver`
+   and `BookMagicSniffer` appear only in their own files and comments under `android/app/src/main`;
+   `ImportActivity.onCreate()` still calls `finish()` and constructs neither. The stall gap therefore
+   cannot be triggered by a user or a hostile app at this HEAD.
+2. **Tracking — accurate and complete.** The amended D8 block and the features row were judged to
+   state the mechanism correctly and completely: unbounded synchronous provider calls, the watchdog
+   sitting after resolution, the permit taken before a stream exists, the required worker/watchdog
+   extension across `peek`/`resolveAndOpen`, timeout-to-outcome routing, late-result stream disposal,
+   and the rejection of a resolver-local executor timeout.
+3. **One NEW HIGH — an orchestrator process error, now fixed.** The audit ran against branch HEAD and
+   found the D8/features/version changes **uncommitted in the working tree**: the orchestrator's
+   `git commit` had been inside a compound command that the merge-gate hook aborted. Merging that HEAD
+   would have landed WI-3 *without* the promised gate in the branch history a future WI dispatcher
+   consumes — a tracked gap that isn't actually in the history is an untracked gap.
+
+   > `docs/features.md:208 | HIGH | The WI-5-blocking stall gap tracking is only in the dirty working
+   > tree, not branch HEAD | Commit the D8/features/version tracking change before merge.`
+
+   **Fixed**: commit `05959d02` (plan D7/D8 + features row) and `cc541807` (version bump) are now in
+   `main..HEAD`. This was the auditor's *sole* blocking condition, stated explicitly and verifiably —
+   *"With the dirty tracking commit included, the disposition would be acceptable."* The verdict is
+   therefore updated on a **met condition**, not on an override.
+
+**Verdict rationale, in the auditor's own framing**: block-recommended was returned "not because the
+stall HIGH is newly disputed, and not because it is reachable today; it is not reachable" — purely
+because the documented orchestration action was not committed. With that condition satisfied, the
+stated disposition is `follow-up-recommended`: unreachable resolver/sniffer code plus an explicit
+WI-5 gate.
+
+**The open HIGH remains open.** It is carried in plan D8 as `BLOCKS WI-5` and in the `docs/features.md`
+#155 row. WI-5 is not dispatched until it is closed.
 
 Round-3 High is the SINGLE remaining finding, and all three rounds agree it is **not fixable
 inside this work item's four-file write-set**. Everything else is resolved or accepted with
