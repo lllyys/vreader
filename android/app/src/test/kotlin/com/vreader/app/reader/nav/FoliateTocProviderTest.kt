@@ -34,9 +34,10 @@ import kotlin.coroutines.CoroutineContext
  *   this is the INDEPENDENT defense 2, and [entryLocator_hasNoProgression] asserts the field is
  *   `null`, not merely that an href is present (an href-only assertion passes under both).
  * - **A blank label or href SKIPS the row but STILL WALKS its subitems** — iOS bug #262's round-1
- *   fix. Both fixtures below give the blank node real children and assert those children survive
- *   AND that their depth still incremented past the skipped parent; a childless fixture would let
- *   the test pass vacuously.
+ *   fix. The fixtures give the blank node real children and assert those children survive AND that
+ *   their depth still incremented past the skipped parent; a childless fixture would let the test
+ *   pass vacuously, and [consecutiveSkippedContainers_stillYieldTheirDescendants] closes the
+ *   two-skips-in-a-row gap a single-skip fixture leaves open.
  * - **Hrefs are opaque and preserved BYTE-FOR-BYTE** — no trim, no normalization, no re-encoding.
  *   WI-3 hands the href straight to `readerAPI.goTo` and WI-4 matches `relocate.tocHref` byte-
  *   exactly, so any tidying here silently breaks navigation or the current-chapter highlight one WI
@@ -179,6 +180,22 @@ class FoliateTocProviderTest {
         assertEquals(listOf(1), entries.map { it.depth })
     }
 
+    @Test fun consecutiveSkippedContainers_stillYieldTheirDescendants() {
+        // Gate-4 round 1 (Low): a single-skip fixture would still pass under a bug that only loses
+        // children once TWO skipped containers nest. Skipped for a blank label, then for a blank
+        // href, then a real chapter — which must survive at depth 2, both levels still counted.
+        val tree = listOf(
+            item(
+                "  ", "grandparent.html",
+                item("Untitled Part", "", item("Chapter", "chapter.html")),
+            ),
+        )
+        val entries = toc(tree)
+        assertEquals(listOf("Chapter"), entries.map { it.title })
+        assertEquals(listOf(2), entries.map { it.depth })
+        assertEquals(listOf("chapter.html"), entries.map { it.canonicalLocator.href })
+    }
+
     // ------------------------------------------------------------------ label policy
 
     @Test fun labelIsTrimmed() {
@@ -251,7 +268,10 @@ class FoliateTocProviderTest {
     }
 
     @Test fun entryLocator_isValid() {
-        toc(NESTED).forEach { assertNull(it.canonicalLocator.validate()) }
+        val entries = toc(NESTED)
+        // Size first: a forEach over an accidentally-empty list would assert nothing (Gate-4 R1 Low).
+        assertEquals(NESTED_TITLES.size, entries.size)
+        entries.forEach { assertNull(it.canonicalLocator.validate()) }
     }
 
     @Test fun pageLabelAndReadiumLocator_areNull() {
@@ -302,9 +322,14 @@ class FoliateTocProviderTest {
 
     @Test fun hrefIsNotUnicodeNormalized() {
         // Composed vs decomposed must stay distinct: the engine matches the bytes it emitted.
-        // Written as escapes so the distinction cannot be lost to an editor's own normalization.
-        val decomposed = "café/ch1.xhtml"
-        val composed = "café/ch1.xhtml"
+        // The two fixtures below are LITERAL UTF-8 in this source (bytes `63 61 66 65 cc 81` and
+        // `63 61 66 c3 a9`) — the code points are named in the trailing comments. The
+        // `assertNotEquals` guard is what makes that robust: if any editor or reformat ever
+        // normalized this file, the fixtures would collapse and this test would fail loudly rather
+        // than pass vacuously. (Gate-4 R1 Low: an earlier comment claimed \u escapes, which the
+        // source did not carry.)
+        val decomposed = "café/ch1.xhtml"   // e + U+0301 COMBINING ACUTE ACCENT
+        val composed = "café/ch1.xhtml"      // U+00E9 LATIN SMALL LETTER E WITH ACUTE
         assertNotEquals(decomposed, composed)
         val entries = toc(listOf(item("A", decomposed), item("B", composed)))
         assertEquals(listOf(decomposed, composed), entries.map { it.canonicalLocator.href })
@@ -328,9 +353,6 @@ class FoliateTocProviderTest {
         try {
             val callerThread = currentThreadName()
             val walkThreads = Collections.synchronizedSet(mutableSetOf<String>())
-            // kotlinx.coroutines' debug mode renames the running thread to "<name> @coroutine#N"
-            // for the duration of the block, so strip that suffix — the thread IDENTITY is the
-            // assertion, not the coroutine bookkeeping appended to its name.
             val probe = ProbeList(NESTED) { walkThreads.add(currentThreadName()) }
             val entries = toc(probe, dispatcher = dispatcher)
             assertEquals(NESTED_TITLES, entries.map { it.title })
