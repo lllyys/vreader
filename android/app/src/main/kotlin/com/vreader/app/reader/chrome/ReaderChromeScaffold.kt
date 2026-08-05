@@ -89,6 +89,11 @@ import vreader.contracts.Locator
  * designed accent `Import annotations…` row + B1's merge-policy footnote to the sheet's ActionList and is
  * invoked on tap; null (the default) renders neither (the capability gate — no dead no-op). The paired
  * `Export annotations…` row is NOT built here: it is `BLOCKED: needs-design (#2085)` and lands in WI-8.
+ * feature #165 WI-7 — [importSheet] is the host-supplied post-pick preview/confirm sheet overlay (the
+ * designed [com.vreader.app.annotations.AnnotationImportPreviewSheet], a ModalBottomSheet whose state the
+ * host owns — the #133 [searchSheet] precedent). It renders LAST, so it sits above the Details sheet, and
+ * independently of [ReaderChromeState.sheet], because the host closes the Details route before the system
+ * picker opens.
  *
  * [bottomChrome] receives the Contents/Notes open callbacks (a null Contents callback when [tocEntries] is
  * empty) and renders the reader's bottom chrome. [body] is the reader content; a center-tap on it toggles
@@ -124,6 +129,10 @@ fun ReaderChromeScaffold(
     // default) renders NO Import row and NO merge-policy footnote, so #132/#134/#135 callers are unchanged.
     // WI-7 supplies the real launcher; the paired Export entry is BLOCKED on needs-design #2085 (WI-8).
     onImportAnnotations: (() -> Unit)? = null,
+    // feature #165 WI-7 — the post-pick preview/confirm sheet, supplied by the host (the #133
+    // `searchSheet` precedent: a ModalBottomSheet whose state the host owns). Rendered LAST so it lands
+    // ABOVE the Details sheet; null (the default) renders nothing.
+    importSheet: (@Composable () -> Unit)? = null,
     // feature #131 WI-9 — the bilingual entry: [pillSlot] fills the top-chrome pill next to the title
     // (WI-7a BilingualPill; null → no pill, bilingual off), and [bilingualMoreRow] supplies the More-menu
     // Bilingual Toggle/Disabled row (null → no row — the #132/#134-only callers stay valid).
@@ -260,6 +269,12 @@ fun ReaderChromeScaffold(
             initialTab = TocTab.Bookmarks,
         )
     }
+
+    // feature #165 WI-7 — the designed annotations-import preview/confirm sheet. Rendered AFTER the
+    // route sheets so a stacked presentation puts it on top, and OUTSIDE the `when` because it is not a
+    // [ReaderSheet] route: it is driven by the host's own launcher state, which can be up while the
+    // route is [ReaderSheet.None] (the hosts close the Details sheet before the picker opens).
+    importSheet?.invoke()
 }
 
 // feature #134 WI-5 / #131 WI-9 — the More-menu row assembly ([readerMoreRows] + [BilingualMoreRow] +

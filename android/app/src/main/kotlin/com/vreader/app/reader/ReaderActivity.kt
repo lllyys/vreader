@@ -115,6 +115,11 @@ class ReaderActivity : AppCompatActivity() {
 
     private val annotations: AnnotationsRepository get() = container.annotationsRepository
 
+    // feature #165 WI-7 — the annotation import/export SAF boundary for THIS activity: this activity's
+    // ContentResolver behind the app-wide BoundedCallGate (never a fresh gate — one abandoned-call
+    // ledger, plan section 8.5). Built lazily so a reader that never opens the Details sheet pays nothing.
+    private val annotationsIo by lazy { container.annotationsIoController(contentResolver) }
+
     private var containerId: Int = 0
     private var navigator: EpubNavigatorFragment? = null
     private var publication: Publication? = null   // host-owned; closed in onDestroy
@@ -548,6 +553,18 @@ class ReaderActivity : AppCompatActivity() {
         }
     }
 
+    /** feature #165 WI-7 — reload the Notes snapshot after an annotation import merged rows.
+     *  [observeAnnotationsSnapshot]'s Flow fires on HIGHLIGHT changes only, so a file that brought only
+     *  notes (or only bookmarks) would otherwise stay invisible until the book was reopened. */
+    private fun refreshAnnotationsSnapshot() {
+        val current = book ?: return
+        lifecycleScope.launch {
+            val snapshot = runCatching { annotations.annotationsForBook(current.fingerprintKey) }
+                .getOrDefault(AnnotationsSnapshot(emptyList(), emptyList()))
+            chromeModel.value = chromeModel.value.copy(annotations = snapshot)
+        }
+    }
+
     /** feature #134 WI-5 — build + keep the More menu's Book-details model in sync with this book's live
      *  collection names (EPUB supplies no page count → the Pages row is omitted). The mapped model appears
      *  on the [chromeBookDetails] state the top band/sheet layer read, so the More button appears once the
@@ -928,6 +945,20 @@ class ReaderActivity : AppCompatActivity() {
         val popoverOverlay = ComposeView(this).apply { setContent { PopoverOverlay() } }
         val sheetLayer = ComposeView(this).apply {
             setContent {
+                // feature #165 WI-7 — the production annotation-import entry: the SAF launcher + the
+                // designed preview sheet, built HERE because this is the ComposeView that renders the
+                // Details sheet the row lives in. The Details route is closed before the picker opens
+                // (one modal at a time), and a successful merge forces a snapshot refresh — the live
+                // `highlights` Flow only fires for highlights, so a notes-only import would otherwise
+                // not appear until a reopen.
+                val details = chromeBookDetails.value
+                val importEntry = rememberAnnotationImportEntry(
+                    controller = annotationsIo,
+                    bookKey = book?.fingerprintKey.orEmpty(),
+                    bookTitle = chromeModel.value.title,
+                    onLaunching = { chromeState.value = chromeState.value.copy(sheet = ReaderSheet.None) },
+                    onApplied = ::refreshAnnotationsSnapshot,
+                )
                 EpubReaderSheets(
                     model = chromeModel,
                     theme = chromeTheme.value,
@@ -935,12 +966,16 @@ class ReaderActivity : AppCompatActivity() {
                     onJumpToc = ::jumpToTocEntry,
                     onShareAnnotations = { shareAnnotations(chromeModel.value.annotations) },
                     // feature #134 WI-5 — the Book Details route + its Share / copy-fingerprint actions.
-                    bookDetails = chromeBookDetails.value,
+                    bookDetails = details,
                     onShareBook = ::shareBookFile,
                     onCopyFingerprint = ::copyFingerprint,
                     // feature #135 WI-7 — the Bookmarks-tab rows + the per-bookmark jump (canonical → Readium).
                     bookmarks = bookmarkRows.value,
                     onJumpBookmark = ::jumpToBookmark,
+                    // feature #165 WI-7 — gated on the SAME model that gates the More button, so the row can
+                    // never appear before this book's key is known.
+                    onImportAnnotations = if (details != null) importEntry.launch else null,
+                    importSheet = importEntry.sheetSlot(chromeTheme.value),
                 )
                 // feature #133 WI-11 — the in-book search sheet renders in the SAME sheet-layer ComposeView
                 // (open-only, so it does not cover the fragment while closed → touch-through preserved). It is

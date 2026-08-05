@@ -1,0 +1,207 @@
+// Purpose: feature #165 WI-7 — the ONE annotation-import entry the four reader hosts share: the
+// production SAF `ACTION_OPEN_DOCUMENT` launcher, the designed preview sheet's state, and the
+// apply call. This is what makes annotation import reachable by a real user (criterion A-10a);
+// before it, WI-6's Import row existed but no production call site passed a callback.
+//
+// Pipeline: the Details sheet's `Import annotations…` row -> [AnnotationImportEntry.launch] ->
+// the system document picker -> the picked `Uri` -> `AnnotationsIoController.preview` (bounded,
+// section 8.1) -> the designed `AnnotationImportPreviewSheet` -> the user's `Import N items` ->
+// `AnnotationsIoController.apply` -> the merged rows appear in the already-designed Notes sheet.
+//
+// Key decisions:
+//  - FOUR HOSTS, ONE COPY. Four activities registering their own launcher and their own state
+//    machine is four chances to drift (plan R-4). The hosts hold a `rememberAnnotationImportEntry`
+//    call and pass its three members on; every decision lives here, and every bounded provider
+//    call lives one layer further down in `AnnotationsIoController`.
+//  - NOTHING HERE TOUCHES A `ContentResolver`. The picked `Uri` is handed straight to the
+//    controller, whose every provider call runs through the shipped `BoundedCallGate` (section
+//    8.5 forbids a bare resolver call anywhere in this feature). This file must stay that way.
+//  - THE DETAILS SHEET IS DISMISSED BEFORE THE PICKER OPENS. The system picker covers the screen
+//    and returns to a reader, not to a stale modal; and stacking the preview `ModalBottomSheet`
+//    on top of the Details `ModalBottomSheet` would put two dialog windows up at once for no
+//    designed reason. Section 3.2's claim that the parse window needs NO new pixels still holds —
+//    it names the absence of a progress surface, and there is none either way.
+//  - A CANCELLED PICK IS SILENT. `OpenDocument` yields a null `Uri` when the user backs out; that
+//    is not a failure and the designed error blob would be a lie. No surface, no state change
+//    (rule 51 — the design draws no "you cancelled" state, so none is invented).
+//  - THE REFUSAL PATH STILL NAMES THE FILE, AND THE NAME IS SANITIZED HERE. The designed file
+//    header sits OUTSIDE the error branch, but `ImportParseResult.Failed` carries no name, so the
+//    only name left is the picked `Uri`'s last path segment — as provider-controlled as
+//    `DISPLAY_NAME`, and therefore run through the same
+//    `IncomingBookResolver.sanitizeDisplayName` the controller uses (section 8.4). A readable file
+//    uses the controller's sanitized `DISPLAY_NAME` instead; the fallback is only ever the
+//    second-best name, never the preferred one.
+//  - THE PREVIEW TRAVELS BY IDENTITY. `onConfirm` hands back the very `ImportPreview` object the
+//    reader produced, so "the number the user approves is the number they get" (section 6.4) is an
+//    object-identity property rather than a re-derivation that could disagree.
+//  - APPLY FAILURE RE-RENDERS THE SAME DESIGNED ERROR BRANCH (section 3.2 / D-10b), keeping the
+//    typed reason. The transaction is atomic, so the honest choice really is "all, or the blob".
+//
+// @coordinates-with AnnotationsIoController (the bounded I/O boundary this drives),
+//   AnnotationImportPreviewSheet (the designed surface it feeds), BookDetailsRows (the designed
+//   Import row that calls `launch`), ReaderChromeScaffold + EpubReaderSheets (the two chrome hosts
+//   that render the sheet), VReaderApp (which builds the controller from the ONE app-wide gate).
+package com.vreader.app.reader
+
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import com.vreader.app.annotations.AnnotationImportFailedException
+import com.vreader.app.annotations.AnnotationImportPreviewSheet
+import com.vreader.app.annotations.AnnotationImportSheetState
+import com.vreader.app.annotations.AnnotationsIoController
+import com.vreader.app.annotations.ImportFailure
+import com.vreader.app.annotations.ImportParseResult
+import com.vreader.app.annotations.ImportPreview
+import com.vreader.app.imports.IncomingBookResolver
+import com.vreader.app.reader.settings.ReaderTheme
+import kotlinx.coroutines.launch
+
+/**
+ * The MIME hint handed to the system picker.
+ *
+ * `application/json` first so a well-behaved provider pre-filters, `* / *` alongside it because
+ * providers routinely mislabel a `.json` document as `text/plain` or `application/octet-stream` and
+ * a strict filter would make a legitimate file unpickable (plan R-7). The declared type is a HINT
+ * and never a gate — validation is by content, always (D-4).
+ */
+internal val ANNOTATION_IMPORT_MIME_TYPES = arrayOf("application/json", "*/*")
+
+/**
+ * What a reader host needs to offer annotation import: the designed sheet's current state (null =
+ * no sheet), and the three things the user can do.
+ *
+ * [launch] is what the designed `Import annotations…` row calls. [dismiss] is Cancel / swipe /
+ * scrim. [confirm] is `Import N items`, and it receives the very preview on screen.
+ */
+@Immutable
+class AnnotationImportEntry internal constructor(
+    val sheet: AnnotationImportSheetState?,
+    val launch: () -> Unit,
+    val dismiss: () -> Unit,
+    val confirm: (ImportPreview) -> Unit,
+)
+
+/**
+ * Registers the production SAF launcher for [bookKey] and drives the designed preview sheet.
+ *
+ * [onLaunching] runs immediately before the picker opens — the hosts use it to close the Details
+ * sheet the row was tapped in. [onApplied] runs after a successful merge; hosts that keep a
+ * one-shot annotations snapshot use it to refresh, and hosts whose snapshot is a live Flow need
+ * nothing.
+ *
+ * Must be called from a composition hosted by a `ComponentActivity`
+ * (`rememberLauncherForActivityResult`'s requirement) — every reader host is one.
+ */
+@Composable
+internal fun rememberAnnotationImportEntry(
+    controller: AnnotationsIoController,
+    bookKey: String,
+    bookTitle: String,
+    onLaunching: () -> Unit = {},
+    onApplied: () -> Unit = {},
+): AnnotationImportEntry {
+    val scope = rememberCoroutineScope()
+    var sheet by remember(bookKey) { mutableStateOf<AnnotationImportSheetState?>(null) }
+
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+        // A cancelled pick is silent — no state, no surface (see this file's header).
+        if (uri == null) return@rememberLauncherForActivityResult
+        val fallbackName = importPickerFileName(uri.lastPathSegment)
+        scope.launch {
+            sheet = importSheetStateFor(controller.preview(uri, bookKey, bookTitle), fallbackName)
+        }
+    }
+
+    return AnnotationImportEntry(
+        sheet = sheet,
+        launch = {
+            onLaunching()
+            picker.launch(ANNOTATION_IMPORT_MIME_TYPES)
+        },
+        dismiss = { sheet = null },
+        confirm = { preview ->
+            scope.launch {
+                controller.apply(preview)
+                    .onSuccess {
+                        // The observable result is the designed annotations list itself (section
+                        // 3.2) — no "42 imported!" banner is invented here.
+                        sheet = null
+                        onApplied()
+                    }
+                    .onFailure { error -> sheet = importApplyFailureState(error, preview.fileName) }
+            }
+        },
+    )
+}
+
+/**
+ * This entry's designed sheet as a chrome-host `importSheet` slot, or null when nothing is picked.
+ *
+ * Deliberately NOT a `@Composable` — it is a plain mapping from state to a slot, so a host can
+ * compute it wherever it already has the theme, and so "no pick, no slot" is a null the host can
+ * see rather than a composable that renders nothing.
+ */
+internal fun AnnotationImportEntry.sheetSlot(theme: ReaderTheme): (@Composable () -> Unit)? {
+    val state = sheet ?: return null
+    return {
+        AnnotationImportPreviewSheet(
+            theme = theme,
+            state = state,
+            onCancel = dismiss,
+            onConfirm = confirm,
+            onDismiss = dismiss,
+        )
+    }
+}
+
+// ---- the pure decisions (JVM-testable; see AnnotationImportEntryTest) --------------------------
+
+/**
+ * The file name the designed header shows when the boundary refused the document, derived from the
+ * picked `Uri`'s last path segment.
+ *
+ * That segment is provider-controlled text and gets the SAME treatment `DISPLAY_NAME` gets
+ * (section 8.4): leaf-only extraction, a pre-normalization bound, NFC, control-character and
+ * Bidi_Control removal, unpaired-surrogate removal, and a 200-char cap that never splits a
+ * surrogate pair. Null / blank / fully-stripped becomes `Untitled`.
+ */
+internal fun importPickerFileName(rawLastPathSegment: String?): String =
+    IncomingBookResolver.sanitizeDisplayName(rawLastPathSegment)
+
+/**
+ * The boundary's answer as the designed sheet's state.
+ *
+ * A readable file keeps the controller's own sanitized `DISPLAY_NAME` (carried on the preview);
+ * only a refusal falls back to [fallbackName]. `importable == 0` is `Ready`, not `Failed` — C-8 is
+ * a disabled primary, not the error blob.
+ */
+internal fun importSheetStateFor(
+    result: ImportParseResult,
+    fallbackName: String,
+): AnnotationImportSheetState = when (result) {
+    is ImportParseResult.Ok -> AnnotationImportSheetState.Ready(result.preview)
+    is ImportParseResult.Failed -> AnnotationImportSheetState.Failed(fallbackName, result.reason)
+}
+
+/**
+ * An apply-time failure as the SAME designed error branch (section 3.2), keeping its typed reason.
+ *
+ * Anything that is not an [AnnotationImportFailedException] never passed through the feature's own
+ * taxonomy, so it reports `Unreadable` rather than a guess; the throwable's text is never shown —
+ * `ImportFailure.userMessage` is a fixed string (rule 50 section 6).
+ */
+internal fun importApplyFailureState(
+    error: Throwable,
+    fileName: String,
+): AnnotationImportSheetState.Failed = AnnotationImportSheetState.Failed(
+    fileName = fileName,
+    reason = (error as? AnnotationImportFailedException)?.reason ?: ImportFailure.Unreadable,
+)

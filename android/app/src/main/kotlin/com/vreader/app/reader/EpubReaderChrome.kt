@@ -208,10 +208,18 @@ fun EpubReaderSheets(
     // default) renders NO Import row and NO merge-policy footnote, so #132/#134/#135 EPUB callers are
     // unchanged. WI-7 supplies the real launcher; the paired Export entry is BLOCKED on needs-design #2085.
     onImportAnnotations: (() -> Unit)? = null,
+    // feature #165 WI-7 — the host-supplied post-pick preview/confirm sheet (the designed
+    // [com.vreader.app.annotations.AnnotationImportPreviewSheet]). It is NOT a [ReaderSheet] route: the
+    // host closes the Details route before the system picker opens, so this layer must render it even
+    // while the route is [ReaderSheet.None]. Null (the default) renders nothing.
+    importSheet: (@Composable () -> Unit)? = null,
 ) {
     val chrome by model.collectAsStateWithLifecycle()
     val sheet = chromeState.value.sheet
-    if (sheet is ReaderSheet.None) return // render nothing → the fragment keeps all input
+    // Render nothing → the fragment keeps all input. The import sheet is checked too, because it can be
+    // up with no route open; when it is, this layer hosts it and nothing else (the ModalBottomSheet
+    // lives in its own window, so the ComposeView itself still covers nothing).
+    if (sheet is ReaderSheet.None && importSheet == null) return
 
     fun closeSheet() { chromeState.value = chromeState.value.copy(sheet = ReaderSheet.None) }
 
@@ -219,27 +227,30 @@ fun EpubReaderSheets(
     // full-screen dismiss overlay below, silently intercepting Readium scroll/selection/link input (a
     // dead route). Normalize it back to None so touch-through is preserved (Gate-4 P1). In practice this
     // route is only reached once [bookDetails] fed the More menu, so this is a defensive guard.
-    if (sheet is ReaderSheet.Details && bookDetails == null) {
-        closeSheet()
-        return
-    }
+    val deadDetailsRoute = sheet is ReaderSheet.Details && bookDetails == null
+    if (deadDetailsRoute) closeSheet()
 
     // feature #135 WI-6 — the Bookmarks route now DOES render (the two-tab TocBookmarksSheet with the
     // Bookmarks tab pre-selected), so it is NOT normalized away — it lays the scrim + the sheet like Toc.
+    val routeVisible = sheet !is ReaderSheet.None && !deadDetailsRoute
 
     // The open-only full-screen dismiss overlay — a transparent scrim under the sheet. An outside tap
-    // (a tap that reaches the scrim, not the sheet) closes the sheet. Present ONLY while a sheet is open.
-    Box(
-        Modifier
-            .fillMaxSize()
-            .testTag("epub-sheet-dismiss-overlay")
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-            ) { closeSheet() },
-    )
+    // (a tap that reaches the scrim, not the sheet) closes the sheet. Present ONLY while a ROUTE sheet is
+    // open: an import sheet alone must not lay a scrim, or dismissing it would be indistinguishable from
+    // tapping the fragment.
+    if (routeVisible) {
+        Box(
+            Modifier
+                .fillMaxSize()
+                .testTag("epub-sheet-dismiss-overlay")
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                ) { closeSheet() },
+        )
+    }
 
-    when (sheet) {
+    if (routeVisible) when (sheet) {
         ReaderSheet.None -> Unit
         // feature #135 WI-6 — the promoted two-tab TOC sheet (Contents|Bookmarks). The Contents tab REUSES
         // #132's TocContentsSheet body unchanged; dismiss-on-success (Contents) / dismiss-on-Succeeded
@@ -286,4 +297,8 @@ fun EpubReaderSheets(
             initialTab = TocTab.Bookmarks,
         )
     }
+
+    // feature #165 WI-7 — the designed import preview/confirm sheet, rendered AFTER the route sheets so a
+    // stacked presentation puts it on top.
+    importSheet?.invoke()
 }

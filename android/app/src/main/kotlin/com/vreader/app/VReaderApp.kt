@@ -106,6 +106,44 @@ class AppContainer(
         com.vreader.app.data.CollectionRepository(database.collectionDao())
     }
 
+    // ── feature #165 — annotation export / import ─────────────────────────────────────────────
+    // Both halves of the graph land together even though only IMPORT is user-reachable in the
+    // first pass: `AnnotationsIoController` takes the writer as a CONSTRUCTOR parameter, so the
+    // writer is constructed here while `export()` stays unreachable until the `Export
+    // annotations…` row lands (WI-8, BLOCKED: needs-design #2085). That mirrors WI-4b shipping the
+    // bounded export I/O path whole — deferring the hardening alongside the UI would mean the
+    // unbounded call arrives the same day the row does.
+
+    /** The export half's writer. Process-singleton over the shared annotations repository. */
+    val annotationsExportWriter: com.vreader.app.annotations.AnnotationsExportWriter by lazy {
+        com.vreader.app.annotations.AnnotationsExportWriter(annotationsRepository)
+    }
+
+    /** The import half's merge seam (over `AnnotationsRepository.restoreAnnotations` + C-5b's
+     *  parent-book re-check). */
+    val annotationsImportApplier: com.vreader.app.annotations.AnnotationsImportApplier by lazy {
+        com.vreader.app.annotations.AnnotationsImportApplier(annotationsRepository, repository)
+    }
+
+    /**
+     * The per-activity SAF boundary for annotation import/export.
+     *
+     * NOT a lazy: it binds an activity's own [android.content.ContentResolver]. The
+     * `BoundedCallGate` it receives is the SHIPPED app-wide one
+     * ([incomingImportCoordinator]`.boundedCalls`) — never a fresh instance. A second gate would
+     * carry a second `MAX_ABANDONED_CALLS` budget, i.e. DOUBLE the ceiling on simultaneously
+     * parked provider threads (plan section 8.5, R-3b).
+     */
+    fun annotationsIoController(
+        resolver: android.content.ContentResolver,
+    ): com.vreader.app.annotations.AnnotationsIoController =
+        com.vreader.app.annotations.AnnotationsIoController(
+            resolver = resolver,
+            writer = annotationsExportWriter,
+            applier = annotationsImportApplier,
+            gate = incomingImportCoordinator.boundedCalls,
+        )
+
     // feature #129 — reader display settings. A device-local DataStore (the OpdsSourceStore /
     // AiProviderStore precedent), global (not per-book), process-singleton so a settings change
     // propagates to whatever reader is open. Stored under noBackupFilesDir — display prefs are
