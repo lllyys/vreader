@@ -1,7 +1,7 @@
 ---
 branch: feat/155-wi-4-coordinator
 threadId: 019fd039-ec53-7ae1-9426-bb72f0c867ea
-rounds: 3
+rounds: 5
 final_verdict: block-recommended
 ---
 
@@ -78,8 +78,68 @@ round on the (small, localized) delta or to escalate.
 | Late-result disposal skipped in `BoundedCallGate` | `a late result is DISPOSED, never leaked` |
 | Input-queue bound removed for `PreResolved` | `PreResolved envelopes cannot grow the queue without bound …` |
 
+## Round 4 — orchestrator-run (gpt-5.5/high) on the `565cf105` queue-bound delta
+
+The escalation above was accepted and the orchestrator ran the confirming round on the round-3
+delta. It **confirmed** the parts the lane could not self-certify: `queueDepth` is decremented on
+all three paths (worker receive, failed post-shutdown send, shutdown drain) with no upward leak
+that could wedge admission; streams, the GUARANTEED timeout liveness and `BoundedCallGate`'s
+late-result disposal all remain intact; and dropping the newest does not reorder the items already
+accepted.
+
+It also found **two new HIGHs in the queue-bound fix itself** — i.e. defects the lane introduced
+while closing round 3's finding, which is exactly why self-certification was refused:
+
+| Sev | Finding | Fix (round 5) |
+| --- | --- | --- |
+| **High 1** | **Admission was not atomic.** `enqueue` read `queueDepth.get()` separately from its increment, so concurrent callers could each pass the check while below `MAX_PENDING_ITEMS` and collectively push past it — *without* holding slots. Reachable from an exported activity, so concurrent callers are the EXPECTED case, not a corner. | `tryReserveDepth()` is now a CAS reservation loop, mirroring `tryOwn()` / `acquireSlot()`. The reservation is released on the three paths already handled. |
+| **High 2** | **The drop path silently swallowed an outcome.** The over-cap branch `continue`d before any `emit`/`process`, so that input URI produced NO outcome at all — breaking one-outcome-per-input-URI precisely where a user cannot explain it (share 300 files, some produce no toast, ever). | Took the orchestrator's suggested direction rather than patching the drop: **the queue no longer drops at all.** Every item either enters the queue (the worker owes its outcome) or is handled INLINE — and inline means emitting the envelope's OWN outcome, not a substituted `Failed`, since it already carries the true one and holds no fd. The invariant now holds by construction. |
+
+**Why the queue stopped dropping.** Every queued item *owes* an outcome, so a droppable queue is in
+permanent tension with the contract. Bounding *admission* instead leaves exactly ONE degradable
+path in the whole design — the delivery buffer's own bound (`MAX_PENDING_OUTCOMES`, accepted in
+round 2) — rather than two. The residual cost of inline handling is input ORDER for that item under
+overload, never the outcome itself, which is the same trade the over-cap `reject()` path has always
+made. Worst-case queue depth is now stated precisely as `MAX_PENDING_ITEMS + MAX_IN_FLIGHT`: a
+`Ready` item owns an fd, so it is never refused for depth and is merely counted.
+
+**One existing test legitimately went RED and was rewritten, not deleted.** `undelivered outcomes
+are BOUNDED, keeping the oldest…` enqueued 356 envelopes in one batch, which after this change
+trips BOTH bounds — the 100 inline-handled ones are delivered ahead of the 256 queued ones, so
+"oldest first" no longer described it. It now drains in chunks below the admission bound, isolating
+the delivery buffer; the reordering it used to accidentally cover has its own explicit assertion in
+`an envelope refused by the depth bound STILL gets its own outcome`.
+
+## Round 5 — mutation pass (8 mutations, all killed)
+
+Re-run against the final code; the two the orchestrator asked for are the last two rows.
+
+| Mutation | Test that went RED |
+| --- | --- |
+| `sourceUri` re-derived from `pending.uri.toString()` | `the pre-capped sourceUri is passed to the importer VERBATIM` |
+| Slot released only on non-timeout paths | 6 RED, incl. `liveness is GUARANTEED …` and `abandoned calls are bounded …` (re-verified on the round-5 code) |
+| Guard stream not closed on the over-cap path | `an undeclared oversize stream …`, `an endless stream …` |
+| Outcome `Channel` → non-replaying `MutableSharedFlow` | 20 RED, incl. `… every outcome reaches a LATE collector` |
+| Late-result disposal skipped in `BoundedCallGate` | `a late result is DISPOSED, never leaked` |
+| Input-queue bound removed for `PreResolved` | `PreResolved envelopes cannot grow the queue without bound …` |
+| **(a) check/increment made non-atomic again** | `concurrent enqueue callers cannot collectively push past the depth bound` (observed depth 257 vs 256) |
+| **(b) over-cap envelope dropped without emitting** | `an envelope refused by the depth bound STILL gets its own outcome` |
+
+Note on (a): a non-atomic check/increment is a *probabilistic* defect, so the test's detection power
+comes from the width of the race window — 16 threads released simultaneously by a `CyclicBarrier`
+onto the exact boundary (`MAX_PENDING_ITEMS - 1` pre-filled). The assertion itself
+(`depth == MAX_PENDING_ITEMS`) is exact and cannot false-fail on the CAS implementation.
+
+## Why this artifact still records `block-recommended`
+
+Round 4 found two HIGHs in the lane's own round-3 fix. Both are now fixed and mutation-tested, but
+by the same rule that produced the correct escalation last time, **the lane does not certify its
+own fix to an independent auditor's finding** — and that rule just proved its worth. The verdict
+stays `block-recommended` and the lane returns `outcome: blocked` pending the orchestrator's
+confirming round on the round-5 delta.
+
 ## Test gate
 
-`RUN-ANDROID-TESTS RESULT: SUCCEEDED` — 168 tests / 0 failures across
-`*imports*` + `*BookImporterTest*` (33 in `IncomingImportCoordinatorTest`; in-package baseline
-was unchanged and green).
+`RUN-ANDROID-TESTS RESULT: SUCCEEDED` — **170 tests / 0 failures** across `*imports*` +
+`*BookImporterTest*` (35 in `IncomingImportCoordinatorTest`; in-package baseline unchanged and
+green). Earlier rounds: 168/0 at round 3, 33 coordinator tests.

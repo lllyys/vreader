@@ -479,13 +479,23 @@ class IncomingImportCoordinator internal constructor(
     /**
      * Appends [items] to the process-wide queue, taking ownership of every stream. Never
      * suspends and never throws, so a caller that is finishing cannot be blocked by import work.
+     *
+     * EVERY item leaves here owing exactly one outcome, and the queue itself NEVER drops: an item
+     * is either accepted (the worker owes its outcome) or handled INLINE right here (its outcome
+     * is emitted immediately). That is what makes one-outcome-per-input-URI hold by construction
+     * rather than by care — a queue that may drop is in permanent tension with the contract
+     * (Gate-4 round 4, High). The one remaining, documented degradation is the delivery buffer's
+     * own bound; see [outcomeChannel].
+     *
+     * Inline handling costs input ORDER for that item under overload, never the outcome itself —
+     * the same trade the over-cap [reject] path has always made.
      */
     fun enqueue(items: List<IncomingItem>) {
         for (item in items) {
             val ready = item as? IncomingItem.Ready
-            // A PreResolved failure goes through the SAME queue, not straight to the outcome
-            // channel: relaying it early would reorder it ahead of the Ready items it was
-            // interleaved with, and the contract is one outcome per input IN INPUT ORDER.
+            // A PreResolved failure normally goes through the SAME queue, not straight to the
+            // delivery channel: relaying it early would reorder it ahead of the Ready items it
+            // was interleaved with, and the contract is one outcome per input IN INPUT ORDER.
             if (ready != null) {
                 // Defence in depth behind the slots: a caller that enqueued without one must
                 // still not be able to grow the queue past the cap.
@@ -493,15 +503,19 @@ class IncomingImportCoordinator internal constructor(
                     reject(ready)
                     continue
                 }
-            } else if (queueDepth.get() >= MAX_PENDING_ITEMS) {
+                // A Ready item is never refused for DEPTH — it is separately capped at
+                // MAX_IN_FLIGHT and owns an open fd that must not be handled inline — so it is
+                // admitted unconditionally and merely counted. Worst-case depth is therefore
+                // MAX_PENDING_ITEMS + MAX_IN_FLIGHT.
+                queueDepth.incrementAndGet()
+            } else if (!tryReserveDepth()) {
                 // Overload from a hostile launch loop: the exported entry point can be started
                 // faster than one worker drains, and a PreResolved envelope takes no slot, so
-                // this was the last unbounded input (Gate-4 round 3, High). Refusing the NEWEST
-                // mirrors the outcome channel's DROP_LATEST, and costs at most that URI's
-                // advisory toast — it holds no fd and no library state depends on it.
+                // this is the input the depth bound exists for. It holds no fd and no library
+                // state, so it is handled INLINE — its own outcome, not a substituted failure.
+                emit((item as IncomingItem.PreResolved).outcome)
                 continue
             }
-            queueDepth.incrementAndGet()
             if (queue.trySend(item).isFailure) {         // only after shutdown
                 queueDepth.decrementAndGet()
                 if (ready != null) {
@@ -511,6 +525,23 @@ class IncomingImportCoordinator internal constructor(
                     emit((item as IncomingItem.PreResolved).outcome)
                 }
             }
+        }
+    }
+
+    /**
+     * Reserves one queue slot, or refuses at [MAX_PENDING_ITEMS].
+     *
+     * A CAS loop, NOT `get()`-then-`increment`: `enqueue` is reachable from an exported activity,
+     * so concurrent callers are the EXPECTED case, and a check separated from its increment lets
+     * every one of them pass while below the cap and collectively push past it (Gate-4 round 4,
+     * High). Released on all three paths the counter is decremented: worker receive, failed
+     * post-shutdown send, and the shutdown drain.
+     */
+    private fun tryReserveDepth(): Boolean {
+        while (true) {
+            val n = queueDepth.get()
+            if (n >= MAX_PENDING_ITEMS) return false
+            if (queueDepth.compareAndSet(n, n + 1)) return true
         }
     }
 
@@ -685,8 +716,11 @@ class IncomingImportCoordinator internal constructor(
         /** Undelivered outcomes retained while nothing is collecting — see [outcomeChannel]. */
         const val MAX_PENDING_OUTCOMES = 256
 
-        /** Items awaiting the worker. Ready items are separately capped at [MAX_IN_FLIGHT]; this
-         *  bounds the PreResolved envelopes, which hold no slot — see [enqueue]. */
+        /** Admission bound on items awaiting the worker: it refuses PreResolved envelopes, which
+         *  hold no slot and are otherwise unbounded. Ready items are admitted unconditionally
+         *  (separately capped at [MAX_IN_FLIGHT]), so the provable worst-case depth is
+         *  `MAX_PENDING_ITEMS + MAX_IN_FLIGHT`. A refused envelope is handled inline, never
+         *  dropped — see [enqueue]. */
         const val MAX_PENDING_ITEMS = 256
 
         val IMPORT_TIMEOUT: Duration = 5.minutes

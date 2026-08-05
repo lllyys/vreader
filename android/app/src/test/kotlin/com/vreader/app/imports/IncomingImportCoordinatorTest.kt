@@ -147,10 +147,22 @@ class IncomingImportCoordinatorTest {
         val ceiling = IncomingImportCoordinator.MAX_PENDING_OUTCOMES
         // An exported entry point can be launched in a loop; with no collector this must not grow
         // without limit. Past the bound the contract degrades EXPLICITLY, and only that far.
-        fixture.coordinator.enqueue(
-            (1..ceiling + 100).map { IncomingItem.PreResolved(IncomingImportOutcome.Unsupported("f$it.xyz")) },
-        )
-        testScheduler.runCurrent()
+        //
+        // Drained in CHUNKS below the queue's own admission bound, so this isolates the DELIVERY
+        // buffer: a single 356-item batch would trip the queue bound too, and the envelopes it
+        // handles inline are delivered ahead of the queued ones — that reordering is the subject
+        // of its own test, and folding both bounds into one assertion tests neither.
+        var emitted = 0
+        repeat(4) { chunk ->
+            fixture.coordinator.enqueue(
+                (1..100).map {
+                    emitted++
+                    IncomingItem.PreResolved(IncomingImportOutcome.Unsupported("f$emitted.xyz"))
+                },
+            )
+            testScheduler.runCurrent()          // the worker drains; nothing is collecting yet
+            assertEquals("the queue itself never backs up here", 0, fixture.coordinator.pendingItems)
+        }
         // ... and the worker is still alive behind all of that.
         fixture.coordinator.enqueue(listOf(fixture.readyItem("after.epub")))
         testScheduler.runCurrent()
@@ -215,6 +227,63 @@ class IncomingImportCoordinatorTest {
         assertTrue(
             "queue depth must stay bounded: ${fixture.coordinator.pendingItems}",
             fixture.coordinator.pendingItems <= ceiling,
+        )
+    }
+
+    @Test
+    fun `an envelope refused by the depth bound STILL gets its own outcome`() = runTest {
+        // Every queued item OWES an outcome. A queue that silently drops the over-cap ones breaks
+        // one-outcome-per-input-URI exactly where a user is least able to explain it: share 300
+        // files, some produce no toast at all (Gate-4 round 4, High).
+        val fixture = fixture()
+        val ceiling = IncomingImportCoordinator.MAX_PENDING_ITEMS
+        // Fill the queue to the bound with the worker never pumped, so nothing drains.
+        fixture.coordinator.enqueue(
+            (1..ceiling).map { IncomingItem.PreResolved(IncomingImportOutcome.Unreadable) },
+        )
+        assertEquals(ceiling, fixture.coordinator.pendingItems)
+
+        val refused = IncomingImportOutcome.Unsupported("refused.xyz")
+        fixture.coordinator.enqueue(listOf(IncomingItem.PreResolved(refused)))
+
+        assertEquals("it must NOT be queued", ceiling, fixture.coordinator.pendingItems)
+        val outcomes = fixture.collectOutcomes()
+        assertTrue("the refused URI still gets its outcome", outcomes.contains(refused))
+        // Handled inline, so it is delivered AHEAD of the queued items — the documented cost is
+        // ORDER under overload, never a missing outcome.
+        assertEquals(refused, outcomes.first())
+    }
+
+    @Test
+    fun `concurrent enqueue callers cannot collectively push past the depth bound`() = runTest {
+        // `enqueue` is reachable from an EXPORTED activity, so concurrent callers are the expected
+        // case. A depth check separated from its increment lets every racing caller pass while
+        // below the cap and overshoot together (Gate-4 round 4, High).
+        val fixture = fixture()
+        val ceiling = IncomingImportCoordinator.MAX_PENDING_ITEMS
+        fixture.coordinator.enqueue(
+            (1..ceiling - 1).map { IncomingItem.PreResolved(IncomingImportOutcome.Unreadable) },
+        )
+        assertEquals(ceiling - 1, fixture.coordinator.pendingItems)
+
+        // All of them arrive at the boundary at once: exactly ONE may be admitted. The racer count
+        // is what widens the window — a non-atomic check/increment is a probabilistic defect, so
+        // more simultaneous arrivals make the mutation reliably observable.
+        val racers = 16
+        val barrier = java.util.concurrent.CyclicBarrier(racers)
+        val threads = (1..racers).map {
+            Thread {
+                barrier.await()
+                fixture.coordinator.enqueue(listOf(IncomingItem.PreResolved(IncomingImportOutcome.Unreadable)))
+            }.apply { isDaemon = true; start() }
+        }
+        threads.forEach { it.join(30_000) }
+
+        assertTrue("every racer finished", threads.none { it.isAlive })
+        assertEquals(
+            "exactly one racer may be admitted: depth=${fixture.coordinator.pendingItems}",
+            ceiling,
+            fixture.coordinator.pendingItems,
         )
     }
 
