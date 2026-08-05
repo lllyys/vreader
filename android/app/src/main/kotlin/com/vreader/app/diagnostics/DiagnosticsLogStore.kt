@@ -22,9 +22,12 @@ import java.time.Instant
  * - **The store enforces its own bound**, `takeLast(cap)`, rather than trusting a source to honour
  *   `limit`. The source is an injectable seam, so "the viewer asked for N" is the store's promise
  *   to keep, and `cap <= maxEntries` makes this subsume the `maxEntries` window trim.
- * - **No exception escapes** except [CancellationException]: a source failure is data (a degraded
- *   load), but cancelling the caller is not a source failure and must not be swallowed — and must
- *   not fabricate an availability verdict either.
+ * - **Only an ordinary `Exception` is contained** (as a degraded load — defence in depth over a
+ *   source contract that already promises not to throw). [CancellationException] propagates,
+ *   because cancelling the caller is not a source failure and must not be swallowed; an `Error`
+ *   (OOM, LinkageError) propagates too, because it is not containable and laundering it into
+ *   "capture is degraded" would report a JVM failure as a logging one. Neither fabricates an
+ *   availability verdict — the previous latch survives untouched.
  * - **Every message goes through [DiagnosticsRedactor]** on the way out. On Android that is the
  *   ONLY egress barrier (logcat is plaintext), so it is applied per entry with no fast path.
  * - **Continuation lines are indented.** A multi-line message (a stack trace) would otherwise be
@@ -32,20 +35,23 @@ import java.time.Instant
  *   header. Indentation makes "starts at column 0" the entry-line predicate for any reader.
  *
  * Known limitations (accepted, NOT mitigated — do not read these as guarantees):
- * - **[lastLoadDegraded] is a FLAT signal.** The store sees only the composite [SourceResult],
- *   which carries no per-source provenance, so it cannot distinguish "logcat died but the ring
- *   buffer answered" from "everything answered". The flag means exactly "the last load's source
- *   reported `Unavailable`". [CAPTURE_SOURCE_FULL] / [CAPTURE_SOURCE_DEGRADED] are therefore the
- *   plan's two COARSE labels for that one bit, not observed per-source provenance: a composite
- *   `Available` may in truth have been breadcrumbs-only. Reporting partial degradation needs
- *   provenance on `SourceResult` — a `DiagnosticsLogSource` change, outside this WI's write-set.
+ * - **[lastLoadDegraded] CANNOT SEE PRIMARY-ONLY DEGRADATION, and with the production wiring it is
+ *   effectively always `false`.** The store sees one flat [SourceResult]. `CompositeDiagnosticsSource`
+ *   reports `Unavailable` only when BOTH of its sources fail, and `RingBufferDiagnosticsSource` has
+ *   no failure path at all — so "logcat denied + ring healthy" arrives as `Available`, and
+ *   [CAPTURE_SOURCE_DEGRADED] is unreachable in the shipped app. This does NOT meet the plan's
+ *   "the last load's PRIMARY source reported Unavailable" contract (API sketch) or WI-4 acceptance
+ *   criterion 2; closing it needs provenance carried on `SourceResult` (e.g.
+ *   `Available(entries, primaryDegraded)`) plus the composite propagating it — files owned by WI-1
+ *   and WI-3, outside this WI's write-set. **Escalated to the orchestrator, not silently accepted.**
+ *   Until then the flag means only "this store's own source reported `Unavailable`, or threw".
  * - **Loads are expected to be SINGLE-FLIGHT.** [lastLoadDegraded] is `@Volatile`, so there is no
  *   torn read, but it is a store-wide latch rather than a property of one returned batch: if two
- *   loads overlap, the later one's verdict wins and the earlier caller would read it. WI-5's
- *   ViewModel serialises loads (one `flatMapLatest`-driven refresh at a time), which is the
- *   precondition this store is written against; the last-writer-wins behaviour is pinned by test
- *   rather than left accidental. Binding the verdict to the batch would mean returning a compound
- *   result, which is not the API the plan specifies for WI-5 to consume.
+ *   loads overlap, the verdict of the one that COMPLETES LAST wins, and an earlier caller reading
+ *   the flag afterwards sees it. WI-5's ViewModel serialises loads (one `flatMapLatest`-driven
+ *   refresh at a time), which is the precondition this store is written against. Binding the
+ *   verdict to its batch would mean returning a compound result, which is not the API the plan
+ *   specifies for WI-5 to consume.
  *
  * @coordinates-with DiagnosticsLogSource.kt, DiagnosticsRedactor.kt, DiagnosticsLogEntry.kt,
  *   DiagnosticsCategoryBounding.kt
@@ -62,9 +68,11 @@ class DiagnosticsLogStore(
     private var degraded: Boolean = false
 
     /**
-     * True when the LAST completed load's source reported [SourceResult.Unavailable] — i.e. capture
-     * itself failed, as opposed to a readable log that happened to be empty. Feeds the export
-     * header's `capture source:` line (section 6.5 of the plan). `false` before the first load and
+     * True when the LAST-COMPLETING load's source reported [SourceResult.Unavailable] or threw an
+     * ordinary exception — i.e. capture itself failed, as opposed to a readable log that happened
+     * to be empty. See the class doc's first known limitation before relying on this: with the
+     * production composite wiring it never becomes `true`. Feeds the export header's
+     * `capture source:` line (section 6.5 of the plan). `false` before the first load and
      * after any successful one; a cancelled load leaves it untouched.
      */
     val lastLoadDegraded: Boolean get() = degraded

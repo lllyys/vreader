@@ -1,12 +1,15 @@
 package com.vreader.app.diagnostics
 
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Feature #164 WI-4 — [DiagnosticsLogStore].
@@ -70,6 +73,27 @@ class DiagnosticsLogStoreTest {
                 is Throwable -> throw step
                 else -> step as SourceResult
             }
+    }
+
+    /**
+     * Each call takes the next (gate, result) pair and SUSPENDS on its gate, so two loads can be
+     * genuinely in flight at once and released in an arbitrary completion order.
+     */
+    private class GatedSource(
+        private val steps: List<Pair<CompletableDeferred<Unit>, SourceResult>>,
+    ) : DiagnosticsLogSource {
+        private val next = AtomicInteger(0)
+        private val started = AtomicInteger(0)
+
+        /** How many calls have entered and are waiting on (or past) their gate. */
+        val inFlight: Int get() = started.get()
+
+        override suspend fun recentEntries(sinceMillis: Long?, limit: Int): SourceResult {
+            val (gate, result) = steps[next.getAndIncrement()]
+            started.incrementAndGet()
+            gate.await()
+            return result
+        }
     }
 
     private fun entry(
@@ -235,29 +259,72 @@ class DiagnosticsLogStoreTest {
 
     /**
      * [DiagnosticsLogStore.lastLoadDegraded] is a store-wide latch, not a property of one returned
-     * batch: overlapping loads are LAST-WRITER-WINS. WI-5 serialises loads, which is the
-     * precondition the store documents; pinning the behaviour here keeps it specified rather than
-     * accidental, so a future single-flight guard is a deliberate, test-breaking change.
+     * batch: genuinely OVERLAPPING loads resolve LAST-TO-COMPLETE-WINS. WI-5 serialises loads, which
+     * is the precondition the store documents; pinning the behaviour here keeps it specified rather
+     * than accidental, so a future single-flight guard is a deliberate, test-breaking change.
+     *
+     * This test and its pair below use the SAME start order and the SAME two verdicts, and differ
+     * only in RELEASE order — which is what makes them discriminating. Here the loads complete in
+     * start order, so the healthy one lands last and the latch ends clean; an implementation where
+     * the FIRST-STARTED load owned the latch would report degraded and fail.
      */
     @Test
-    fun overlappingLoadsAreLastWriterWinsOnTheDegradedLatch() = runTest {
-        val healthy = DiagnosticsLogStore(
-            ScriptedSource(
-                mutableListOf<Any>(SourceResult.Unavailable("dead"), available(entry(10, "ok"))),
+    fun overlappingLoadsLetTheLastToCompleteOwnTheLatchWhenItIsTheHealthyOne() = runTest {
+        val firstStarted = CompletableDeferred<Unit>()
+        val secondStarted = CompletableDeferred<Unit>()
+        val source = GatedSource(
+            listOf(
+                firstStarted to SourceResult.Unavailable("capture dead"),
+                secondStarted to available(entry(10, "healthy")),
             ),
         )
-        healthy.load()
-        healthy.load()
-        assertFalse("the later verdict wins", healthy.lastLoadDegraded)
+        val subject = DiagnosticsLogStore(source)
 
-        val degradedLast = DiagnosticsLogStore(
-            ScriptedSource(
-                mutableListOf<Any>(available(entry(10, "ok")), SourceResult.Unavailable("dead")),
+        val first = async { subject.load() }
+        val second = async { subject.load() }
+        testScheduler.runCurrent()
+        assertEquals("both loads must be in flight before either resolves", 2, source.inFlight)
+
+        firstStarted.complete(Unit)
+        testScheduler.runCurrent()
+        secondStarted.complete(Unit)
+        testScheduler.runCurrent()
+
+        assertEquals(emptyList<DiagnosticsLogEntry>(), first.await())
+        assertEquals(listOf("healthy"), second.await().map { it.message })
+        assertFalse("the load that completed LAST owns the latch", subject.lastLoadDegraded)
+    }
+
+    /**
+     * The discriminating pair: identical start order and verdicts, released in REVERSE, so the
+     * degraded load now completes last and must own the latch. An implementation where the
+     * LAST-STARTED load owned it would report healthy and fail.
+     */
+    @Test
+    fun overlappingLoadsLetTheLastToCompleteOwnTheLatchWhenItIsTheDegradedOne() = runTest {
+        val firstStarted = CompletableDeferred<Unit>()
+        val secondStarted = CompletableDeferred<Unit>()
+        val source = GatedSource(
+            listOf(
+                firstStarted to SourceResult.Unavailable("capture dead"),
+                secondStarted to available(entry(10, "healthy")),
             ),
         )
-        degradedLast.load()
-        degradedLast.load()
-        assertTrue("the later verdict wins in the other order too", degradedLast.lastLoadDegraded)
+        val subject = DiagnosticsLogStore(source)
+
+        val first = async { subject.load() }
+        val second = async { subject.load() }
+        testScheduler.runCurrent()
+        assertEquals("both loads must be in flight before either resolves", 2, source.inFlight)
+
+        secondStarted.complete(Unit)
+        testScheduler.runCurrent()
+        firstStarted.complete(Unit)
+        testScheduler.runCurrent()
+
+        assertEquals(emptyList<DiagnosticsLogEntry>(), first.await())
+        assertEquals(listOf("healthy"), second.await().map { it.message })
+        assertTrue("the load that completed LAST owns the latch", subject.lastLoadDegraded)
     }
 
     // ================================================================ bounds + clamping
