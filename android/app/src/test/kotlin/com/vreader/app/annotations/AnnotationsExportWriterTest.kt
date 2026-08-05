@@ -234,9 +234,15 @@ class AnnotationsExportWriterTest {
         )
     }
 
-    /** The single-copy pin: the writer's text IS the shared mapper's text (WI-1), so it can never
-     *  drift from the backup path. Wire JSON hand-built inside the writer fails here. */
-    @Test fun exportJson_isTheSharedMappersText() = runTest {
+    /**
+     * Output equivalence over the SAME rows: the writer's text equals `AnnotationBackupMapper`'s
+     * for this book's records, so a re-assembly that sorted, enveloped or encoded differently is
+     * caught. It does NOT prove delegation — hand-built text that happened to be byte-identical
+     * would pass, and its expected value comes from the same mapper production calls. The
+     * INDEPENDENT evidence is the two goldens above, copied from the pre-extraction collector
+     * output; this test is the same-rows integration check on top of them.
+     */
+    @Test fun exportJson_equalsTheSharedMappersOutputForTheSameRows() = runTest {
         seed()
         val expected = AnnotationBackupMapper.json(
             highlights = highlights().filter { it.bookKey == keyA },
@@ -316,14 +322,21 @@ class AnnotationsExportWriterTest {
         assertEquals(0, writer.writeTo(ByteArrayOutputStream(), keyEmpty))
     }
 
-    @Test fun writeTo_doesNotCloseTheSink() = runTest {
+    /** A buffered SAF sink only reaches the file on flush, and the caller (not the writer) owns
+     *  the close — so both halves are asserted. `ByteArrayOutputStream` surfaces its bytes without
+     *  a flush, which is exactly why the flush is counted rather than inferred from the output. */
+    @Test fun writeTo_flushesAfterWriting_andDoesNotCloseTheSink() = runTest {
         seed()
+        val events = mutableListOf<String>()
         val sink = object : ByteArrayOutputStream() {
-            var closed = false
-            override fun close() { closed = true; super.close() }
+            override fun write(b: ByteArray, off: Int, len: Int) { events += "write"; super.write(b, off, len) }
+            override fun flush() { events += "flush"; super.flush() }
+            override fun close() { events += "close"; super.close() }
         }
         writer.writeTo(sink, keyB)
-        assertFalse("the caller owns the stream's lifetime", sink.closed)
+        // The ORDER, not just the counts: `ByteArrayOutputStream` surfaces its bytes without a
+        // flush, so a flush that happened before the write would look identical in the output.
+        assertEquals(listOf("write", "flush"), events)
         assertTrue(sink.toByteArray().isNotEmpty())
     }
 

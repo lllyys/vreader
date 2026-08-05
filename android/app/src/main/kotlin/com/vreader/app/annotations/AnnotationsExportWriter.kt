@@ -11,6 +11,8 @@
 //    `schemaVersion` therefore comes from `BackupSchema.CURRENT_SCHEMA_VERSION` by construction.
 //  - A book with no annotations still exports a VALID EMPTY envelope (C-13) — a silent no-op would
 //    leave the user staring at a picker that produced nothing.
+//  - The three kinds are read SEQUENTIALLY, not under one transaction: byte identity with the
+//    collector holds for the captured row set, not against concurrent writes (see `rows`).
 //  - `writeTo` does NOT close the sink: the caller opened it (a SAF `OutputStream`) and owns its
 //    lifetime, including the close that a bounded-call gate may have to perform off-deadline.
 //  - `suggestedFileName` is DERIVED from the book's title + fingerprint, never a caller-supplied
@@ -45,6 +47,15 @@ class AnnotationsExportWriter(private val repo: AnnotationsRepository) {
         return rows.count
     }
 
+    /**
+     * The book's three kinds, captured through SEQUENTIAL one-shot reads — deliberately NOT one
+     * cross-kind transaction. A write committing between the reads can therefore land in the
+     * export partially (say a bookmark but not its sibling highlight); every emitted row is still
+     * individually valid, and import merges per row, so the file is never inconsistent — only
+     * possibly a moment newer in one kind than another. Real cross-kind isolation would need a
+     * `@Transaction` DAO query and a repository snapshot API, which the backup collector wants
+     * too; that belongs to a shared follow-up, not to this writer.
+     */
     private suspend fun rows(bookKey: String): Rows {
         val snapshot = repo.annotationsForBook(bookKey)
         return Rows(snapshot.highlights, snapshot.notes, repo.bookmarks(bookKey).first())
