@@ -34,22 +34,19 @@ import java.time.Instant
  *   indistinguishable from the next entry — including a message whose own text mimics an entry
  *   header. Indentation makes "starts at column 0" the entry-line predicate for any reader.
  *
+ * - **A degraded load is not an empty one.** When the platform log is dead but the in-process ring
+ *   answered, [load] returns the ring's entries AND sets [lastLoadDegraded]. The two facts are
+ *   independent: serving breadcrumbs is the point of the fallback, and reporting the dead leg is
+ *   the point of the flag. (WI-4b. Before it, `CompositeDiagnosticsSource` collapsed that case into
+ *   a flat `Available`, so the export claimed `logcat + breadcrumbs` while logcat was denied — the
+ *   one thing a diagnostics tool must never do. The provenance now rides on
+ *   [SourceResult.Available.degradedReason].)
+ *
  * Known limitations (accepted, NOT mitigated — do not read these as guarantees):
- * - **[lastLoadDegraded] CANNOT SEE PRIMARY-ONLY DEGRADATION.** The store sees one flat
- *   [SourceResult]. `CompositeDiagnosticsSource` reports `Unavailable` only when BOTH of its
- *   sources fail, and `RingBufferDiagnosticsSource` has no *modelled* `Unavailable` path — every
- *   normal return is `Available` (a throw from it is still contained by the composite). So under
- *   the wiring the plan specifies, "logcat denied + ring healthy" arrives here as `Available` and
- *   [CAPTURE_SOURCE_DEGRADED] is unreachable for exactly the operational case it exists to report.
- *   That does NOT meet the plan's "the last load's PRIMARY source reported Unavailable" contract
- *   (API sketch) or WI-4 acceptance criterion 2. Closing it needs provenance carried on
- *   `SourceResult` (e.g. `Available(entries, primaryUnavailable)`) plus the composite propagating
- *   it — files owned by WI-1 and WI-3, outside this WI's write-set.
- *   **Escalated to the orchestrator, not silently accepted**; no test in this WI's suite asserts
- *   the flat behaviour as if it were correct. Note the store and the composite have no production
- *   construction yet at all (the container wiring is WI-7/WI-8), so this is a contract gap to close
- *   before the feature ships, not a live user-facing defect today. Until it is closed, the flag
- *   means only "this store's own source reported `Unavailable`, or threw an ordinary `Exception`".
+ * - **The flag is about the PRIMARY (platform log) leg only.** A dead in-process ring under a
+ *   healthy logcat reads as NOT degraded, because the export's degraded wording names the platform
+ *   log specifically (plan §6.5). That asymmetry is `CompositeDiagnosticsSource`'s deliberate
+ *   ruling, documented there; the store just consumes it.
  * - **Loads are expected to be SINGLE-FLIGHT.** [lastLoadDegraded] is `@Volatile`, so there is no
  *   torn read, but it is a store-wide latch rather than a property of one returned batch: if two
  *   loads overlap, the verdict of the one that COMPLETES LAST wins, and an earlier caller reading
@@ -73,12 +70,13 @@ class DiagnosticsLogStore(
     private var degraded: Boolean = false
 
     /**
-     * True when the LAST-COMPLETING load's source reported [SourceResult.Unavailable] or threw an
-     * ordinary exception — i.e. capture itself failed, as opposed to a readable log that happened
-     * to be empty. See the class doc's first known limitation before relying on this: with the
-     * production composite wiring it never becomes `true`. Feeds the export header's
-     * `capture source:` line (section 6.5 of the plan). `false` before the first load and
-     * after any successful one; a cancelled load leaves it untouched.
+     * True when the LAST-COMPLETING load's capture stack was diminished: its source reported
+     * [SourceResult.Unavailable], returned an [SourceResult.Available] carrying a
+     * [SourceResult.Available.degradedReason] (the composite's "platform log denied, ring served
+     * the batch" case), or threw an ordinary exception. It is NOT set by a readable log that
+     * happened to be empty, and it does not imply the returned batch was empty. Feeds the export
+     * header's `capture source:` line (section 6.5 of the plan). `false` before the first load and
+     * after any healthy one; a cancelled load leaves it untouched.
      */
     val lastLoadDegraded: Boolean get() = degraded
 
@@ -100,7 +98,10 @@ class DiagnosticsLogStore(
             null
         }
         val available = result as? SourceResult.Available
-        degraded = available == null
+        // Degraded is about PROVENANCE, never emptiness, and never about the batch being lost: a
+        // partially-available read still serves its entries (the ring's breadcrumbs are the whole
+        // point of the fallback) while reporting that the platform log did not answer.
+        degraded = available == null || available.degradedReason != null
         return available?.entries?.takeLast(cap) ?: emptyList()
     }
 
@@ -158,17 +159,13 @@ class DiagnosticsLogStore(
          */
         const val CAPTURE_SCOPE_LABEL: String = "recent activity"
 
-        /**
-         * `capture source:` value when the last load's source answered. A COARSE label: it does
-         * not prove logcat specifically was readable — see the class doc's flat-signal limitation.
-         */
+        /** `capture source:` value when the last-completing load's whole capture stack answered. */
         const val CAPTURE_SOURCE_FULL: String = "logcat + breadcrumbs"
 
         /**
-         * `capture source:` value when the last-completing load's source reported `Unavailable`
-         * OR threw a contained ordinary exception (section 6.5). See the class doc's first known
-         * limitation: under the planned composite wiring this is not reachable for the
-         * primary-only degradation it is meant to describe.
+         * `capture source:` value when the last-completing load found the platform log dead —
+         * reported `Unavailable`, carried a `degradedReason`, or threw a contained ordinary
+         * exception (section 6.5). Verbatim plan wording: rule 51 fixes this string.
          */
         const val CAPTURE_SOURCE_DEGRADED: String = "breadcrumbs only (platform log unavailable)"
 

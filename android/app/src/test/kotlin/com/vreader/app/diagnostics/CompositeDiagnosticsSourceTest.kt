@@ -229,6 +229,141 @@ class CompositeDiagnosticsSourceTest {
         assertEquals(77, ring.lastLimit)
     }
 
+    // ---------------------------------------------------------------- degradation provenance
+
+    /*
+     * WI-4b. A merge that SURVIVES a dead primary must say so. Each branch that can return
+     * `Available` is asserted separately, because the two that mattered were the ones a naive fix
+     * misses: the `limit <= 0` short-circuit and the merge itself.
+     */
+
+    private fun SourceResult.degradedReason(): String? {
+        assertTrue("expected Available, got $this", this is SourceResult.Available)
+        return (this as SourceResult.Available).degradedReason
+    }
+
+    /** The headline case: logcat denied, ring healthy — entries served, degradation reported. */
+    @Test
+    fun anUnavailablePrimaryIsReportedAsDegradedWhileTheRingStillServes() = runTest {
+        val result = merge(
+            FakeSource(SourceResult.Unavailable("logcat: exec denied")),
+            FakeSource(available(entry(100, "floor", sequenceId = 1L))),
+        )
+
+        assertEquals(listOf("floor"), result.entries().map { it.message })
+        assertEquals("logcat: exec denied", result.degradedReason())
+    }
+
+    /**
+     * The second propagation hole, asserted on its own: `limit <= 0` returns before the merge, and
+     * an implementation that returns a bare `Available(emptyList())` there drops the provenance
+     * even though the platform log is exactly as dead as in the test above.
+     */
+    @Test
+    fun aZeroLimitStillCarriesThePrimaryDegradation() = runTest {
+        val result = merge(
+            FakeSource(SourceResult.Unavailable("logcat: exec denied")),
+            FakeSource(available(entry(100, "floor", sequenceId = 1L))),
+            limit = 0,
+        )
+
+        assertEquals(emptyList<DiagnosticsLogEntry>(), result.entries())
+        assertEquals("logcat: exec denied", result.degradedReason())
+    }
+
+    @Test
+    fun aNegativeLimitStillCarriesThePrimaryDegradation() = runTest {
+        val result = merge(
+            FakeSource(SourceResult.Unavailable("logcat: exec denied")),
+            FakeSource(available(entry(100, "floor", sequenceId = 1L))),
+            limit = -3,
+        )
+
+        assertEquals(emptyList<DiagnosticsLogEntry>(), result.entries())
+        assertEquals("logcat: exec denied", result.degradedReason())
+    }
+
+    /** A contained primary exception is a dead primary too — the reason names the throwable. */
+    @Test
+    fun aThrowingPrimaryIsReportedAsDegraded() = runTest {
+        val result = merge(
+            FakeSource(error = IOException("logcat exploded")),
+            FakeSource(available(entry(10L, "floor", sequenceId = 1L))),
+        )
+
+        val reason = result.degradedReason()
+        assertTrue("reason must name the failure, was $reason", reason != null && reason.contains("IOException"))
+    }
+
+    /**
+     * The no-spurious-signal half. A fully healthy stack — including the load-bearing
+     * healthy-but-EMPTY case the design's empty-state copy rests on — reports no degradation, so
+     * `Available(emptyList())` still means "quiet", never "broken".
+     */
+    @Test
+    fun aHealthyMergeCarriesNoDegradationReason() = runTest {
+        val populated = merge(
+            FakeSource(available(entry(10, "platform"))),
+            FakeSource(available(entry(20, "floor", sequenceId = 1L))),
+        )
+        val empty = merge(
+            FakeSource(SourceResult.Available(emptyList())),
+            FakeSource(SourceResult.Available(emptyList())),
+        )
+
+        assertEquals(null, populated.degradedReason())
+        assertEquals(null, empty.degradedReason())
+    }
+
+    /**
+     * The asymmetry, asserted rather than left to fall out of the code: a dead SECONDARY under a
+     * healthy primary is NOT platform-log degradation. The signal's only consumer is the export's
+     * `capture source:` line, whose degraded wording (plan §6.5, rule-51 verbatim) names the
+     * platform log — emitting it because the ring failed would invert the truth.
+     */
+    @Test
+    fun anUnavailableSecondaryIsNotReportedAsPrimaryDegradation() = runTest {
+        val result = merge(
+            FakeSource(available(entry(10, "platform"))),
+            FakeSource(SourceResult.Unavailable("ring: absent")),
+        )
+
+        assertEquals(listOf("platform"), result.entries().map { it.message })
+        assertEquals(null, result.degradedReason())
+    }
+
+    /** Both legs dead stays `Unavailable` — never a degraded `Available`, which would be a batch. */
+    @Test
+    fun bothUnavailableIsStillUnavailableRatherThanADegradedAvailable() = runTest {
+        val result = merge(
+            FakeSource(SourceResult.Unavailable("logcat: denied")),
+            FakeSource(SourceResult.Unavailable("ring: absent")),
+        )
+
+        assertTrue("expected Unavailable, got $result", result is SourceResult.Unavailable)
+    }
+
+    /**
+     * A primary that is ITSELF a degraded composite keeps its provenance: nesting must not launder
+     * the signal back to healthy.
+     */
+    @Test
+    fun anAlreadyDegradedPrimaryPropagatesItsReasonOutward() = runTest {
+        val innerlyDegraded = FakeSource(
+            SourceResult.Available(listOf(entry(10, "partial")), degradedReason = "logcat: exec denied"),
+        )
+
+        val result = merge(innerlyDegraded, FakeSource(available(entry(20, "floor", sequenceId = 1L))))
+
+        assertEquals("logcat: exec denied", result.degradedReason())
+    }
+
+    /** A leaf source constructs `Available(entries)` positionally and is undegraded by default. */
+    @Test
+    fun availableDefaultsToUndegradedSoLeafSourcesNeedNoChange() {
+        assertEquals(null, SourceResult.Available(listOf(entry(10, "leaf"))).degradedReason)
+    }
+
     // ---------------------------------------------------------------- failure containment
 
     @Test

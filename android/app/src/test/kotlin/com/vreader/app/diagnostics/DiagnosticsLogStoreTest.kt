@@ -327,6 +327,154 @@ class DiagnosticsLogStoreTest {
         assertTrue("the load that completed LAST owns the latch", subject.lastLoadDegraded)
     }
 
+    // ================================================================ primary-source provenance
+
+    /*
+     * WI-4b. These run through the REAL `CompositeDiagnosticsSource` and the REAL
+     * `RingBufferDiagnosticsSource` — only the platform log is faked, because a JVM test cannot
+     * make logd deny a read. A store-level assertion against a stub that was handed a pre-set flag
+     * would prove nothing: the whole finding was that the provenance never SURVIVES the composite.
+     */
+
+    /** A ring seeded with one breadcrumb, the in-process floor a denied logcat falls back to. */
+    private fun seededRing(vararg messages: String) = RingBufferDiagnosticsSource(capacity = 16).apply {
+        messages.forEachIndexed { index, message ->
+            record(DiagnosticsLevel.WARN, "Reader", message, at = 1_000L + index, sequenceId = index.toLong())
+        }
+    }
+
+    private fun storeOver(primary: DiagnosticsLogSource, secondary: DiagnosticsLogSource) =
+        DiagnosticsLogStore(CompositeDiagnosticsSource(primary, secondary))
+
+    /**
+     * THE case the whole degraded signal exists for (plan §6.5): logcat denied, ring healthy. The
+     * batch must still carry the breadcrumbs — degraded is not empty — while the export tells the
+     * person triaging the bug that the platform log is dead. Before WI-4b this returned the ring's
+     * entries under a `capture source: logcat + breadcrumbs` header, i.e. the tool lied.
+     */
+    @Test
+    fun aDeniedPlatformLogWithAHealthyRingServesBreadcrumbsAndReportsDegraded() = runTest {
+        val subject = storeOver(
+            primary = FakeSource(SourceResult.Unavailable("logcat: exec denied")),
+            secondary = seededRing("breadcrumb"),
+        )
+
+        val entries = subject.load()
+
+        assertEquals("a degraded load must still serve the ring", listOf("breadcrumb"), entries.map { it.message })
+        assertTrue("a denied platform log must reach the store", subject.lastLoadDegraded)
+        val export = subject.exportText(entries, generatedAt = 0L)
+        assertTrue(export, export.contains("capture source: breadcrumbs only (platform log unavailable)"))
+    }
+
+    /**
+     * The export header on the SAME path, owned by its own test rather than left as a trailing
+     * assertion behind the latch assertion above — otherwise a broken header mapping could only
+     * ever be reported as a latch failure. Both halves are asserted: the degraded wording is
+     * present AND the full-stack wording is gone, so a header that printed both would fail.
+     */
+    @Test
+    fun theExportHeaderNamesTheDeadPlatformLogWhileStillListingTheBreadcrumbs() = runTest {
+        val subject = storeOver(
+            primary = FakeSource(SourceResult.Unavailable("logcat: exec denied")),
+            secondary = seededRing("breadcrumb"),
+        )
+
+        val export = subject.exportText(subject.load(), generatedAt = 0L)
+
+        assertTrue(export, export.contains("capture source: breadcrumbs only (platform log unavailable)"))
+        assertFalse(export, export.contains("capture source: logcat + breadcrumbs"))
+        assertTrue("the breadcrumbs themselves must still be in the payload", export.contains("breadcrumb"))
+    }
+
+    /**
+     * The `limit <= 0` short-circuit is a SEPARATE path through the composite, and it is where a
+     * naive fix drops the provenance on the floor: the batch is legitimately empty, but the platform
+     * log is just as dead as in the case above.
+     */
+    @Test
+    fun aDeniedPlatformLogIsStillReportedWhenTheRequestedLimitIsZero() = runTest {
+        val subject = storeOver(
+            primary = FakeSource(SourceResult.Unavailable("logcat: exec denied")),
+            secondary = seededRing("breadcrumb"),
+        )
+
+        assertEquals(emptyList<DiagnosticsLogEntry>(), subject.load(limit = 0))
+
+        assertTrue("a zero-limit load must not launder away the degradation", subject.lastLoadDegraded)
+    }
+
+    /**
+     * The counterweight, and the reason the signal is provenance rather than emptiness: a healthy
+     * stack that simply had nothing to say is NOT degraded. This is the state the design's
+     * empty-state copy rests on.
+     */
+    @Test
+    fun aHealthyButSilentStackIsNotDegradedThroughTheComposite() = runTest {
+        val subject = storeOver(
+            primary = FakeSource(SourceResult.Available(emptyList())),
+            secondary = RingBufferDiagnosticsSource(capacity = 16),
+        )
+
+        assertEquals(emptyList<DiagnosticsLogEntry>(), subject.load())
+
+        assertFalse("healthy-but-empty must never read as degraded", subject.lastLoadDegraded)
+        val export = subject.exportText(emptyList(), generatedAt = 0L)
+        assertTrue(export, export.contains("capture source: logcat + breadcrumbs"))
+    }
+
+    /** A load that finds the platform log healthy again clears the latch. */
+    @Test
+    fun regainingThePlatformLogClearsTheDegradedLatch() = runTest {
+        val subject = storeOver(
+            primary = ScriptedSource(
+                mutableListOf<Any>(
+                    SourceResult.Unavailable("logcat: exec denied"),
+                    available(entry(2_000L, "from logcat")),
+                ),
+            ),
+            secondary = seededRing("breadcrumb"),
+        )
+
+        subject.load()
+        assertTrue("first load must be degraded", subject.lastLoadDegraded)
+
+        assertEquals(listOf("breadcrumb", "from logcat"), subject.load().map { it.message })
+        assertFalse("a recovered platform log must clear the latch", subject.lastLoadDegraded)
+    }
+
+    /** Both legs dead is still `Unavailable` — an empty batch, degraded, never a healthy read. */
+    @Test
+    fun bothSourcesDeadRemainsAnUnavailableDegradedLoad() = runTest {
+        val subject = storeOver(
+            primary = FakeSource(SourceResult.Unavailable("logcat: exec denied")),
+            secondary = FakeSource(SourceResult.Unavailable("ring: absent")),
+        )
+
+        assertEquals(emptyList<DiagnosticsLogEntry>(), subject.load())
+
+        assertTrue(subject.lastLoadDegraded)
+    }
+
+    /**
+     * The asymmetric case, ruled deliberately: a dead RING with a healthy logcat is NOT reported
+     * through this channel. The only vocabulary the export line has is plan §6.5's verbatim
+     * `breadcrumbs only (platform log unavailable)` — printing that while logcat is the leg still
+     * working would be the same class of lie WI-4b exists to remove, and rule 51 admits no third
+     * label. The batch is complete as far as the platform log goes, so it reads as healthy.
+     */
+    @Test
+    fun aDeadRingWithAHealthyPlatformLogIsNotReportedAsPlatformLogDegradation() = runTest {
+        val subject = storeOver(
+            primary = FakeSource(available(entry(10L, "from logcat"))),
+            secondary = FakeSource(SourceResult.Unavailable("ring: absent")),
+        )
+
+        assertEquals(listOf("from logcat"), subject.load().map { it.message })
+
+        assertFalse("a secondary-only failure must not claim the platform log is dead", subject.lastLoadDegraded)
+    }
+
     // ================================================================ bounds + clamping
 
     @Test

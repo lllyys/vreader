@@ -28,8 +28,26 @@ interface DiagnosticsLogSource {
 
 /** The outcome of one read. `Available(emptyList())` and `Unavailable` are DIFFERENT. */
 sealed interface SourceResult {
-    /** The source was readable. [entries] may legitimately be empty. */
-    data class Available(val entries: List<DiagnosticsLogEntry>) : SourceResult
+    /**
+     * The source was readable. [entries] may legitimately be empty.
+     *
+     * [degradedReason] carries PROVENANCE for a result that answered but is less complete than it
+     * should be: non-null means *"these entries are everything I could get, but a source I depend
+     * on was unavailable — here is why"*. It defaults to `null` and a LEAF source always leaves it
+     * there: a single source that could be read produced a complete result by definition, and only
+     * a compositor knows that something is missing. Only [CompositeDiagnosticsSource] sets it, and
+     * only for its PRIMARY (platform-log) leg — see that class for why the asymmetry is deliberate.
+     *
+     * This is deliberately a nullable reason and not a `primaryUnavailable` flag: "primary" is a
+     * compositing concept that a leaf source cannot meaningfully answer, whereas a reason string
+     * reuses [Unavailable]'s existing vocabulary, so the codebase carries one concept rather than
+     * two. The distinction `Available(emptyList())` vs [Unavailable] is untouched — a healthy,
+     * quiet log is still `Available` with a `null` reason.
+     */
+    data class Available(
+        val entries: List<DiagnosticsLogEntry>,
+        val degradedReason: String? = null,
+    ) : SourceResult
 
     /** The source could not be read at all. [reason] is diagnostic text, never user copy. */
     data class Unavailable(val reason: String) : SourceResult
