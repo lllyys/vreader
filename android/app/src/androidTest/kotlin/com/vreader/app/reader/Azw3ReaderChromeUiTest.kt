@@ -346,9 +346,18 @@ class Azw3ReaderChromeUiTest {
     }
 
     /**
-     * Runs [block] with a real, non-null [Azw3Document] on the main thread. The document is CONSTRUCTED
-     * only — never `run()`/attached — so no bundle loads, no book is read and no bridge traffic occurs;
-     * it exists purely to be a non-null instance, which is all [azw3TocJumpDecision] inspects.
+     * Runs [block] with a real, non-null [Azw3Document] on the main thread. It exists purely to BE a
+     * non-null instance — that is all [azw3TocJumpDecision] inspects.
+     *
+     * The document is CONSTRUCTED only, never `run()`/`attach()`/`load()`ed: no bundle loads, no book is
+     * read (the file path deliberately does not exist, and is only opened from a later WebView request
+     * that never happens), no bridge traffic. Construction is NOT, however, entirely free (Gate-4 R3
+     * Low): `FoliateBridge` builds a `FoliateGoToDispatcher` whose `init` launches an ack collector on a
+     * standalone `CoroutineScope(Dispatchers.Main)`, and `webView.destroy()` below does not cancel that
+     * scope. The collector is idle — it observes a `SharedFlow` nothing ever emits to, because no bridge
+     * is attached — so it neither affects the other tests in this class nor keeps work alive; it is
+     * simply not a clean teardown. Making the decision testable without a WebView at all (a boolean
+     * "is there a live document" seam) is the named follow-up.
      */
     private fun withLiveDocument(block: (Azw3Document) -> Unit) {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
