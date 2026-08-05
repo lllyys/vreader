@@ -1,11 +1,20 @@
 // Purpose: feature #134 WI-4 — the Book Details sheet's individual pieces (design
 // `vreader-book-details.jsx` `DetailsStacked`): the centered title/author block, the tag chips (wrapping),
-// the `MetaList` card (`Format/Size/Pages/Fingerprint/Location`), and the `ActionList` (Share only). Each
+// the `MetaList` card (`Format/Size/Pages/Fingerprint/Location`), and the `ActionList`. Each
 // meta/optional row is ABSENT when its model value is null/empty — no invented/dead rows (§details-source,
-// §page-count, §location; Design-gate #1: no cover art / placeholder / Export). The copy mini-action
+// §page-count, §location; Design-gate #1: no cover art / placeholder / cover-edit). The copy mini-action
 // carries the FULL canonical key (§fingerprint); Location is a read-only label. Reuses the [ReaderTheme]
 // token map (ink/accent/isDark → the design's ink/sub/rule/mono), same posture as MorePopup /
 // AnnotationsReviewSheet. Pure function of state (rule 50 §4).
+//
+// feature #165 WI-6 — the `ActionList` now carries Share + an OPTIONAL accent `Import annotations…` row
+// (design `vreader-annotation-import.jsx` `BookDetailsActionsCard` variant `B1-paired`) plus that
+// variant's merge-policy footnote, both gated on a nullable `onImportAnnotations` (null → neither, no
+// dead no-op). The design's paired `Export annotations…` row is still ABSENT: it is
+// `BLOCKED: needs-design (#2085)` — export FAILURE feedback has no depicted surface and no shipped
+// string that fits (all three of MainActivity's describe import) — and lands in WI-8, which flips
+// `AnnotationsIoEntryTest`'s `assertDoesNotExist("details-export-annotations")` in the same commit that
+// adds the row. Both rows share the private [ActionRow] geometry so they cannot drift apart.
 package com.vreader.app.reader.details
 
 import androidx.compose.foundation.background
@@ -27,13 +36,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.outlined.ContentCopy
+import androidx.compose.material.icons.outlined.FileUpload
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -225,9 +235,23 @@ private fun MetaRow(
     }
 }
 
-/** The `ActionList` card (Share ONLY — Export + cover-edit omitted): icon tile + label + chevron. */
+/**
+ * The `ActionList` card. Ships **Share + Import annotations…**; the design's `Replace cover…` row is
+ * omitted (Design-gate #1) and its `Export annotations…` row is `BLOCKED: needs-design (#2085)` — no
+ * shipped string describes an export *failure*, so WI-8 builds that row once the design lands.
+ *
+ * [onImportAnnotations] is capability-gated (#134's nullable-callback pattern): null renders **no Import
+ * row and no footnote** rather than a dead no-op, so a host that has not wired annotation import shows
+ * exactly the Share-only card #134 shipped. When non-null the card renders the accent Import row
+ * (`vreader-annotation-import.jsx:321-323`, variant `B1-paired`) plus that variant's merge-policy
+ * footnote (`:332-339`) verbatim beneath the card.
+ */
 @Composable
-internal fun BookActionList(theme: ReaderTheme, onShare: () -> Unit) {
+internal fun BookActionList(
+    theme: ReaderTheme,
+    onShare: () -> Unit,
+    onImportAnnotations: (() -> Unit)? = null,
+) {
     Column(Modifier.fillMaxWidth().padding(top = 22.dp)) {
         SectionLabel(theme, "Actions")
         Column(
@@ -237,46 +261,114 @@ internal fun BookActionList(theme: ReaderTheme, onShare: () -> Unit) {
                 .clip(RoundedCornerShape(14.dp))
                 .background(theme.cardColor()),
         ) {
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .clickable(onClick = onShare)
-                    .testTag("details-share")
-                    .semantics { contentDescription = "Share book" }
-                    .padding(horizontal = 14.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Box(
-                    Modifier
-                        .size(28.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(theme.ink.copy(alpha = if (theme.isDark) 0.05f else 0.04f)),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        Icons.Filled.Share,
-                        contentDescription = null,
-                        tint = theme.ink,
-                        modifier = Modifier.size(15.dp),
-                    )
-                }
-                Text(
-                    "Share book…",
-                    modifier = Modifier.weight(1f),
-                    color = theme.ink,
-                    fontFamily = VReaderFonts.Sans,
-                    fontSize = 14.5.sp,
-                    fontWeight = FontWeight.Medium,
-                )
-                // The design's trailing chevron accessory (`ActionList` `Icons.Chevron`).
-                Icon(
-                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                    contentDescription = null,
-                    tint = theme.subColor(),
-                    modifier = Modifier.size(16.dp),
+            ActionRow(
+                theme = theme,
+                icon = Icons.Filled.Share,
+                label = "Share book…",
+                tag = "details-share",
+                accessibilityLabel = "Share book",
+                accent = false,
+                // The design's `last` row carries no bottom rule — Share is last only without Import.
+                showDivider = onImportAnnotations != null,
+                onClick = onShare,
+            )
+            if (onImportAnnotations != null) {
+                ActionRow(
+                    theme = theme,
+                    icon = Icons.Outlined.FileUpload,
+                    label = "Import annotations…",
+                    tag = "details-import-annotations",
+                    accessibilityLabel = "Import annotations",
+                    accent = true,
+                    showDivider = false,
+                    onClick = onImportAnnotations,
                 )
             }
+        }
+        if (onImportAnnotations != null) {
+            // B1-paired's merge-policy caption, verbatim. It states the non-interactive merge policy the
+            // design chose to declare in copy INSTEAD of asking the user, so it ships with the row.
+            Text(
+                "Imports merge into this book by passage match; existing notes are not overwritten.",
+                modifier = Modifier
+                    .padding(top = 8.dp, start = 4.dp, end = 4.dp)
+                    .testTag("details-annotations-footnote"),
+                // The design's `color: t.sub, opacity: 0.7` — t.sub is ink@0.62, so 0.62 × 0.7.
+                color = theme.ink.copy(alpha = 0.62f * 0.7f),
+                fontFamily = VReaderFonts.Sans,
+                fontSize = 11.sp,
+                lineHeight = 15.4.sp,
+            )
+        }
+    }
+}
+
+/**
+ * One `ActionList` row (design `BDRow`): an icon tile + label + the trailing chevron accessory. [accent]
+ * tints the tile background and the label with [ReaderTheme.accent] (the design's `accent` BDRow, tile
+ * `${t.accent}1a` ≈ 10% alpha). No `sub` line is ever rendered — §3.3 A-1/A-2 record the design's
+ * sub-lines as deliberate ABSENCES (Android ships one export format and no Readwise/Apple-Books
+ * importer; rendering those subtitles would be a false affordance).
+ */
+@Composable
+private fun ActionRow(
+    theme: ReaderTheme,
+    icon: ImageVector,
+    label: String,
+    tag: String,
+    accessibilityLabel: String,
+    accent: Boolean,
+    showDivider: Boolean,
+    onClick: () -> Unit,
+) {
+    val foreground = if (accent) theme.accent else theme.ink
+    Column(Modifier.fillMaxWidth()) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onClick)
+                .testTag(tag)
+                .semantics { contentDescription = accessibilityLabel }
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Box(
+                Modifier
+                    .size(28.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(
+                        if (accent) theme.accent.copy(alpha = 0.10f)
+                        else theme.ink.copy(alpha = if (theme.isDark) 0.05f else 0.04f),
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(icon, contentDescription = null, tint = foreground, modifier = Modifier.size(15.dp))
+            }
+            Text(
+                label,
+                modifier = Modifier.weight(1f),
+                color = foreground,
+                fontFamily = VReaderFonts.Sans,
+                fontSize = 14.5.sp,
+                fontWeight = FontWeight.Medium,
+            )
+            // The design's trailing chevron accessory (`ActionList` `Icons.Chevron`).
+            Icon(
+                Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = theme.subColor(),
+                modifier = Modifier.size(16.dp),
+            )
+        }
+        if (showDivider) {
+            Spacer(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(start = 14.dp)
+                    .height(0.5.dp)
+                    .background(theme.ruleColor()),
+            )
         }
     }
 }

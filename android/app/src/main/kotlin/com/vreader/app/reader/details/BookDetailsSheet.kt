@@ -9,6 +9,14 @@
 // instrumented clicks reach unreliably — the AnnotationsReviewSheetContent precedent). Reuses the
 // [ReaderTheme] token map; pure function of state (rule 50 §4). The host (WI-5) routes `ReaderSheet.Details`
 // here and supplies onCopyFingerprint (clipboard) / onShare (BookShareIntent) / onDismiss.
+//
+// feature #165 WI-6 — the sheet threads an OPTIONAL [onImportAnnotations] to the ActionList's designed
+// `Import annotations…` row + merge-policy footnote (null → neither renders; the #134 capability-gate).
+// The **NO Export invariant above STILL HOLDS** and is deliberately left standing — its reason is now
+// `needs-design` #2085 (export FAILURE feedback is undepicted and no shipped string fits: all three of
+// MainActivity's describe *import*, and "Couldn't open the file" is factually wrong for a write), not
+// #134's original "no Android export subsystem" scope call. WI-8 retires the invariant when it builds
+// the row. Adding an export affordance here before #2085 lands is self-designed UI (rule 51).
 package com.vreader.app.reader.details
 
 import androidx.compose.foundation.background
@@ -53,7 +61,12 @@ internal fun ReaderTheme.cardColor(): Color = if (isDark) Color(0x0AFFFFFF) else
  * The Book Details sheet as a [ModalBottomSheet]. [model] is WI-1's assembled metadata. [onCopyFingerprint]
  * receives the FULL canonical key (the copy payload); [onShare] fires the share flow; [onDismiss] closes the
  * sheet. Renders in [theme]'s colors. Stacked layout only (no split / remote-only state). No cover art (the
- * missing-cover fallback is Design-gate #1) and no Export action (no Android export subsystem).
+ * missing-cover fallback is Design-gate #1) and **no Export action** — `BLOCKED: needs-design (#2085)`,
+ * built in WI-8.
+ *
+ * feature #165 WI-6 — [onImportAnnotations] is the capability-gated annotation-import entry: non-null adds
+ * the designed accent `Import annotations…` row + B1's merge-policy footnote to the ActionList; null (the
+ * default) renders neither, so every pre-#165 caller keeps the exact card #134 shipped.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -64,6 +77,7 @@ fun BookDetailsSheet(
     onShare: () -> Unit,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
+    onImportAnnotations: (() -> Unit)? = null,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     ModalBottomSheet(
@@ -77,6 +91,7 @@ fun BookDetailsSheet(
             model = model,
             onCopyFingerprint = onCopyFingerprint,
             onShare = onShare,
+            onImportAnnotations = onImportAnnotations,
         )
     }
 }
@@ -86,7 +101,8 @@ fun BookDetailsSheet(
  * `AnnotationsReviewSheetContent` precedent — a modal sheet's content renders in a separate window that
  * instrumented clicks reach unreliably). Renders: a header with the sheet-level trailing Share, the
  * scrollable stacked body (title/author + tag chips + `MetaList` + `ActionList`). NO cover art leads the
- * body — the title/author block does (Design-gate #1).
+ * body — the title/author block does (Design-gate #1). [onImportAnnotations] is passed straight through to
+ * [BookActionList]'s capability gate (#165 WI-6).
  */
 @Composable
 fun BookDetailsSheetContent(
@@ -94,6 +110,7 @@ fun BookDetailsSheetContent(
     model: BookDetailsUiModel,
     onCopyFingerprint: (String) -> Unit,
     onShare: () -> Unit,
+    onImportAnnotations: (() -> Unit)? = null,
 ) {
     Column(
         Modifier
@@ -121,7 +138,11 @@ fun BookDetailsSheetContent(
                 locationLabel = model.locationLabel,
                 onCopyFingerprint = onCopyFingerprint,
             )
-            BookActionList(theme = theme, onShare = onShare)
+            BookActionList(
+                theme = theme,
+                onShare = onShare,
+                onImportAnnotations = onImportAnnotations,
+            )
         }
     }
 }
