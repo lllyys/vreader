@@ -158,9 +158,13 @@ class EpubPublisherStylesEffectsConnectedTest : ReaderSettingsIsolatedTest() {
             for ((key, em, expected) in typeScale) {
                 val legacyPx = requireNotNull(pxOrNull(legacy.optString("${key}_fs"))) { "$key unreadable in control" }
                 val flagPx = requireNotNull(pxOrNull(withFlag.optString("${key}_fs"))) { "$key unreadable" }
+                // Tolerances are deliberately tight (±1% of root ≈ 0.16px at 16px). At ±3% the h1
+                // assertion could not tell the block's computed 1.2^3 rem from its 1.75rem fallback
+                // declaration, and `small` could not tell 5/6 rem from a 13px keyword-table result —
+                // i.e. the assertion would name a value it cannot actually discriminate.
                 assertEquals(
                     "control: the publisher's $key must render at its own ${em}em before the change",
-                    em * root, legacyPx, root * 0.05,
+                    em * root, legacyPx, root * 0.01,
                 )
                 assertTrue(
                     "E3: the advanced type scale must shrink $key from the publisher's ${em}em " +
@@ -169,7 +173,7 @@ class EpubPublisherStylesEffectsConnectedTest : ReaderSettingsIsolatedTest() {
                 )
                 assertEquals(
                     "E3: $key must land on the advanced block's own size, not merely somewhere smaller",
-                    expected, flagPx, root * 0.03,
+                    expected, flagPx, root * 0.01,
                 )
             }
 
