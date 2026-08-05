@@ -11,6 +11,7 @@ import com.vreader.app.data.LibraryRepository
 import com.vreader.app.data.VReaderDatabase
 import com.vreader.app.imports.IncomingBookResolver
 import com.vreader.app.imports.IncomingImportCoordinator
+import com.vreader.app.imports.inboundBlockingLane
 import com.vreader.app.reader.BookOpener
 import com.vreader.app.search.BookTextExtractor
 import com.vreader.app.search.EpubTextExtractor
@@ -339,13 +340,41 @@ class AppContainer(
     // Both are lazy and reuse the EXISTING repository/importer/appScope singletons: an
     // inbound document must land in the same library as a SAF-picked one.
 
+    /**
+     * The PRIVATE lane every blocking call on behalf of an untrusted provider runs on — the
+     * resolver's cursor query / open / probe read, and the inbound copy. Deliberately NOT
+     * `Dispatchers.IO`: those calls are synchronous and uninterruptible, so a provider that
+     * parks forever would hold one of the app's ~64 shared IO workers until the process dies,
+     * and enough of them would starve backup, OPDS and search alike (Gate-4 round 1, Critical).
+     * Elastic, so a parked thread never denies a fresh import; the number of simultaneously
+     * parked calls is bounded by BoundedCallGate's abandoned-call ceiling instead.
+     */
+    private val inboundLane: kotlinx.coroutines.CoroutineDispatcher = inboundBlockingLane()
+
     /** Resolves an inbound content URI to a format + name + ONE already-open, rewound stream. */
     val incomingBookResolver: IncomingBookResolver by lazy {
-        IncomingBookResolver(appContext.contentResolver)
+        IncomingBookResolver(appContext.contentResolver, inboundLane)
+    }
+
+    /**
+     * A SECOND [BookImporter] over the SAME [booksDir] and the SAME [repository] singleton —
+     * identical storage and identity, differing only in being pinned to [inboundLane].
+     * `importStream` switches dispatchers internally, so reusing the SAF-path importer would
+     * park an untrusted read on shared IO no matter what the coordinator does. Two instances
+     * are safe: the importer is stateless, and a concurrent same-key import already relies on
+     * a unique temp file plus an ATOMIC_MOVE.
+     */
+    private val inboundImporter: BookImporter by lazy {
+        BookImporter(booksDir, repository, inboundLane)
     }
 
     val incomingImportCoordinator: IncomingImportCoordinator by lazy {
-        IncomingImportCoordinator(importer = importer, booksDir = booksDir, appScope = appScope)
+        IncomingImportCoordinator(
+            importer = inboundImporter,
+            booksDir = booksDir,
+            appScope = appScope,
+            blockingLane = inboundLane,
+        )
     }
 
     init {
