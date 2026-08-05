@@ -1,7 +1,8 @@
 // Purpose: parse the `{name, detail}` wire JSON the foliate-js bundle posts over the WebView bridge
 // into a typed [FoliateMessage]. Pure + side-effect-free so it is fully JVM-unit-testable (no WebView).
 // Uses kotlinx.serialization (the module convention, cf. ReadiumLocatorBridge) — NOT org.json, which
-// is a throwing stub under JVM unit tests. Feature #126 WI-2.
+// is a throwing stub under JVM unit tests. Owns which FIELD carries what; delegates the nested
+// `book-ready.toc` tree walk to FoliateTocParser (feature #140 WI-1). Feature #126 WI-2.
 package com.vreader.app.reader.foliate
 
 import kotlinx.serialization.json.Json
@@ -30,6 +31,9 @@ object FoliateMessageParser {
             "book-ready" -> FoliateMessage.BookReady(
                 title = detail.str("title"),
                 sectionTotal = detail.int("sections") ?: detail.int("sectionTotal") ?: 0,
+                // Reading the field is this parser's job; walking the tree is FoliateTocParser's.
+                // A missing `toc` hands over `null`, which is a legal input yielding an empty list.
+                toc = FoliateTocParser.parse(detail["toc"]),
             )
             "relocate" -> FoliateMessage.Relocate(
                 cfi = detail.str("cfi"),
