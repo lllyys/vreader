@@ -380,8 +380,16 @@ class IncomingImportCoordinator internal constructor(
      */
     val boundedCalls: BoundedCallGate = BoundedCallGate(appScope, blockingLane, copyContextFactory)
 
-    /** UNLIMITED so `enqueue` never suspends the caller; admission is bounded by slots. */
+    // UNLIMITED as a CHANNEL so `enqueue` can never suspend a caller that is finishing, and so a
+    // Ready item — which owns an open fd — is never silently dropped by a buffer policy. Depth is
+    // bounded by [queueDepth] instead: Ready items by MAX_IN_FLIGHT, PreResolved envelopes (which
+    // hold no slot, and so were the one unbounded input left) by MAX_PENDING_ITEMS.
     private val queue = Channel<IncomingItem>(Channel.UNLIMITED)
+
+    /** Items sitting in [queue] awaiting the worker — the bound the channel itself does not give. */
+    private val queueDepth = AtomicInteger(0)
+
+    internal val pendingItems: Int get() = queueDepth.get()
 
     // Written with `trySend`, so emitting can never suspend the ONE worker — a buffer that made
     // the worker wait for a collector would wedge every later import.
@@ -418,6 +426,7 @@ class IncomingImportCoordinator internal constructor(
     init {
         val worker = appScope.launch {
             for (item in queue) {
+                queueDepth.decrementAndGet()
                 // One item's failure must never kill the ONE worker and wedge every later
                 // import — including an Error thrown by an attacker-supplied stream's close().
                 try {
@@ -477,13 +486,24 @@ class IncomingImportCoordinator internal constructor(
             // A PreResolved failure goes through the SAME queue, not straight to the outcome
             // channel: relaying it early would reorder it ahead of the Ready items it was
             // interleaved with, and the contract is one outcome per input IN INPUT ORDER.
-            if (ready != null && !tryOwn()) {
+            if (ready != null) {
                 // Defence in depth behind the slots: a caller that enqueued without one must
                 // still not be able to grow the queue past the cap.
-                reject(ready)
+                if (!tryOwn()) {
+                    reject(ready)
+                    continue
+                }
+            } else if (queueDepth.get() >= MAX_PENDING_ITEMS) {
+                // Overload from a hostile launch loop: the exported entry point can be started
+                // faster than one worker drains, and a PreResolved envelope takes no slot, so
+                // this was the last unbounded input (Gate-4 round 3, High). Refusing the NEWEST
+                // mirrors the outcome channel's DROP_LATEST, and costs at most that URI's
+                // advisory toast — it holds no fd and no library state depends on it.
                 continue
             }
+            queueDepth.incrementAndGet()
             if (queue.trySend(item).isFailure) {         // only after shutdown
+                queueDepth.decrementAndGet()
                 if (ready != null) {
                     owned.decrementAndGet()
                     reject(ready)
@@ -597,16 +617,23 @@ class IncomingImportCoordinator internal constructor(
     private fun shutdown() {
         queue.close()
         while (true) {
-            when (val item = queue.tryReceive().getOrNull()) {
-                null -> return
-                is IncomingItem.Ready -> try {
-                    owned.decrementAndGet()
-                    reject(item)
-                } finally {
-                    item.slot.release()
-                }
-                is IncomingItem.PreResolved -> emit(item.outcome)
+            val item = queue.tryReceive().getOrNull() ?: return
+            queueDepth.decrementAndGet()
+            releaseDrained(item)
+        }
+    }
+
+    /** Isolated per item: one hostile stream throwing from `close()` must not abort the drain
+     *  and strand everything behind it. */
+    private fun releaseDrained(item: IncomingItem) {
+        when (item) {
+            is IncomingItem.Ready -> try {
+                owned.decrementAndGet()
+                reject(item)
+            } finally {
+                item.slot.release()
             }
+            is IncomingItem.PreResolved -> emit(item.outcome)
         }
     }
 
@@ -657,6 +684,10 @@ class IncomingImportCoordinator internal constructor(
 
         /** Undelivered outcomes retained while nothing is collecting — see [outcomeChannel]. */
         const val MAX_PENDING_OUTCOMES = 256
+
+        /** Items awaiting the worker. Ready items are separately capped at [MAX_IN_FLIGHT]; this
+         *  bounds the PreResolved envelopes, which hold no slot — see [enqueue]. */
+        const val MAX_PENDING_ITEMS = 256
 
         val IMPORT_TIMEOUT: Duration = 5.minutes
         val STALL_TIMEOUT: Duration = 60.seconds

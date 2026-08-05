@@ -180,9 +180,12 @@ class IncomingImportCoordinatorTest {
                         // contention, so a side effect inside it would count the same slot twice.
                         val depth = held.incrementAndGet()
                         peak.updateAndGet { p -> maxOf(p, depth) }
-                        held.decrementAndGet()
+                        // Release BEFORE un-counting, so the test's counter is never lower than
+                        // what the coordinator actually holds — otherwise `peak` could miss a
+                        // genuine over-admission.
                         slot.release()
                         slot.release()          // the idempotent double release, under contention
+                        held.decrementAndGet()
                     }
                 }
             }.apply { isDaemon = true; start() }
@@ -190,8 +193,29 @@ class IncomingImportCoordinatorTest {
         start.countDown()
         threads.forEach { it.join(30_000) }
 
+        assertTrue("every worker finished", threads.none { it.isAlive })
         assertTrue("the cap held under contention: peak=${peak.get()}", peak.get() <= IncomingImportCoordinator.MAX_IN_FLIGHT)
         assertEquals("and every slot came back", 0, coordinator.outstandingSlots)
+    }
+
+    @Test
+    fun `PreResolved envelopes cannot grow the queue without bound while the worker is busy`() = runTest {
+        val fixture = fixture()
+        importer.gate = CompletableDeferred()                    // the worker never drains
+        fixture.coordinator.enqueue(listOf(fixture.readyItem("blocking.epub")))
+        testScheduler.runCurrent()
+        assertEquals("the worker is parked on item 1", 1, importer.calls.size)
+
+        val ceiling = IncomingImportCoordinator.MAX_PENDING_ITEMS
+        // A hostile launch loop: PreResolved envelopes hold no slot, so nothing else bounds them.
+        fixture.coordinator.enqueue(
+            (1..ceiling + 200).map { IncomingItem.PreResolved(IncomingImportOutcome.Unreadable) },
+        )
+
+        assertTrue(
+            "queue depth must stay bounded: ${fixture.coordinator.pendingItems}",
+            fixture.coordinator.pendingItems <= ceiling,
+        )
     }
 
     @Test
