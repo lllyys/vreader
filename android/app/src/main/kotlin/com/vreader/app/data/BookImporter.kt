@@ -9,6 +9,7 @@ package com.vreader.app.data
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import vreader.contracts.BookFormat
 import vreader.contracts.DocumentFingerprint
 import java.io.File
 import java.io.InputStream
@@ -49,19 +50,30 @@ class BookImporter(
      * [displayName] + [input] from the SAF content URI; [sourceUri] is persisted only as
      * provenance metadata. [input] is always closed.
      *
-     * @throws ImportException.UnsupportedFormat if [displayName]'s extension is unknown.
+     * [format], when non-null, REPLACES the extension-derived format lookup (feature #155:
+     * a `content://` URI handed over by another app has no reliable filename, so the caller
+     * resolves the format from the MIME type / magic bytes and passes it here). It wins over
+     * a conflicting extension in [displayName], and skips the unsupported-extension throw.
+     * When null the extension decides, exactly as before. Identity is unaffected either way:
+     * the key is always `Identity.canonicalKey(format.name, sha256, byteCount)`, so the same
+     * bytes resolve to the same library row down both paths.
+     *
+     * @throws ImportException.UnsupportedFormat if [format] is null and [displayName]'s
+     *   extension is unknown.
      */
     suspend fun importStream(
         sourceUri: String,
         displayName: String,
         input: InputStream,
         expectedKey: String? = null,
+        format: BookFormat? = null,
     ): Book =
         withContext(ioDispatcher) {
             // Outer use closes [input] on EVERY exit (incl. unsupported-format /
             // temp-create failures), not only once hashing starts.
             input.use { stream ->
-                val format = DocumentFingerprint.formatForFilename(displayName)
+                val resolvedFormat = format
+                    ?: DocumentFingerprint.formatForFilename(displayName)
                     ?: throw ImportException.UnsupportedFormat(displayName)
                 if (!booksDir.exists()) booksDir.mkdirs()
 
@@ -72,7 +84,7 @@ class BookImporter(
                     val result = temp.outputStream().buffered().use { sink ->
                         DocumentFingerprint.hashing(stream, sink)
                     }
-                    val key = result.canonicalKey(format)
+                    val key = result.canonicalKey(resolvedFormat)
 
                     // Verify identity BEFORE promoting the artifact or writing the DB row, so a
                     // blob that doesn't match the caller's expected identity (a corrupt/mismatched
@@ -94,7 +106,7 @@ class BookImporter(
                     val book = Book(
                         fingerprintKey = key,
                         title = titleFromDisplayName(displayName),
-                        originalFormat = format,
+                        originalFormat = resolvedFormat,
                         contentSHA256 = result.sha256,
                         fileByteCount = result.fileByteCount,
                         localFilePath = finalFile.absolutePath,

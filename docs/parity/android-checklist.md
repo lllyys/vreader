@@ -185,6 +185,27 @@ dispatches that isn't READY).
 
 **Highest-value item in phase 4**: it ships no new capability and makes four existing ones usable.
 
+**Detector baseline, 2026-08-05** (`scripts/check-orphan-surfaces.sh` against `d8de46f7`):
+`FINDINGS (12 orphaned, 1 debug-only)`, `reachable=21`. Every finding is accounted for — there are
+no unknown unreachable surfaces:
+
+| Finding | Owner | Class |
+|---|---|---|
+| `AiChatPanel`, `AiProviderListScreen` | #118 | Settings-gated — waiting on #171 |
+| `RestoreScreen`, `RestoreConfirmDialog`, `SelectiveRestoreSheet`, `ServerEditSheet`, `WebDavServersScreen` | #114 / #116 | Settings-gated |
+| `BackupRestoreScreen` (debug-only) | #114 | reachable **only** from `android/app/src/debug` — excluded from the release APK, which is precisely the hole rule 47's Gate-5 clause closed |
+| `OpdsAddSheet`, `OpdsBrowseScreen`, `OpdsSourceListScreen` | #120 | Settings-gated |
+| `StatsDashboard` | #122 | Settings-gated |
+| `TocContentsSheet` | #132 / #135 | **dead code, not an unreachable feature** — see below |
+
+`TocContentsSheet` is the one finding that is *not* about #171. It is the outer wrapper superseded
+when #135 promoted the two-tab `TocBookmarksSheet`; its body `TocContentsSheetContent` **is** live
+and is what #139's TOC work reaches the user through
+(`ReaderChromeScaffold`/`EpubReaderChrome` → `TocBookmarksSheet:158` → `TocContentsSheetContent`),
+matching the path named in `dev-docs/verification/feature-139-20260805.md`. So #139's `VERIFIED`
+stands; the wrapper is a leftover to delete. Tracked here so a known-stale finding does not train
+readers to ignore the detector — a detector with unexplained output stops being read.
+
 ## G1. Reader navigation — Contents (TOC) on every format
 
 - [x] **#139 TXT/MD auto-generated TOC** — iOS: #23 + #12. **VERIFIED 2026-08-05**

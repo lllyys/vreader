@@ -310,6 +310,143 @@ class BookImporterTest {
         assertEquals(local.absolutePath, repo.findBook(first.fingerprintKey)?.localFilePath)
         assertEquals(first.fingerprintKey, DocumentFingerprint.hash(local).canonicalKey(BookFormat.epub))
     }
+
+    // --- feature #155 WI-1: explicit format override ---
+    // An inbound `content://` URI from another app has no reliable filename, so
+    // extension-derived detection cannot be the only path into the importer. The
+    // trailing `format` parameter REPLACES the extension lookup when non-null;
+    // when null the importer behaves exactly as it always has.
+
+    @Test
+    fun import_explicitNullFormat_reproducesExtensionDerivedBehaviour() = runTest {
+        // Passing the new parameter explicitly as null must be indistinguishable from
+        // omitting it: the extension still decides, and an unknown one still throws.
+        val book = importer.importStream(
+            sourceUri = "content://saf/n1",
+            displayName = "Moby-Dick.epub",
+            input = ByteArrayInputStream(epubBytes),
+            format = null,
+        )
+        assertEquals(BookFormat.epub, book.originalFormat)
+        assertEquals("epub:${book.contentSHA256}:${book.fileByteCount}", book.fingerprintKey)
+
+        var threw = false
+        try {
+            importer.importStream(
+                sourceUri = "content://saf/n2",
+                displayName = "notes.xyz",
+                input = ByteArrayInputStream(epubBytes),
+                format = null,
+            )
+        } catch (e: ImportException.UnsupportedFormat) {
+            threw = true
+            assertEquals("notes.xyz", e.name)
+        }
+        assertTrue("format=null keeps the UnsupportedFormat contract", threw)
+    }
+
+    @Test
+    fun import_explicitFormat_overridesUnknownExtension() = runTest {
+        val book = importer.importStream(
+            sourceUri = "content://saf/o1",
+            displayName = "x.bin",
+            input = ByteArrayInputStream(epubBytes),
+            format = BookFormat.epub,
+        )
+        assertEquals(BookFormat.epub, book.originalFormat)
+        // Key shape asserted from the Book's own fields with a LITERAL prefix — never
+        // rebuilt through the same helper the implementation uses.
+        assertEquals("epub:${book.contentSHA256}:${book.fileByteCount}", book.fingerprintKey)
+        assertTrue("artifact stored", File(book.localFilePath!!).exists())
+        assertNotNull(
+            "book recorded in the library",
+            LibraryRepository(db.bookDao(), db.readingPositionDao()).findBook(book.fingerprintKey),
+        )
+    }
+
+    @Test
+    fun import_explicitFormat_andExtensionDerived_produceIdenticalCanonicalKey() = runTest {
+        // THE identity contract: an open-with import (no filename → explicit format) must
+        // resume the SAME library row a SAF import of the same bytes created, not create a
+        // duplicate. The expectation comes from the UNTOUCHED extension path.
+        val viaExtension = importer.importStream(
+            "content://saf/k1", "Book.epub", ByteArrayInputStream(epubBytes),
+        )
+        val viaOverride = importer.importStream(
+            sourceUri = "content://saf/k2",
+            displayName = "x.bin",
+            input = ByteArrayInputStream(epubBytes),
+            format = BookFormat.epub,
+        )
+        assertEquals(
+            "explicit format and extension detection agree on identity",
+            viaExtension.fingerprintKey,
+            viaOverride.fingerprintKey,
+        )
+        val repo = LibraryRepository(db.bookDao(), db.readingPositionDao())
+        assertEquals("no duplicate library row", 1, repo.observeLibrary().first().size)
+    }
+
+    @Test
+    fun import_explicitFormat_beatsAConflictingValidExtension() = runTest {
+        // Override vs a DIFFERENT *valid* extension: the caller-supplied format wins. The
+        // caller resolves it from MIME/magic bytes, which outrank a provider-supplied name.
+        val book = importer.importStream(
+            sourceUri = "content://saf/c",
+            displayName = "x.pdf",
+            input = ByteArrayInputStream(epubBytes),
+            format = BookFormat.epub,
+        )
+        assertEquals(BookFormat.epub, book.originalFormat)
+        assertEquals("epub:${book.contentSHA256}:${book.fileByteCount}", book.fingerprintKey)
+    }
+
+    @Test
+    fun import_explicitFormat_extensionlessCjkName_keepsWholeNameAsTitle() = runTest {
+        // The realistic content:// shape: a name with no extension at all (and CJK, so the
+        // title path is exercised on non-ASCII). Today this throws; with an override it imports.
+        val book = importer.importStream(
+            sourceUri = "content://saf/cjk",
+            displayName = "红楼梦",
+            input = ByteArrayInputStream(epubBytes),
+            format = BookFormat.azw3,
+        )
+        assertEquals("红楼梦", book.title)
+        assertEquals(BookFormat.azw3, book.originalFormat)
+        assertEquals("azw3:${book.contentSHA256}:${book.fileByteCount}", book.fingerprintKey)
+    }
+
+    @Test
+    fun import_explicitFormat_stillHonoursExpectedKeyVerification() = runTest {
+        val viaExtension = importer.importStream(
+            "content://saf/x1", "Book.epub", ByteArrayInputStream(epubBytes),
+        )
+        // A matching expectation succeeds through the override path.
+        val ok = importer.importStream(
+            sourceUri = "content://saf/x2",
+            displayName = "x.bin",
+            input = ByteArrayInputStream(epubBytes),
+            expectedKey = viaExtension.fingerprintKey,
+            format = BookFormat.epub,
+        )
+        assertEquals(viaExtension.fingerprintKey, ok.fingerprintKey)
+
+        // A wrong expectation still fails — the override does not bypass verification.
+        var mismatch: ImportException.FingerprintMismatch? = null
+        try {
+            importer.importStream(
+                sourceUri = "content://saf/x3",
+                displayName = "x.bin",
+                input = ByteArrayInputStream(epubBytes),
+                expectedKey = "pdf:${viaExtension.contentSHA256}:${viaExtension.fileByteCount}",
+                format = BookFormat.epub,
+            )
+        } catch (e: ImportException.FingerprintMismatch) {
+            mismatch = e
+        }
+        assertNotNull("expectedKey verification still applies under an override", mismatch)
+        assertEquals(viaExtension.fingerprintKey, mismatch!!.actual)
+    }
 }
 
 /**
