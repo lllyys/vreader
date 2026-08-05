@@ -9,6 +9,9 @@ import android.content.Context
 import com.vreader.app.data.BookImporter
 import com.vreader.app.data.LibraryRepository
 import com.vreader.app.data.VReaderDatabase
+import com.vreader.app.imports.IncomingBookResolver
+import com.vreader.app.imports.IncomingImportCoordinator
+import com.vreader.app.imports.inboundBlockingLane
 import com.vreader.app.reader.BookOpener
 import com.vreader.app.search.BookTextExtractor
 import com.vreader.app.search.EpubTextExtractor
@@ -67,9 +70,11 @@ class AppContainer(
     val repository: LibraryRepository by lazy {
         LibraryRepository(database.bookDao(), database.readingPositionDao())
     }
-    val importer: BookImporter by lazy {
-        BookImporter(File(appContext.filesDir, "books"), repository)
-    }
+
+    /** App-private book storage — shared by the importer and the #155 inbound-import sweep. */
+    private val booksDir: File = File(appContext.filesDir, "books")
+
+    val importer: BookImporter by lazy { BookImporter(booksDir, repository) }
 
     // feature #122 — reading-stats. The repository + the time tracker are process-singletons so a
     // reading session survives the (shorter-lived) reader ViewModel / rotation. ONE shared DateClock
@@ -326,6 +331,66 @@ class AppContainer(
                 .map { it == 0 },
             recordQuery = { q -> recentSearchesStore.record(q) },
         )
+
+    // ── feature #155 — "Open with VReader" / "Share to VReader" ───────────────────────────
+    // ImportActivity resolves + opens each inbound stream while its read grant is alive and
+    // hands the already-open work to the PROCESS-WIDE coordinator, which owns every stream
+    // and drains ONE queue with ONE worker — so sequencing and the in-flight cap hold across
+    // concurrent ImportActivity instances, and a copy outlives the activity that started it.
+    // Both are lazy and reuse the EXISTING repository/importer/appScope singletons: an
+    // inbound document must land in the same library as a SAF-picked one.
+
+    /**
+     * The PRIVATE lane every blocking call on behalf of an untrusted provider runs on — the
+     * resolver's cursor query / open / probe read, and the inbound copy. Deliberately NOT
+     * `Dispatchers.IO`: those calls are synchronous and uninterruptible, so a provider that
+     * parks forever would hold one of the app's ~64 shared IO workers until the process dies,
+     * and enough of them would starve backup, OPDS and search alike (Gate-4 round 1, Critical).
+     * Elastic, so a parked thread never denies a fresh import; the number of simultaneously
+     * parked calls is bounded by BoundedCallGate's abandoned-call ceiling instead.
+     */
+    private val inboundLane: kotlinx.coroutines.CoroutineDispatcher = inboundBlockingLane()
+
+    /** Resolves an inbound content URI to a format + name + ONE already-open, rewound stream. */
+    val incomingBookResolver: IncomingBookResolver by lazy {
+        IncomingBookResolver(appContext.contentResolver, inboundLane)
+    }
+
+    /**
+     * A SECOND [BookImporter] over the SAME [booksDir] and the SAME [repository] singleton —
+     * identical storage and identity, differing only in being pinned to [inboundLane].
+     * `importStream` switches dispatchers internally, so reusing the SAF-path importer would
+     * park an untrusted read on shared IO no matter what the coordinator does.
+     *
+     * A second instance adds no state: the importer holds none, each copy gets its own temp
+     * file, and promotion is an ATOMIC_MOVE. It does NOT make concurrent same-key imports
+     * transactional — BookImporter's promote -> upsert -> conditional-rollback sequence is not
+     * atomic per key, so two concurrent same-key imports where one upsert FAILS can leave the
+     * winner's row pointing at a deleted artifact. That hazard is pre-existing and instance-
+     * independent (two concurrent calls on ONE instance race identically); fixing it needs a
+     * per-key lock inside BookImporter, which is outside this WI's write-set. Reported as a
+     * follow-up by Gate-4 round 2.
+     */
+    private val inboundImporter: BookImporter by lazy {
+        BookImporter(booksDir, repository, inboundLane)
+    }
+
+    val incomingImportCoordinator: IncomingImportCoordinator by lazy {
+        IncomingImportCoordinator(
+            importer = inboundImporter,
+            booksDir = booksDir,
+            appScope = appScope,
+            blockingLane = inboundLane,
+        )
+    }
+
+    init {
+        // EXACTLY ONCE, in the constructor — so it cannot race a live import (nothing can
+        // have reached [importer] yet) and cannot run twice. Deliberately the companion
+        // form: the instance method would force the importer, and with it Room, onto the
+        // startup path. Age-gated to >1h, so even a hypothetical concurrent import is safe.
+        IncomingImportCoordinator.sweepStaleTempFiles(booksDir)
+    }
 
     /** In-memory last reading char-offset per fingerprintKey. Written synchronously on
      *  save so a fast rotation / reopen restores the LATEST position without waiting for

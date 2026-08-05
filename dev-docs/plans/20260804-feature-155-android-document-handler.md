@@ -337,6 +337,15 @@ bus is a `Channel(Channel.BUFFERED)` with a comment saying so (F11b). The coordi
 construct (`Channel(Channel.BUFFERED)` + `receiveAsFlow()`), so an outcome raised before
 `MainActivity` collects is buffered and delivered when collection starts.
 
+> **Corrected in implementation (WI-4, 2026-08-05) — and this correction is load-bearing.**
+> `Channel.BUFFERED` is a *capacity constant*, and pairing it with a non-`SUSPEND` `onBufferOverflow`
+> policy silently yields a **capacity-ONE conflated channel** rather than the buffered one the text
+> promises. The lane's tests caught it. The shipped code therefore uses an **explicit capacity**
+> (`MAX_PENDING_OUTCOMES = 256`) with an explicit overflow policy, not the bare constant. An exported
+> entry point can be launched in a loop, so the outcome buffer and the input queue
+> (`MAX_PENDING_ITEMS = 256`) are both explicitly bounded — an unbounded queue reachable from an
+> exported activity is a DoS surface, and `Channel.UNLIMITED` was round 3's remaining High.
+
 **Scope of the guarantee, stated honestly (round 2, M3).** This eliminates the *no-collector* loss.
 It does **not** make delivery exactly-once across a collector handover: `receiveAsFlow` is
 single-consumer and removes the element on receive, so an outcome received microseconds before a
@@ -504,8 +513,26 @@ class IncomingImportCoordinator(
 }
 ```
 
+> **Superseded by the WI-4 implementation (2026-08-05) — WI-5 must use the shipped shape, not this
+> sketch.** Admission is an **idempotent `ImportSlot` token**: `acquireSlot(): ImportSlot?` (null ⇒
+> `PreResolved(Failed)`, nothing opened), and the slot is **carried by `IncomingItem.Ready(pending,
+> slot)`** so ownership transfer to the coordinator is *type-checked* rather than convention. WI-5
+> keeps `try/finally { if (!transferred) slot.release() }`, and a double release is now harmless.
+> The coordinator releases the slot of every `Ready` item it accepts, at that item's terminal outcome.
+>
+> Also superseded: D8's "per-item **dedicated thread**" is now a **private elastic daemon lane** with
+> an accounted abandonment threshold. Blocking work never runs on `Dispatchers.IO` — `withContext(io)`
+> inside the importer or resolver would park an *untrusted* read on one of the app's ~64 shared IO
+> workers. `AppContainer` pins both the inbound `BookImporter` and `IncomingBookResolver` to the
+> private lane.
+
 `wasAlreadyPresent` is `repository.findBook(key) != null` evaluated **before** the upsert
 (`LibraryRepository.kt:85`) — the honest duplicate signal a future #2030 design will consume.
+
+> **Downgraded to a documented HEURISTIC (WI-4, 2026-08-05).** The exact signal is only computable
+> *inside* `BookImporter`, which already derives `artifactPreexisted` at the right key and moment; the
+> clean fix is for it to return an `ImportResult(book, wasAlreadyPresent)`. Nothing consumes the field
+> today, so this is a tracked follow-up rather than a defect.
 
 **`.../imports/ImportActivity.kt`** (~150 lines)
 
@@ -1002,11 +1029,19 @@ spec: |
             dropped URI breaks the one-outcome-per-URI invariant.)
          b. PERMIT (r3 H1), with LEAK-PROOF OWNERSHIP (r4 H1 — v4 named the owner but not the
             exception/cancellation path, so 20 leaks could permanently wedge admission):
-              if !coordinator.tryAcquireSlot() -> PreResolved(Failed), open NOTHING, next URI.
-              Otherwise the permit is held under a try/finally spanning the REST of this URI's block:
+              UPDATED 2026-08-05 to the API WI-4 actually shipped (§5's sketch is superseded; this
+              block is what a dispatched lane receives, so it must not lag — see the row's own note
+              that a stale Spec block gets implemented verbatim):
+                val slot = coordinator.acquireSlot() ?: -> PreResolved(Failed), open NOTHING, next URI.
+              `acquireSlot(): ImportSlot?` returns an IDEMPOTENT token; a double release is harmless.
+              The slot is held under a try/finally spanning the REST of this URI's block:
                 var transferred = false
                 try { … steps c-f …; if (item is Ready) { enqueue-list += item; transferred = true } }
-                finally { if (!transferred) coordinator.releaseSlot() }
+                finally { if (!transferred) slot.release() }
+              The slot is CARRIED BY the item — `IncomingItem.Ready(pending, slot)` — so ownership
+              transfer to the coordinator is TYPE-CHECKED rather than conventional.
+              ACQUIRE ORDER (D8 gap): acquire only AFTER the own-fileprovider guard AND after
+              resolution succeeds, so a hostile provider stalled in resolution can never hold a slot.
               OWNERSHIP TRANSFERS TO THE COORDINATOR IF AND ONLY IF a Ready item actually reaches
               enqueue(). Every other exit — PreResolved, a thrown exception, or CancellationException
               from the activity being destroyed mid-loop — releases in the finally. The coordinator
@@ -1018,6 +1053,16 @@ spec: |
          c. resolver.peek(uri) -> DISPLAY_NAME + SIZE (cursor query, NO stream yet), wrapped in
             try/catch: ANY exception (SecurityException, IllegalStateException, a provider that
             throws on query) -> PreResolved(Unreadable). (r3 H3.)
+            CLOSES D8's OPEN GAP (added 2026-08-05): a try/catch does NOT bound a hostile provider —
+            `query` is synchronous and uninterruptible, so it can park forever. BOTH `peek` AND
+            `resolveAndOpen` MUST be wrapped in WI-4's bounded-execution primitive:
+              coordinator.boundedCalls.call(
+                  timeoutMillis = IncomingImportCoordinator.RESOLVE_TIMEOUT.inWholeMilliseconds,
+                  dispose = { it?.stream?.close() })
+            The `dispose` hook is MANDATORY for `resolveAndOpen`: a PendingImport produced AFTER the
+            timeout owns an fd nobody else will ever close. Map `BoundedCall.TimedOut` ->
+            PreResolved(Failed); `BoundedCall.Failed` -> the existing total mapping
+            (UnsupportedFormat -> Unsupported, anything else -> Unreadable).
          d. PRE-OPEN preflight (D8): declaredSize > MAX_IMPORT_BYTES -> PreResolved(TooLarge);
             declaredSize known && booksDir.usableSpace <= declaredSize + 32 MiB -> PreResolved(Failed).
             These run BEFORE opening — that is the whole point of "reject before opening".
