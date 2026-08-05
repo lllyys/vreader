@@ -5,8 +5,10 @@
 // Storage contract:
 //  - `locatorJSON` stores the FULL serialized `Locator` (round-trippable, a PLAIN Locator — never a
 //    VReaderLocator envelope or Readium JSON; the position-precedent of storing the round-trippable
-//    form in Room). The #113 backup collector (deferred) converts it to `Locator.canonicalJson()`
-//    for the on-wire BackupHighlight.locatorJSON.
+//    form in Room). The on-wire `BackupHighlight.locatorJSON` is the SAME plain form — the backup
+//    mapper emits `BackupJson.encode(locator)`, NOT `canonicalJson()` (`AnnotationBackupMapper`;
+//    iOS parity, `contracts/identity/backup-format.md`). `canonicalJson()` is used ONLY to derive
+//    `profileKey` below; it is a hashing input, never a wire format.
 //  - `profileKey = "$bookKey:${sha256(locator.canonicalJson())}"` — derived from the CANONICAL form
 //    so dedup is cross-platform-stable regardless of the stored round-trip form.
 //  - `anchorKey = anchor?.anchorHash ?: NIL_ANCHOR` — the non-null dedupe sentinel.

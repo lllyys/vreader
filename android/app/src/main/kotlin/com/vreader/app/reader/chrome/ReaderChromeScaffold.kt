@@ -85,6 +85,11 @@ import vreader.contracts.Locator
  * dismiss-on-Succeeded; null → review-only, non-clickable rows, NO dead no-op). Both are nullable/defaulted
  * so #132 Contents/Notes-only callers stay valid (WI-7 feeds them per host).
  *
+ * feature #165 WI-6 — annotation import on the Details sheet: a non-null [onImportAnnotations] adds the
+ * designed accent `Import annotations…` row + B1's merge-policy footnote to the sheet's ActionList and is
+ * invoked on tap; null (the default) renders neither (the capability gate — no dead no-op). The paired
+ * `Export annotations…` row is NOT built here: it is `BLOCKED: needs-design (#2085)` and lands in WI-8.
+ *
  * [bottomChrome] receives the Contents/Notes open callbacks (a null Contents callback when [tocEntries] is
  * empty) and renders the reader's bottom chrome. [body] is the reader content; a center-tap on it toggles
  * [ReaderChromeState.chromeVisible].
@@ -115,6 +120,10 @@ fun ReaderChromeScaffold(
     bookDetails: BookDetailsUiModel? = null,
     onShareBook: () -> Unit = {},
     onCopyFingerprint: (String) -> Unit = {},
+    // feature #165 WI-6 — the annotation-import entry on the Details sheet. Capability-gated: null (the
+    // default) renders NO Import row and NO merge-policy footnote, so #132/#134/#135 callers are unchanged.
+    // WI-7 supplies the real launcher; the paired Export entry is BLOCKED on needs-design #2085 (WI-8).
+    onImportAnnotations: (() -> Unit)? = null,
     // feature #131 WI-9 — the bilingual entry: [pillSlot] fills the top-chrome pill next to the title
     // (WI-7a BilingualPill; null → no pill, bilingual off), and [bilingualMoreRow] supplies the More-menu
     // Bilingual Toggle/Disabled row (null → no row — the #132/#134-only callers stay valid).
@@ -235,6 +244,7 @@ fun ReaderChromeScaffold(
             onCopyFingerprint = onCopyFingerprint,
             onShare = onShareBook,
             onDismiss = { openSheet(ReaderSheet.None) },
+            onImportAnnotations = onImportAnnotations,
         )
         // feature #135 WI-6 — the Bookmarks route opens the SAME two-tab sheet with the Bookmarks tab
         // pre-selected (the designed [TocBookmarksSheet]; rule 51 — no invented list surface).

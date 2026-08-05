@@ -187,7 +187,10 @@ fun EpubBottomBand(
  * (the WI-4 [BookDetailsSheet]); [onShareBook] is its Share flow and [onCopyFingerprint] its copy-fingerprint
  * mini-action (the host copies to the OS clipboard — no invented toast, rule 51). A Details route with no
  * [bookDetails] (should not happen — the route is only reachable when the More menu was fed a model) treats
- * the scrim as present but shows no sheet (a safe no-op).
+ * the scrim as present but shows no sheet (a safe no-op). feature #165 WI-6 — a non-null
+ * [onImportAnnotations] adds the designed accent `Import annotations…` row + B1's merge-policy footnote to
+ * the Details sheet's ActionList and is invoked on tap; null (the default) renders neither. The paired
+ * `Export annotations…` row is NOT built here — `BLOCKED: needs-design (#2085)`, WI-8.
  */
 @Composable
 fun EpubReaderSheets(
@@ -201,6 +204,10 @@ fun EpubReaderSheets(
     onCopyFingerprint: (String) -> Unit = {},
     bookmarks: List<BookmarkRowItem> = emptyList(),
     onJumpBookmark: ((BookmarkRecord) -> JumpResult)? = null,
+    // feature #165 WI-6 — the annotation-import entry on the Details sheet. Capability-gated: null (the
+    // default) renders NO Import row and NO merge-policy footnote, so #132/#134/#135 EPUB callers are
+    // unchanged. WI-7 supplies the real launcher; the paired Export entry is BLOCKED on needs-design #2085.
+    onImportAnnotations: (() -> Unit)? = null,
 ) {
     val chrome by model.collectAsStateWithLifecycle()
     val sheet = chromeState.value.sheet
@@ -263,6 +270,7 @@ fun EpubReaderSheets(
             onCopyFingerprint = onCopyFingerprint,
             onShare = onShareBook,
             onDismiss = { closeSheet() },
+            onImportAnnotations = onImportAnnotations,
         )
         // feature #135 WI-6 — the Bookmarks route opens the SAME two-tab sheet with the Bookmarks tab
         // pre-selected (the designed [TocBookmarksSheet]; rule 51 — no invented list surface).
