@@ -196,6 +196,20 @@ class DiagnosticsLogRowTest {
         assertLevelColor(DiagnosticsTokens.Dark.sub.toArgb())
     }
 
+    @Test fun assertLevelRidesTheErrorTreatmentInDark() {
+        showRow(entry(level = DiagnosticsLevel.ASSERT), DiagnosticsTokens.Dark)
+
+        compose.onNodeWithText("ERROR", useUnmergedTree = true).assertExists()
+        assertLevelColor(0xFFE0826F.toInt())
+    }
+
+    @Test fun verboseFoldsIntoTheDebugTreatment() {
+        showRow(entry(level = DiagnosticsLevel.VERBOSE), DiagnosticsTokens.Light)
+
+        compose.onNodeWithText("DEBUG", useUnmergedTree = true).assertExists()
+        assertLevelColor(DiagnosticsTokens.Light.sub.toArgb())
+    }
+
     @Test fun assertLevelRidesTheErrorTreatment() {
         // logcat `F` is in the Errors chip's level SET, so it takes the error treatment and the
         // `ERROR` token — the design has no fourth token for it either.
@@ -222,10 +236,15 @@ class DiagnosticsLogRowTest {
         val lineHeightPx = with(compose.density) { DiagnosticsRowMetrics.MESSAGE_LINE_HEIGHT.toPx() }
         val collapsed = compose.onNodeWithTag(DiagnosticsRowTags.MESSAGE, useUnmergedTree = true)
             .fetchSemanticsNode().size.height
-        // 3.5 lines of slack: enough for font padding, still short of a 4-line clamp.
+        // Bounded on BOTH sides (Gate-4 round 1): the upper bound rejects a 4-line clamp, the lower
+        // bound rejects a 1- or 2-line clamp, which an upper bound alone would have let through.
         assertTrue(
             "collapsed message height ${collapsed}px exceeds the 3-line clamp (${lineHeightPx * 3}px)",
             collapsed <= lineHeightPx * 3.5f,
+        )
+        assertTrue(
+            "collapsed message height ${collapsed}px is short of 3 lines (${lineHeightPx * 3}px)",
+            collapsed >= lineHeightPx * 2.5f,
         )
         compose.onNodeWithText("Copy entry", useUnmergedTree = true).assertDoesNotExist()
 
@@ -384,6 +403,99 @@ class DiagnosticsLogRowTest {
         compose.waitForIdle()
         // Nothing in this message is a credential, so redaction is a no-op — CJK is not mangled.
         assertEquals(message, clipText(context))
+    }
+
+    @Test fun aNewlineOnlyMessageRendersAndCopiesWithoutCrashing() {
+        // The logcat parser can hand us continuation-only payloads; a blank body must not take the
+        // row down or produce a clipboard write of something other than the message.
+        lateinit var context: Context
+        compose.setContent {
+            context = LocalContext.current
+            DiagnosticsLogRow(
+                entry = entry(message = "\n\n\n"),
+                expanded = true,
+                onToggleExpanded = {},
+                zone = utc,
+            )
+        }
+
+        compose.onNodeWithTag(DiagnosticsRowTags.COPY, useUnmergedTree = true).performClick()
+        compose.waitForIdle()
+        assertEquals("\n\n\n", clipText(context))
+    }
+
+    @Test fun anRtlMessageIsDisplayedAndCopiedIntact() {
+        val message = "فشل فتح الكتاب — Authorization: Bearer sk-live-RtlSecret1234567890 — HTTP 401"
+        lateinit var context: Context
+        compose.setContent {
+            context = LocalContext.current
+            DiagnosticsLogRow(
+                entry = entry(message = message),
+                expanded = true,
+                onToggleExpanded = {},
+                zone = utc,
+            )
+        }
+
+        assertEquals(message, messageText())
+        compose.onNodeWithTag(DiagnosticsRowTags.COPY, useUnmergedTree = true).performClick()
+        compose.waitForIdle()
+        val clip = clipText(context)
+
+        assertNotNull(clip)
+        assertFalse(clip!!.contains("sk-live-RtlSecret1234567890"))
+        assertTrue(clip.contains(DiagnosticsRedactor.PLACEHOLDER))
+        // The Arabic context survives — redaction is anchored on the credential, not the script.
+        assertTrue(clip.contains("فشل فتح الكتاب"))
+    }
+
+    @Test fun aTruncationSizedMessageStillRedactsOnCopy() {
+        // logd truncates a payload at 4068 bytes; the tail is where a credential can end up sitting.
+        val filler = "context ".repeat(500)
+        val message = (filler + "Authorization: Bearer sk-live-TailSecret0987654321").take(4068)
+        lateinit var context: Context
+        compose.setContent {
+            context = LocalContext.current
+            DiagnosticsLogRow(
+                entry = entry(message = message),
+                expanded = true,
+                onToggleExpanded = {},
+                zone = utc,
+            )
+        }
+
+        compose.onNodeWithTag(DiagnosticsRowTags.COPY, useUnmergedTree = true).performClick()
+        compose.waitForIdle()
+        val clip = clipText(context)
+
+        assertNotNull(clip)
+        assertFalse(clip!!.contains("sk-live-TailSecret0987654321"))
+        assertTrue(clip.contains(DiagnosticsRedactor.PLACEHOLDER))
+    }
+
+    @Test fun repeatedCopyTapsLeaveTheRedactedTextOnTheClipboard() {
+        val secret = "sk-live-RepeatTap1234567890abc"
+        lateinit var context: Context
+        compose.setContent {
+            context = LocalContext.current
+            DiagnosticsLogRow(
+                entry = entry(message = "retry — Authorization: Bearer $secret — attempt 3/5"),
+                expanded = true,
+                onToggleExpanded = {},
+                zone = utc,
+            )
+        }
+
+        repeat(5) {
+            compose.onNodeWithTag(DiagnosticsRowTags.COPY, useUnmergedTree = true).performClick()
+        }
+        compose.waitForIdle()
+        val clip = clipText(context)
+
+        assertNotNull(clip)
+        assertFalse(clip!!.contains(secret))
+        assertTrue(clip.contains(DiagnosticsRedactor.PLACEHOLDER))
+        assertTrue(clip.contains("attempt 3/5"))
     }
 
     @Test fun theLastRowOmitsTheDivider() {

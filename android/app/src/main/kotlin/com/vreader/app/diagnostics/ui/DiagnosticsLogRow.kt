@@ -62,6 +62,18 @@ import java.util.Locale
  * - **`maxLines` IS the design's 3-line clamp** (`WebkitLineClamp: 3`); expansion lifts it. The
  *   collapsed height is asserted against the line height rather than trusted.
  *
+ * Accepted, NOT mitigated (Gate-4 round 1, both are design-owned decisions this WI may not make):
+ * - The design's `Icons.Copy` is REFERENCED at `vreader-diagnostics.jsx:295` but is not defined in
+ *   the committed icon set, so no committed glyph path exists to transcribe. The affordance itself
+ *   IS designed (position, 11px size, accent color, "Copy entry" label); only the glyph outline is
+ *   missing, and the platform copy glyph is what this app already ships for a copy affordance
+ *   (`SelectionPopover`, `BookDetailsRows`). Substituting it renders LESS invention than omitting a
+ *   depicted element; flagged for the design bundle to close.
+ * - The designed control heights (a ~26dp chip, a ~25dp Copy pill) are below the 48dp accessibility
+ *   touch-target guidance. Growing them would change the depicted geometry and the row's vertical
+ *   rhythm, which is exactly what rule 51 reserves to the design; the whole row is a large tap
+ *   target for the expand/collapse gesture, so only the Copy pill is small.
+ *
  * @coordinates-with DiagnosticsLevelStyle.kt, DiagnosticsRedactor.kt, DiagnosticsCategoryBounding.kt,
  *   DiagnosticsDayGrouper.kt, `dev-docs/designs/vreader-fidelity-v1/project/vreader-diagnostics.jsx`
  */
@@ -144,13 +156,15 @@ fun DiagnosticsLogRow(
             .testTag(DiagnosticsRowTags.ROW),
     ) {
         Column(Modifier.padding(start = 18.dp, end = 18.dp, top = 9.dp, bottom = 10.dp)) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
+            // The design aligns the meta line on the TEXT BASELINE (`alignItems: 'baseline'`), which
+            // matters here because its three elements are three different sizes (10.5 / 10 / 9.5sp);
+            // centering them would leave the timestamp and the level token visibly astride.
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
                     time,
-                    modifier = Modifier.testTag(DiagnosticsRowTags.TIME),
+                    modifier = Modifier
+                        .alignByBaseline()
+                        .testTag(DiagnosticsRowTags.TIME),
                     color = tokens.sub,
                     fontFamily = DiagnosticsFonts.Mono,
                     fontSize = 10.5.sp,
@@ -158,6 +172,7 @@ fun DiagnosticsLogRow(
                 Text(
                     levelToken(entry.level),
                     modifier = Modifier
+                        .alignByBaseline()
                         .testTag(DiagnosticsRowTags.LEVEL)
                         .semantics { diagnosticsColor = levelColor.toArgb() },
                     color = levelColor,
@@ -169,6 +184,7 @@ fun DiagnosticsLogRow(
                 Text(
                     category,
                     modifier = Modifier
+                        .alignByBaseline()
                         .clip(RoundedCornerShape(4.dp))
                         .background(tokens.pill)
                         .padding(horizontal = 6.dp, vertical = 1.5.dp)
@@ -208,8 +224,11 @@ fun DiagnosticsLogRow(
 }
 
 /**
- * The expanded row's single action. It writes `redact(message)` — never [message] itself — and takes
- * no caller callback, so no call site can put an unredacted entry on the clipboard.
+ * The expanded row's single action. It writes `redact(message)` — never [message] itself — and
+ * exposes no callback through which a caller could substitute the payload, so the redaction cannot
+ * be bypassed through this component's API. (It is NOT, and cannot be, a guarantee about code that
+ * does not exist yet: a future share/upload path is a NEW egress and owes its own redaction —
+ * Gate-4 round 1 was right that the earlier wording overstated this.)
  *
  * Uses the platform [ClipboardManager] (the house pattern — `ReaderActivity.copyFingerprint`) rather
  * than Compose's `LocalClipboardManager`, which is deprecated on the resolved Compose classpath.

@@ -21,11 +21,15 @@ import com.vreader.app.diagnostics.DiagnosticsLevel
  * - **Level color is FUNCTIONAL, not decorative** — error = warm red, info = cool blue, debug = the
  *   theme's `sub`. The exact RGB is the design's, per theme, and is asserted in the connected tests.
  * - **Six Android priorities map onto the design's THREE row treatments, inventing no token.**
- *   `WARN` renders with the DEBUG treatment (plan section 6.3's interim, pending the designed Warn
- *   treatment filed as GH #2021 — option (i): under-state severity rather than paint every one of
- *   this app's `Log.w` breadcrumbs red or invent a fourth token). `VERBOSE` folds into `DEBUG` and
- *   `ASSERT` rides with `ERROR` for the same reason, matching the level SETS the filter chips use.
- *   The TRUE level is never lost — the export payload carries `[WARN]` / `[ASSERT]` verbatim.
+ *   `WARN` renders with the DEBUG treatment — that one is plan section 6.3's adjudicated interim,
+ *   pending the designed Warn treatment filed as GH #2021 (option (i): under-state severity rather
+ *   than paint every one of this app's `Log.w` breadcrumbs red or invent a fourth token).
+ *   `VERBOSE → DEBUG` and `ASSERT → ERROR` are the IMPLEMENTER's extension of the same principle
+ *   (Gate-4 round 1 correctly noted the plan adjudicates only `WARN`): both keep the row inside the
+ *   design's three-token vocabulary and agree with the level SETS the chips already filter by
+ *   (`Errors = {ERROR, ASSERT}`, `Debug = {VERBOSE, DEBUG}`), so the row a chip selects never shows
+ *   a treatment that contradicts the chip. The TRUE level is never lost — the export payload carries
+ *   `[VERBOSE]` / `[WARN]` / `[ASSERT]` verbatim.
  * - **[DiagnosticsColorKey] is a test-observability seam, exactly like a `testTag`.** A color is
  *   otherwise invisible to the semantics tree, so "the Errors chip takes the error tint" could only
  *   be checked by capturing pixels (flaky) or not at all. It carries the ARGB the node actually
@@ -147,3 +151,13 @@ val LocalDiagnosticsTokens = staticCompositionLocalOf { DiagnosticsTokens.Light 
 val DiagnosticsColorKey = SemanticsPropertyKey<Int>("DiagnosticsColor")
 
 var SemanticsPropertyReceiver.diagnosticsColor by DiagnosticsColorKey
+
+/**
+ * The ARGB of a node's 0.5dp outline, published for the same reason as [DiagnosticsColorKey]: the
+ * design's INACTIVE chip is defined by its border, so a fill-only assertion would keep passing if
+ * the outline were deleted (Gate-4 round 1). An active chip publishes a TRANSPARENT border, because
+ * the design gives it one too — same box, same size, no jitter when a chip is selected.
+ */
+val DiagnosticsBorderColorKey = SemanticsPropertyKey<Int>("DiagnosticsBorderColor")
+
+var SemanticsPropertyReceiver.diagnosticsBorderColor by DiagnosticsBorderColorKey

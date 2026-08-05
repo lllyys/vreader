@@ -3,10 +3,13 @@ package com.vreader.app.diagnostics.ui
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -78,6 +81,11 @@ class DiagnosticsFilterBarTest {
     private fun assertChipFill(tag: String, expected: Int) {
         compose.onNodeWithTag(tag, useUnmergedTree = true)
             .assert(SemanticsMatcher.expectValue(DiagnosticsColorKey, expected))
+    }
+
+    private fun assertChipBorder(tag: String, expected: Int) {
+        compose.onNodeWithTag(tag, useUnmergedTree = true)
+            .assert(SemanticsMatcher.expectValue(DiagnosticsBorderColorKey, expected))
     }
 
     // ───────────────────────────────────────────────────────── chips + counts
@@ -152,19 +160,87 @@ class DiagnosticsFilterBarTest {
     @Test fun inactiveChipsTakeTheOutlinedForm() {
         showBar(state(level = DiagnosticsLevelFilter.ALL))
 
+        // Outlined = transparent FILL *and* a rule-colored 0.5dp OUTLINE. Asserting only the fill
+        // would keep passing with the outline deleted (Gate-4 round 1).
         assertChipFill(
             DiagnosticsFilterTags.levelChip(DiagnosticsLevelFilter.ERRORS),
             Color.Transparent.toArgb(),
+        )
+        assertChipBorder(
+            DiagnosticsFilterTags.levelChip(DiagnosticsLevelFilter.ERRORS),
+            DiagnosticsTokens.Light.rule.toArgb(),
         )
         assertChipFill(
             DiagnosticsFilterTags.levelChip(DiagnosticsLevelFilter.DEBUG),
             Color.Transparent.toArgb(),
         )
-        // …and the ACTIVE `All` chip is the inverted-ink pill, not the error tint.
+        assertChipBorder(
+            DiagnosticsFilterTags.levelChip(DiagnosticsLevelFilter.DEBUG),
+            DiagnosticsTokens.Light.rule.toArgb(),
+        )
+        // …and the ACTIVE `All` chip is the inverted-ink pill, not the error tint — with the
+        // design's TRANSPARENT border, so selecting a chip does not resize it.
         assertChipFill(
             DiagnosticsFilterTags.levelChip(DiagnosticsLevelFilter.ALL),
             DiagnosticsTokens.Light.ink.toArgb(),
         )
+        assertChipBorder(
+            DiagnosticsFilterTags.levelChip(DiagnosticsLevelFilter.ALL),
+            Color.Transparent.toArgb(),
+        )
+    }
+
+    @Test fun selectingAChipDoesNotResizeIt() {
+        // The active and inactive forms must occupy the same box (the design gives both a 0.5px
+        // border); otherwise the whole row shifts every time the user changes a filter.
+        showBar(state(level = DiagnosticsLevelFilter.ALL))
+
+        val activeAll = compose
+            .onNodeWithTag(DiagnosticsFilterTags.levelChip(DiagnosticsLevelFilter.ALL), true)
+            .fetchSemanticsNode().size
+        val inactiveInfo = compose
+            .onNodeWithTag(DiagnosticsFilterTags.levelChip(DiagnosticsLevelFilter.INFO), true)
+            .fetchSemanticsNode().size
+        assertEquals(
+            "the active and inactive chip forms have different heights",
+            activeAll.height,
+            inactiveInfo.height,
+        )
+    }
+
+    @Test fun everyLevelChipStaysReachableAtALargeFontScale() {
+        // At fontScale 2 the four chips overflow a phone's width. The design draws a plain flex row,
+        // but an overflowing fixed row would strand `Info` off-screen with no way to clear a filter.
+        compose.setContent {
+            val base = LocalDensity.current
+            CompositionLocalProvider(
+                LocalDensity provides Density(base.density, fontScale = 2f),
+            ) {
+                DiagnosticsFilterBar(
+                    state = state(),
+                    onSelectLevel = {},
+                    onSelectCategory = {},
+                )
+            }
+        }
+
+        DiagnosticsLevelFilter.entries.forEach { filter ->
+            compose.onNodeWithTag(DiagnosticsFilterTags.levelChip(filter), useUnmergedTree = true)
+                .performScrollTo()
+                .assertIsDisplayed()
+        }
+    }
+
+    @Test fun blankAndDuplicateCategoryChipsAreDropped() {
+        // `DiagnosticsCategoryBounding` cannot emit either today; a blank chip would be an
+        // unlabelled tap target and a duplicate would produce two identically-acting chips.
+        showBar(state(chips = listOf(DiagnosticsCategoryBounding.ALL, "", "  ", "Reader", "Reader")))
+
+        compose.onAllNodesWithText("Reader", useUnmergedTree = true).assertCountEquals(1)
+        compose.onNodeWithTag(DiagnosticsFilterTags.categoryChip(""), useUnmergedTree = true)
+            .assertDoesNotExist()
+        compose.onNodeWithTag(DiagnosticsFilterTags.categoryChip("  "), useUnmergedTree = true)
+            .assertDoesNotExist()
     }
 
     @Test fun theActiveCategoryChipTakesTheInvertedInkPill() {

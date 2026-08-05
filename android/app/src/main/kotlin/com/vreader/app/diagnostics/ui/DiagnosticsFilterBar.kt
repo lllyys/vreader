@@ -45,6 +45,16 @@ import com.vreader.app.diagnostics.DiagnosticsUiState
  *   `horizontalScroll` (not a `LazyRow`) is deliberate: the row is capped at
  *   `DiagnosticsCategoryBounding.MAX_CATEGORY_CHIPS + 1` chips, so laziness buys nothing and would
  *   cost off-screen chips their place in the semantics tree.
+ * - **The LEVEL row scrolls too, though the design draws it as a plain flex row** (Gate-4 round 1
+ *   High). Four chips plus their counts fit at the designed text size, but at a large accessibility
+ *   font scale — or on a narrow device — the trailing chips overflow the viewport and become
+ *   permanently unreachable, which is a filter a user cannot clear. Scrolling engages ONLY on
+ *   overflow, so at the designed scale the row is pixel-identical to the artboards; nothing visible
+ *   is invented. Asserted at `fontScale = 2f`.
+ * - **The chip list is defended against blank and duplicate labels.** `DiagnosticsCategoryBounding`
+ *   cannot emit either today, but a blank chip renders as an unlabelled tap target and a duplicate
+ *   produces two identically-tagged, identically-acting chips. Filtering here keeps a malformed
+ *   upstream state from becoming an untappable UI.
  * - **No `Warn` chip.** The design has four level chips and plan section 6.3 keeps it that way
  *   pending GH #2021; warn-level entries stay reachable under `All`.
  *
@@ -81,7 +91,9 @@ fun DiagnosticsFilterBar(
         Row(
             Modifier
                 .fillMaxWidth()
-                .padding(start = 18.dp, end = 18.dp, top = 12.dp)
+                .padding(top = 12.dp)
+                .horizontalScroll(rememberScrollState())
+                .padding(start = 18.dp, end = 18.dp)
                 .testTag(DiagnosticsFilterTags.LEVEL_ROW),
             horizontalArrangement = Arrangement.spacedBy(7.dp),
         ) {
@@ -106,7 +118,7 @@ fun DiagnosticsFilterBar(
                 .testTag(DiagnosticsFilterTags.CATEGORY_ROW),
             horizontalArrangement = Arrangement.spacedBy(7.dp),
         ) {
-            state.categoryChips.forEach { chip ->
+            state.categoryChips.filter { it.isNotBlank() }.distinct().forEach { chip ->
                 DiagnosticsChip(
                     label = chip,
                     count = null,
@@ -141,6 +153,9 @@ private fun DiagnosticsChip(
 ) {
     val tokens = LocalDiagnosticsTokens.current
     val fill = if (active) (tint ?: tokens.ink) else Color.Transparent
+    // The design gives the ACTIVE chip a 0.5px TRANSPARENT border, not no border: both forms occupy
+    // the same box, so a chip does not resize the row when it is selected.
+    val outline = if (active) Color.Transparent else tokens.rule
     val content = when {
         !active -> tokens.sub
         tint != null -> Color.White
@@ -150,14 +165,14 @@ private fun DiagnosticsChip(
         Modifier
             .clip(RoundedCornerShape(percent = 50))
             .background(fill)
-            .then(
-                if (active) Modifier
-                else Modifier.border(0.5.dp, tokens.rule, RoundedCornerShape(percent = 50)),
-            )
+            .border(0.5.dp, outline, RoundedCornerShape(percent = 50))
             .clickable(onClick = onClick)
             .padding(horizontal = 11.dp, vertical = 5.dp)
             .testTag(tag)
-            .semantics { diagnosticsColor = fill.toArgb() },
+            .semantics {
+                diagnosticsColor = fill.toArgb()
+                diagnosticsBorderColor = outline.toArgb()
+            },
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(5.dp),
     ) {
