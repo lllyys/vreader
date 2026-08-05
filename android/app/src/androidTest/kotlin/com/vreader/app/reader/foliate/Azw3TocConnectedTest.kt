@@ -74,7 +74,16 @@ class Azw3TocConnectedTest {
     private var document: Azw3Document? = null
     private val extraWebViews = CopyOnWriteArrayList<WebView>()
 
-    @Volatile private var latestRelocate: FoliateMessage.Relocate? = null
+    /**
+     * The latest position report, tagged with a monotonic sequence number. The tag is what lets an
+     * assertion bind to ONE relocate EVENT rather than to whatever the latest sample happens to be:
+     * a "the position changed" check and a "it landed in the tapped chapter" check made against two
+     * different relocates would leave a hole for drift-then-settle to satisfy both (Gate-4 R1 #1).
+     * Written only on the main thread (`onRelocate`), read from the instrumentation thread.
+     */
+    private data class Reported(val seq: Long, val relocate: FoliateMessage.Relocate)
+
+    @Volatile private var reported: Reported? = null
 
     @After
     fun tearDown() {
@@ -146,19 +155,37 @@ class Azw3TocConnectedTest {
     fun realBook_goToTocHref_CHANGES_theReportedPosition() {
         val doc = openRealBookOrSkip()
         val rows = rowsFor(doc.state.value as Azw3DocState.Loaded)
-        val before = settledRelocate()
+        val settled = settledReport()
+        val before = settled.relocate
+        // The opening chapter must be KNOWN, or "pick a row we are not already in" below is inert and
+        // the whole test could be jumping to where the reader already stands.
+        assertNotNull(
+            "the opening relocate carried no tocHref — the current chapter is unknown, so the " +
+                "avoid-the-opening-chapter guard would be inert",
+            before.tocHref,
+        )
         val target = pickMiddleRow(rows, avoidHref = before.tocHref)
         val targetHref = requireNotNull(target.canonicalLocator.href)
+        assertTrue("the target row is the chapter the reader is already in", targetHref != before.tocHref)
         val beforeFraction = requireNotNull(before.fraction) { "no fraction in the pre-jump relocate" }
         Log.i(TAG, "jumping to '${target.title}' href=$targetHref from ${before.pos()}")
 
         runBlocking { withContext(Dispatchers.Main) { doc.goTo(target.canonicalLocator) } }
 
-        awaitUntil(RELOCATE_TIMEOUT_MS, "a relocate reporting a position different from ${before.pos()}") {
-            latestRelocate?.pos() != before.pos()
+        // ONE relocate event, newer than the settled one, must satisfy ALL THREE predicates together.
+        // Split across two events they would be satisfiable by drift-somewhere-else followed by a
+        // later report of the target chapter (Gate-4 R1 #1); bound to one event they are not.
+        val after = awaitReport(
+            since = settled.seq,
+            timeoutMs = RELOCATE_TIMEOUT_MS,
+            what = "ONE relocate that moved, moved FORWARD, and reports the tapped chapter ($targetHref)",
+        ) { r ->
+            r.pos() != before.pos() && (r.fraction ?: Double.NEGATIVE_INFINITY) > beforeFraction &&
+                r.tocHref == targetHref
         }
-        val after = latestRelocate!!
-        Log.i(TAG, "post-jump position ${after.pos()}")
+        Log.i(TAG, "post-jump position ${after.pos()} tocHref=${after.tocHref}")
+
+        // Restated individually so the record says what was proven, not merely that a predicate held.
         assertTrue(
             "the reported position did not change — the chapter jump moved nothing " +
                 "(before=${before.pos()} after=${after.pos()})",
@@ -170,28 +197,25 @@ class Azw3TocConnectedTest {
                 "position is the Fraction(0.0) failure shape (before=$beforeFraction after=$afterFraction)",
             afterFraction > beforeFraction,
         )
-        // ...and it moved to THE TAPPED CHAPTER's neighbourhood, not merely somewhere else: a reader
-        // that had drifted forward on its own would satisfy every assertion above but not this one.
-        awaitUntil(RELOCATE_TIMEOUT_MS, "the settled position to report the tapped chapter ($targetHref)") {
-            latestRelocate?.tocHref == targetHref
-        }
         assertEquals(
-            "the position changed but landed outside the tapped chapter",
-            targetHref, latestRelocate!!.tocHref,
+            "the position changed but landed outside the tapped chapter — that is drift, not a jump",
+            targetHref, after.tocHref,
         )
     }
 
     /**
      * THE NEGATIVE CONTROL. An href no chapter carries must NOT move the reader — otherwise
      * "position changed" above could be drift, a late settle or a re-render rather than the jump.
-     * The second half then drives a REAL row through the SAME document and the SAME observation
-     * window: if that moves, the window was long enough and the no-change verdict was earned.
+     * The second half then drives a REAL row through the SAME document and — critically — the SAME
+     * [OBSERVE_WINDOW_MS] budget the no-change verdict was reached under (Gate-4 R1 #3: a liveness
+     * proof given a longer window would not prove the shorter one was long enough).
      */
     @Test
     fun realBook_goToBogusHref_doesNOTChangePosition() {
         val doc = openRealBookOrSkip()
         val rows = rowsFor(doc.state.value as Azw3DocState.Loaded)
-        val before = settledRelocate()
+        val settled = settledReport()
+        val before = settled.relocate
         val identity = bookIdentity()
         val bogus = Locator(
             contentSHA256 = identity.contentSHA256,
@@ -207,7 +231,7 @@ class Azw3TocConnectedTest {
 
         val deadline = System.currentTimeMillis() + OBSERVE_WINDOW_MS
         while (System.currentTimeMillis() < deadline) {
-            val now = latestRelocate!!
+            val now = reported!!.relocate
             assertEquals(
                 "an unresolvable href moved the reader (before=${before.pos()} now=${now.pos()})",
                 before.pos(), now.pos(),
@@ -215,13 +239,17 @@ class Azw3TocConnectedTest {
             Thread.sleep(POLL_MS)
         }
 
-        // Liveness: the same document + the same window DOES observe a real jump, so the assertion
-        // above was a genuine no-change and not a wedged reader or too short an observation.
+        // Liveness, under the SAME budget: a real chapter jump lands within OBSERVE_WINDOW_MS, so the
+        // window above was long enough and the no-change verdict was earned rather than under-observed.
         val target = pickMiddleRow(rows, avoidHref = before.tocHref)
+        val targetHref = requireNotNull(target.canonicalLocator.href)
         runBlocking { withContext(Dispatchers.Main) { doc.goTo(target.canonicalLocator) } }
-        awaitUntil(RELOCATE_TIMEOUT_MS, "a real chapter jump to move the reader (control liveness)") {
-            latestRelocate?.pos() != before.pos()
-        }
+        awaitReport(
+            since = settled.seq,
+            timeoutMs = OBSERVE_WINDOW_MS,
+            what = "a REAL chapter jump to land within the same ${OBSERVE_WINDOW_MS}ms the bogus href " +
+                "was observed for (control liveness)",
+        ) { r -> r.pos() != before.pos() && r.tocHref == targetHref }
     }
 
     /** Criteria 4 + 5: the landing chapter is the tapped one, and the highlight follows it. */
@@ -229,24 +257,29 @@ class Azw3TocConnectedTest {
     fun realBook_goToTocHref_thenRelocateTocHref_matchesThatEntry() {
         val doc = openRealBookOrSkip()
         val rows = rowsFor(doc.state.value as Azw3DocState.Loaded)
-        val before = settledRelocate()
-        val target = pickMiddleRow(rows, avoidHref = before.tocHref)
+        val settled = settledReport()
+        val target = pickMiddleRow(rows, avoidHref = settled.relocate.tocHref)
         val targetHref = requireNotNull(target.canonicalLocator.href)
 
         runBlocking { withContext(Dispatchers.Main) { doc.goTo(target.canonicalLocator) } }
 
-        awaitUntil(RELOCATE_TIMEOUT_MS, "a relocate whose tocHref is the tapped entry's ($targetHref)") {
-            latestRelocate?.tocHref == targetHref
-        }
-        val after = latestRelocate!!
+        val after = awaitReport(
+            since = settled.seq,
+            timeoutMs = RELOCATE_TIMEOUT_MS,
+            what = "a relocate whose tocHref is the tapped entry's ($targetHref)",
+        ) { r -> r.tocHref == targetHref }
         assertEquals("foliate reports a different chapter than the one tapped", targetHref, after.tocHref)
 
-        val index = foliateTocIndexFor(after.tocHref, rows.map { it.canonicalLocator.href })
+        val hrefs = rows.map { it.canonicalLocator.href }
+        val index = foliateTocIndexFor(after.tocHref, hrefs)
         Log.i(TAG, "highlight index after jump = $index for href=$targetHref")
         assertTrue("the highlight fell back to row 0 instead of the tapped chapter", index > 0)
+        // The contract is last-match-wins (a part and its first chapter legitimately share an href),
+        // so the exact row to expect is the LAST one carrying the tapped href — asserting a plain
+        // href match would be weaker than the contract the highlight actually promises.
         assertEquals(
-            "the highlighted row is not the tapped chapter",
-            targetHref, rows[index].canonicalLocator.href,
+            "the highlighted row is not the one foliateTocIndexFor's last-match-wins rule defines",
+            hrefs.indexOfLast { it == targetHref }, index,
         )
     }
 
@@ -255,6 +288,11 @@ class Azw3TocConnectedTest {
      * number was ~100x wrong on device. `book-ready` parsing runs on the WebView callback (main)
      * thread, so the parse is re-timed THERE over a payload rebuilt from — and asserted equal to —
      * the real book's own tree. The flatten is timed on the provider's injected dispatcher.
+     *
+     * Timed in MICROseconds over [COST_SAMPLES] iterations, because a millisecond clock reports this
+     * work as `0` and any ceiling against `0` is decoration (Gate-4 R1 #7). The ceiling is the ONE
+     * principled number available: [MAIN_THREAD_BUDGET_US], ~3 dropped frames at 60 Hz — past that,
+     * a book-ready parse is visible jank on the thread that paints.
      */
     @Test
     fun realBook_tocParseAndFlatten_areLogged_withElapsedMs() {
@@ -263,11 +301,12 @@ class Azw3TocConnectedTest {
         val raw = """{"name":"book-ready","detail":{"title":"t","sections":1,"toc":${tocJson(loaded.toc)}}}"""
 
         var parsed: FoliateMessage.BookReady? = null
-        var parseMs = 0L
+        var parseUs = 0L
         inst.runOnMainSync {
+            parsed = FoliateMessageParser.parse(raw) as? FoliateMessage.BookReady // warm the code path
             val start = System.nanoTime()
-            parsed = FoliateMessageParser.parse(raw) as? FoliateMessage.BookReady
-            parseMs = (System.nanoTime() - start) / 1_000_000
+            repeat(COST_SAMPLES) { FoliateMessageParser.parse(raw) }
+            parseUs = (System.nanoTime() - start) / 1_000 / COST_SAMPLES
         }
         assertNotNull("the rebuilt book-ready did not parse", parsed)
         assertEquals(
@@ -276,13 +315,23 @@ class Azw3TocConnectedTest {
         )
 
         val book = bookIdentity()
+        val provider = FoliateTocProvider(loaded.toc, book, Dispatchers.Default)
+        val rows = runBlocking { provider.toc() } // warm
         val startFlatten = System.nanoTime()
-        val rows = runBlocking { FoliateTocProvider(loaded.toc, book, Dispatchers.Default).toc() }
-        val flattenMs = (System.nanoTime() - startFlatten) / 1_000_000
+        runBlocking { repeat(COST_SAMPLES) { provider.toc() } }
+        val flattenUs = (System.nanoTime() - startFlatten) / 1_000 / COST_SAMPLES
 
-        Log.i(TAG, "TIMINGS: rows=${rows.size} payloadBytes=${raw.length} parseMs=$parseMs flattenMs=$flattenMs")
-        assertTrue("the on-device book-ready parse took ${parseMs}ms", parseMs < COST_CEILING_MS)
-        assertTrue("the on-device TOC flatten took ${flattenMs}ms", flattenMs < COST_CEILING_MS)
+        Log.i(
+            TAG,
+            "TIMINGS (mean of $COST_SAMPLES): rows=${rows.size} payloadBytes=${raw.length} " +
+                "parseUs=$parseUs flattenUs=$flattenUs (main-thread budget ${MAIN_THREAD_BUDGET_US}us)",
+        )
+        assertTrue(
+            "the on-device book-ready parse of the real TOC took ${parseUs}us — past the " +
+                "${MAIN_THREAD_BUDGET_US}us main-thread budget it is visible jank at book open",
+            parseUs < MAIN_THREAD_BUDGET_US,
+        )
+        assertTrue("the on-device TOC flatten took ${flattenUs}us", flattenUs < MAIN_THREAD_BUDGET_US)
     }
 
     // ---- hostile PAYLOADS through the production message channel (fixture-independent) -----------
@@ -336,6 +385,12 @@ class Azw3TocConnectedTest {
 
     private fun openRealBookOrSkip(): Azw3Document {
         val present = inst.context.assets.list("foliate-spike")?.contains("book.azw3") == true
+        if (!present) {
+            // LOUD, because a skip exits 0 exactly like a pass: the run log must make an unverified
+            // WI-7 unmistakable to whoever reads it (plan R7 — bug #369's precedent).
+            Log.e(TAG, "FIXTURE MISSING: androidTest assets foliate-spike/book.azw3 — every real-book " +
+                "case in this class is SKIPPING and this run verifies NOTHING about the AZW3 TOC")
+        }
         assumeTrue(
             "local-only foliate-spike/book.azw3 absent — WI-7 verifies NOTHING without it (plan R7)",
             present,
@@ -345,7 +400,7 @@ class Azw3TocConnectedTest {
         inst.runOnMainSync {
             val wv = WebView(inst.targetContext).also(::forceViewport)
             doc = Azw3Document(wv, file, inst.targetContext)
-            doc.onRelocate = { latestRelocate = it }
+            doc.onRelocate = { r -> reported = Reported((reported?.seq ?: 0L) + 1L, r) }
         }
         document = doc
         scope.launch { doc.run(restore = null) }
@@ -355,12 +410,12 @@ class Azw3TocConnectedTest {
         return doc
     }
 
+    /** Always re-staged from the TEST APK's assets: a cached copy could be a DIFFERENT book than the
+     *  one this APK ships, which would silently decouple the evidence from the artifact under test. */
     private fun realBookFile(): File {
         val file = File(inst.targetContext.cacheDir, "wi7-book.azw3")
-        if (!file.isFile || file.length() == 0L) {
-            inst.context.assets.open("foliate-spike/book.azw3").use { input ->
-                file.outputStream().use { input.copyTo(it) }
-            }
+        inst.context.assets.open("foliate-spike/book.azw3").use { input ->
+            file.outputStream().use { input.copyTo(it) }
         }
         return file
     }
@@ -400,18 +455,62 @@ class Azw3TocConnectedTest {
             ?: throw AssertionError("every TOC row shares the opening chapter's href — nothing to jump to")
     }
 
-    /** The position foliate reports, after it stops changing on its own (drift must not read as a jump). */
-    private fun settledRelocate(): FoliateMessage.Relocate {
-        awaitUntil(OPEN_TIMEOUT_MS, "the first relocate") { latestRelocate != null }
-        var last = latestRelocate!!
+    /**
+     * The position foliate reports once it has HELD STILL for a continuous [SETTLE_HOLD_MS] — the
+     * same window the negative control watches an unresolvable jump for, so "the reader was not
+     * drifting before the jump" and "the reader does not move on its own" are established over the
+     * same budget. A single unchanged sample is not enough: a delayed layout/settle relocate
+     * arriving after it would be indistinguishable from the jump (Gate-4 R1 #2).
+     */
+    private fun settledReport(): Reported {
+        awaitUntil(OPEN_TIMEOUT_MS, "the first relocate") { reported != null }
         val deadline = System.currentTimeMillis() + SETTLE_TIMEOUT_MS
         while (System.currentTimeMillis() < deadline) {
-            Thread.sleep(STABLE_WINDOW_MS)
-            val now = latestRelocate!!
-            if (now.pos() == last.pos()) return now
-            last = now
+            val candidate = reported!!
+            val holdUntil = System.currentTimeMillis() + SETTLE_HOLD_MS
+            var held = true
+            while (System.currentTimeMillis() < holdUntil) {
+                Thread.sleep(POLL_MS)
+                if (reported!!.relocate.pos() != candidate.relocate.pos()) {
+                    held = false
+                    break
+                }
+            }
+            // Return the LATEST report, not `candidate`: an identical position re-reported during the
+            // hold still advances the sequence, and a stale seq would let that report satisfy a later
+            // "newer than the settled one" await.
+            if (held) return reported!!
         }
-        throw AssertionError("the reported position never settled within ${SETTLE_TIMEOUT_MS}ms (last=${last.pos()})")
+        throw AssertionError(
+            "the reported position never held still for ${SETTLE_HOLD_MS}ms within ${SETTLE_TIMEOUT_MS}ms " +
+                "(last=${reported?.relocate?.pos()})",
+        )
+    }
+
+    /**
+     * Await ONE relocate EVENT newer than [since] that satisfies [predicate], and return it. Binding
+     * a multi-part claim to a single event is what stops "it moved" and "it landed in chapter N"
+     * from being satisfiable by two different relocates (Gate-4 R1 #1).
+     */
+    private fun awaitReport(
+        since: Long,
+        timeoutMs: Long,
+        what: String,
+        predicate: (FoliateMessage.Relocate) -> Boolean,
+    ): FoliateMessage.Relocate {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < deadline) {
+            val snapshot = reported
+            if (snapshot != null && snapshot.seq > since && predicate(snapshot.relocate)) {
+                return snapshot.relocate
+            }
+            Thread.sleep(POLL_MS)
+        }
+        val last = reported
+        throw AssertionError(
+            "timed out after ${timeoutMs}ms waiting for $what; last report seq=${last?.seq} " +
+                "pos=${last?.relocate?.pos()} tocHref=${last?.relocate?.tocHref}",
+        )
     }
 
     private class Shell(val webView: WebView, val received: CopyOnWriteArrayList<FoliateMessage>)
@@ -505,16 +604,23 @@ class Azw3TocConnectedTest {
     private companion object {
         const val TAG = "Azw3TocWI7"
         const val POLL_MS = 200L
-        const val STABLE_WINDOW_MS = 1_200L
         const val OPEN_TIMEOUT_MS = 60_000L
         const val SETTLE_TIMEOUT_MS = 30_000L
         const val RELOCATE_TIMEOUT_MS = 30_000L
         const val PAYLOAD_TIMEOUT_MS = 30_000L
-        /** How long an unresolvable jump is watched for movement — comfortably past the 3 s goTo
-         *  budget, and proved sufficient by the same test's liveness half. */
-        const val OBSERVE_WINDOW_MS = 5_000L
-        /** A generous ceiling: the point is to catch a #139-scale (~100x) regression, not to pin a number. */
-        const val COST_CEILING_MS = 1_000L
+        /**
+         * ONE window, used for both halves of the drift argument: how long the pre-jump position must
+         * hold still, and how long an unresolvable jump is watched for movement. The negative
+         * control's liveness half lands a REAL jump inside this same budget, which is what proves the
+         * window is long enough (Gate-4 R1 #2/#3). Comfortably past the 3 s goTo ack budget.
+         */
+        const val SETTLE_HOLD_MS = 5_000L
+        const val OBSERVE_WINDOW_MS = SETTLE_HOLD_MS
+        /** Iterations the timings are averaged over — a millisecond clock reports this work as 0. */
+        const val COST_SAMPLES = 20
+        /** ~3 dropped frames at 60 Hz. The parse runs on the thread that paints, so this is the one
+         *  non-arbitrary ceiling available for it; the flatten reuses it as a sanity bound. */
+        const val MAIN_THREAD_BUDGET_US = 50_000L
         val NONCE = System.nanoTime()
     }
 }
