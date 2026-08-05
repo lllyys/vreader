@@ -99,7 +99,8 @@ fun ReaderSettings.foliateDisplayCss(): String {
         "p:not([style*='text-align' i]):not([align])" +
             ":not([class*='center' i])" +
             ":not([class~='right' i]):not([class*='text-right' i])" +
-            ":not([class*='align-right' i]):not([class*='right-align' i]) " +
+            ":not([class*='align-right' i]):not([class*='right-align' i])" +
+            ":not([class*='alignright' i]):not([class*='rightalign' i]) " +
             "{ text-align: justify !important; }",
     ).joinToString("\n")
 }

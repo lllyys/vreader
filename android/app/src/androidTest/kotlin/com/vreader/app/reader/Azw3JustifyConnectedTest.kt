@@ -18,7 +18,6 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.vreader.app.VReaderApp
 import com.vreader.app.data.Book
-import com.vreader.app.reader.settings.ReaderSettings
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
@@ -339,7 +338,7 @@ class Azw3JustifyConnectedTest {
                 assertTrue("the probe-element $label arm reported failure: $reading", reading.optBoolean("ok"))
                 val keys = listOf(
                     "plainAlign", "inlineAlign", "attrAlign", "classAlign",
-                    "upperAlign", "copyrightAlign", "alignRightAlign",
+                    "upperAlign", "copyrightAlign", "alignRightAlign", "noHyphenAlign",
                 )
                 for (key in keys) {
                     assertTrue(
@@ -393,6 +392,11 @@ class Azw3JustifyConnectedTest {
             assertTrue(
                 "an explicit align-right class must be exempt, got '${subject.optString("alignRightAlign")}'",
                 subject.optString("alignRightAlign") != "justify",
+            )
+            assertTrue(
+                "the no-hyphen `alignright` shape plain HTML/CSS exports emit must be exempt too, got " +
+                    "'${subject.optString("noHyphenAlign")}'",
+                subject.optString("noHyphenAlign") != "justify",
             )
             // The counter-case, and the reason the right guard is a TOKEN match: `copyright` contains
             // `right`, so a substring guard would silently leave ordinary front-matter prose ragged.
@@ -458,6 +462,7 @@ class Azw3JustifyConnectedTest {
                   mk('vreader-probe-upper','style','TEXT-ALIGN:center');
                   mk('vreader-probe-copyright','class','copyright');
                   mk('vreader-probe-alignright','class','align-right');
+                  mk('vreader-probe-nohyphen','class','alignright');
                   d.body.appendChild(host);
                 }
                 function el(id){return d.getElementById(id);}
@@ -481,6 +486,7 @@ class Azw3JustifyConnectedTest {
                   upperAlign:align('vreader-probe-upper'),
                   copyrightAlign:align('vreader-probe-copyright'),
                   alignRightAlign:align('vreader-probe-alignright'),
+                  noHyphenAlign:align('vreader-probe-nohyphen'),
                   plain:{rects:rects('vreader-probe-plain')}});
               }catch(e){return JSON.stringify({ok:false,error:String(e)});}
             })()

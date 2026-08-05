@@ -143,7 +143,8 @@ class Azw3DisplayCssTest {
                 "p:not([style*='text-align' i]):not([align])" +
                     ":not([class*='center' i])" +
                     ":not([class~='right' i]):not([class*='text-right' i])" +
-                    ":not([class*='align-right' i]):not([class*='right-align' i]) " +
+                    ":not([class*='align-right' i]):not([class*='right-align' i])" +
+                    ":not([class*='alignright' i]):not([class*='rightalign' i]) " +
                     "{ text-align: justify !important; }",
             ),
         )
@@ -161,7 +162,12 @@ class Azw3DisplayCssTest {
             rule.contains("[class*='right'"),
         )
         assertTrue("expected a token match on right, got: $rule", rule.contains("[class~='right' i]"))
-        for (shape in listOf("[class*='text-right' i]", "[class*='align-right' i]", "[class*='right-align' i]")) {
+        val shapes = listOf(
+            "[class*='text-right' i]", "[class*='align-right' i]", "[class*='right-align' i]",
+            // No-hyphen variants are what plain HTML/CSS exports emit (`class="alignright"`).
+            "[class*='alignright' i]", "[class*='rightalign' i]",
+        )
+        for (shape in shapes) {
             assertTrue("expected alignment-shaped guard $shape, got: $rule", rule.contains(shape))
         }
     }
@@ -186,6 +192,7 @@ class Azw3DisplayCssTest {
         val guards = listOf(
             "[style*='text-align' i]", "[class*='center' i]", "[class~='right' i]",
             "[class*='text-right' i]", "[class*='align-right' i]", "[class*='right-align' i]",
+            "[class*='alignright' i]", "[class*='rightalign' i]",
         )
         for (guard in guards) {
             assertTrue("guard $guard must be case-insensitive, got: $rule", rule.contains(guard))
