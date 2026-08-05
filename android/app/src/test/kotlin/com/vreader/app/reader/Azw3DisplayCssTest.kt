@@ -132,6 +132,118 @@ class Azw3DisplayCssTest {
         assertTrue("descendant reset should include legacy <font>, got:\n$css", css.contains("font { color: inherit !important; }") || css.contains(", font"))
     }
 
+    // ---- feature #156 WI-3: justify-by-default, scoped to guarded paragraphs ----
+
+    @Test
+    fun justifiesParagraphs_withTheIntentionalAlignmentGuards() {
+        val css = ReaderSettings().foliateDisplayCss()
+        assertTrue(
+            "expected a guarded p justify rule, got:\n$css",
+            css.contains(
+                "p:not([style*='text-align' i]):not([align])" +
+                    ":not([class*='center' i])" +
+                    ":not([class~='right' i]):not([class*='text-right' i])" +
+                    ":not([class*='align-right' i]):not([class*='right-align' i])" +
+                    ":not([class*='alignright' i]):not([class*='rightalign' i]) " +
+                    "{ text-align: justify !important; }",
+            ),
+        )
+    }
+
+    @Test
+    fun rightGuard_isTokenMatched_soCopyrightProseStillJustifies() {
+        // `copyright` CONTAINS `right`. A substring guard therefore silently skipped justification on
+        // every `<p class="copyright">` — ordinary prose in a very common front-matter class. The guard
+        // must be a token match plus explicit alignment-shaped patterns, never a bare `[class*=right]`.
+        val css = ReaderSettings().foliateDisplayCss()
+        val rule = css.lines().single { it.contains("text-align: justify") }
+        assertFalse(
+            "a bare substring guard on 'right' also matches 'copyright', got: $rule",
+            rule.contains("[class*='right'"),
+        )
+        assertTrue("expected a token match on right, got: $rule", rule.contains("[class~='right' i]"))
+        val shapes = listOf(
+            "[class*='text-right' i]", "[class*='align-right' i]", "[class*='right-align' i]",
+            // No-hyphen variants are what plain HTML/CSS exports emit (`class="alignright"`).
+            "[class*='alignright' i]", "[class*='rightalign' i]",
+        )
+        for (shape in shapes) {
+            assertTrue("expected alignment-shaped guard $shape, got: $rule", rule.contains(shape))
+        }
+    }
+
+    @Test
+    fun cssCarriesTheOwnershipSentinel() {
+        // The connected control arm reconstructs "production CSS minus one rule" from the blob actually
+        // live in the section document, and has to find OURS among the book's own stylesheets.
+        val css = ReaderSettings().foliateDisplayCss()
+        assertTrue("expected the ownership sentinel, got:\n$css", css.contains(VREADER_CSS_SENTINEL))
+        assertEquals("the sentinel must appear exactly once", 1, css.split(VREADER_CSS_SENTINEL).size - 1)
+        assertTrue("the sentinel must be a CSS comment so it is inert", VREADER_CSS_SENTINEL.startsWith("/*"))
+    }
+
+    @Test
+    fun justifyGuards_areCaseInsensitive() {
+        // CSS attribute-substring matching is case-sensitive WITHOUT the ` i` flag, so an unflagged
+        // guard would force-justify a paragraph the book centred as `style="TEXT-ALIGN:center"` or
+        // `class="Center"`. Each guarded attribute must carry the flag.
+        val css = ReaderSettings().foliateDisplayCss()
+        val rule = css.lines().single { it.contains("text-align: justify") }
+        val guards = listOf(
+            "[style*='text-align' i]", "[class*='center' i]", "[class~='right' i]",
+            "[class*='text-right' i]", "[class*='align-right' i]", "[class*='right-align' i]",
+            "[class*='alignright' i]", "[class*='rightalign' i]",
+        )
+        for (guard in guards) {
+            assertTrue("guard $guard must be case-insensitive, got: $rule", rule.contains(guard))
+        }
+        // `align` is a bare presence check — it has no value to case-fold, so it takes no flag.
+        assertTrue("the align attribute guard must remain a presence check, got: $rule", rule.contains(":not([align])"))
+    }
+
+    @Test
+    fun justifyRule_isScopedToParagraphs_neverHeadingsOrBody() {
+        // The rule is `p`-scoped ON PURPOSE. iOS #95 rejected `body { text-align: justify }` as too broad,
+        // and WI-2 measured the consequence of the broad shape on EPUB: ReadiumCSS's override targets
+        // `:root`, so headings INHERIT justification (effect E1c). Here headings and body must be untouched
+        // — which is what makes AC-7's "prose justifies while headings do not" achievable at all.
+        val css = ReaderSettings().foliateDisplayCss()
+        val justifyLines = css.lines().filter { it.contains("text-align: justify") }
+        assertEquals("exactly one justify rule expected, got:\n$css", 1, justifyLines.size)
+        val rule = justifyLines.single()
+        assertTrue("the justify rule must be p-scoped, got: $rule", rule.trimStart().startsWith("p:not("))
+        for (h in listOf("h1", "h2", "h3", "h4", "h5", "h6")) {
+            assertFalse("the justify rule must not target $h, got: $rule", rule.contains(h))
+        }
+        assertFalse("the justify rule must not target body, got: $rule", rule.contains("body"))
+        // `text-align-last` is deliberately NOT set: the engine leaves a paragraph's last line
+        // start-aligned by default, which is the no-stretched-final-line behaviour the plan relies on.
+        assertFalse("text-align-last must not be forced, got:\n$css", css.contains("text-align-last"))
+    }
+
+    @Test
+    fun justifyRule_isInvariantAcrossEverySetting() {
+        // Alignment is orthogonal to theme / family / size / spacing / margin (the T8 edge matrix).
+        for (theme in ReaderTheme.entries) {
+            for (family in ReaderFontFamily.entries) {
+                for (size in listOf(ReaderSettings.MIN_FONT_SIZE, 18f, ReaderSettings.MAX_FONT_SIZE)) {
+                    for (spacing in listOf(ReaderSettings.MIN_LINE_SPACING, ReaderSettings.MAX_LINE_SPACING)) {
+                        for (margin in listOf(ReaderSettings.MIN_MARGIN, ReaderSettings.MAX_MARGIN)) {
+                            val css = ReaderSettings(
+                                theme = theme, fontFamily = family, fontSizeSp = size,
+                                lineSpacing = spacing, marginDp = margin,
+                            ).foliateDisplayCss()
+                            assertEquals(
+                                "justify must be emitted exactly once for $theme/$family/$size/$spacing/$margin",
+                                1, css.lines().count { it.contains("text-align: justify") },
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // ---- determinism: same settings → byte-identical CSS (no set ordering / float jitter) ----
 
     @Test

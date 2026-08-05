@@ -4,7 +4,8 @@
 // resolve against the calibrated size), a descendant cascade-flatten (Kindle/MOBI carry per-element em
 // font-size + <font color> ink that would otherwise compound / survive a body rule), headings revert,
 // the serif/sans family stack, the theme's bg/ink hex, a descendant `color: inherit` reset for theme
-// parity, and the margin as `body { padding }`. Deterministic (byte-identical for equal settings). The
+// parity, the margin as `body { padding }`, and — feature #156 WI-3 — justify-by-default on guarded
+// paragraphs (`p` only, never body/headings). Deterministic (byte-identical for equal settings). The
 // JS-escape-safe injection wrapper is the SHARED `foliateSetStylesJs` in the foliate package (the same
 // seam FoliateBridge.setStyles runs, so the pinned escaping IS the production escaping).
 // Pure value types (JVM-unit-testable, Azw3DisplayCssTest) — no Android runtime beyond Compose Color.
@@ -25,6 +26,10 @@ import kotlin.math.roundToInt
 private const val SERIF_STACK = "Georgia, 'Source Serif 4', 'Songti SC', serif"
 private const val SANS_STACK = "'Helvetica Neue', Inter, 'PingFang SC', sans-serif"
 
+/** Identifies the injected blob as ours inside a section document that also carries the book's own
+ *  stylesheets. A CSS comment, so it is inert at render time. */
+const val VREADER_CSS_SENTINEL = "/* vreader-display-css:v1 */"
+
 /**
  * The deterministic foliate CSS blob for these display [ReaderSettings] — raw CSS (no `<style>` wrapper),
  * as `readerAPI.setStyles(css)` expects. Assumes clamped inputs (the [ReaderSettingsStore] clamps on read
@@ -43,6 +48,10 @@ fun ReaderSettings.foliateDisplayCss(): String {
 
     // Rule order is fixed → deterministic output. Mirrors iOS FoliateStyleMapper.themeCSS.
     return listOf(
+        // An ownership marker, not decoration: a connected test reconstructing "the production CSS minus
+        // one rule" has to find OUR injected <style> among the book's own, and matching on a rule's text
+        // is guessable — a publisher stylesheet could carry the same shape. Inert at render time.
+        VREADER_CSS_SENTINEL,
         // Base size + line-height on BOTH html and body so a book's rem/em CSS resolves against the
         // calibrated size, not the 16px UA root default (iOS bug #261 parity).
         "html, body { font-size: ${sizePx}px !important; line-height: $lineHeight !important; }",
@@ -66,6 +75,33 @@ fun ReaderSettings.foliateDisplayCss(): String {
         "body { background: $bg !important; }",
         // Horizontal (and matching vertical) reading margin as body padding.
         "body { padding: ${marginPx}px !important; margin: 0 !important; }",
+        // feature #156 WI-3 — justify-by-default (the designed body rendering; no control, no new UI).
+        // Scoped to `p` ON PURPOSE: `body { text-align: justify }` would be inherited by headings and
+        // layout wrappers (iOS #95 rejected it for that reason, and WI-2 MEASURED that outcome on EPUB,
+        // where ReadiumCSS's override targets `:root` and headings duly inherit justification). The
+        // `:not()` guards skip paragraphs the book aligned on purpose — they are the same heuristics iOS
+        // shipped, and they carry iOS's own caveat: verse-as-`<p>`, blockquote inner prose, and
+        // faux-headings with an unusual class are NOT covered. A paragraph's last line stays
+        // start-aligned by the engine's own `text-align-last: auto` default, so nothing forces a
+        // stretched final line.
+        // The ` i` flag makes the attribute matches CASE-INSENSITIVE. CSS attribute value matching is
+        // case-sensitive by default, so an unflagged guard would justify a paragraph the book had
+        // deliberately centred via `style="TEXT-ALIGN:center"` or `class="Center"` — real shapes in
+        // hand-authored and converted Kindle markup. Single quotes (never double) keep the blob free of
+        // the injection breakers `cssHasNoInjectionBreakers_fromSettingsDerivedValues` pins.
+        //
+        // The `right` guard is a TOKEN match (`~=`) plus explicit alignment-shaped patterns, NOT a bare
+        // substring: `copyright` contains `right`, and a substring guard therefore silently skipped
+        // justification on every `<p class="copyright">` — ordinary prose in a very common front-matter
+        // class. (Inherited from the iOS #95 guard, found by this WI's Gate-4 round 2.) `center` stays a
+        // substring match because no comparably common word contains it, so the asymmetry is a
+        // false-positive judgement rather than an oversight.
+        "p:not([style*='text-align' i]):not([align])" +
+            ":not([class*='center' i])" +
+            ":not([class~='right' i]):not([class*='text-right' i])" +
+            ":not([class*='align-right' i]):not([class*='right-align' i])" +
+            ":not([class*='alignright' i]):not([class*='rightalign' i]) " +
+            "{ text-align: justify !important; }",
     ).joinToString("\n")
 }
 
