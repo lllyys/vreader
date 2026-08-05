@@ -21,12 +21,18 @@ interface DiagnosticsLogSource {
      * NEVER throws an ordinary operational failure — the reader could not be opened, the platform
      * denied it, it timed out — all of those are reported as [SourceResult.Unavailable].
      *
-     * Two kinds of throw still propagate, and callers containing failures must let them:
-     * `CancellationException`, because cancelling the caller is not a source failure and must not be
-     * swallowed; and an `Error` (OOM, `LinkageError`), because it is not containable and reporting a
-     * JVM failure as a degraded log would blame the wrong subsystem. Both
-     * [CompositeDiagnosticsSource] and [DiagnosticsLogStore] therefore contain `Exception`, never
-     * `Throwable`.
+     * Two kinds of throw are REQUIRED to propagate, and every caller that contains failures must
+     * let them: `CancellationException`, because cancelling the caller is not a source failure and
+     * must not be swallowed; and an `Error` (OOM, `LinkageError`), because it is not containable and
+     * reporting a JVM failure as a degraded log would blame the wrong subsystem. Containment is
+     * therefore `catch (Exception)`, never `catch (Throwable)` — as in [CompositeDiagnosticsSource]
+     * and [DiagnosticsLogStore].
+     *
+     * KNOWN DEVIATION: `LogcatDiagnosticsSource` still contains `Throwable`, so an `Error` raised
+     * inside it is converted to `Unavailable` instead of propagating — which the composite would
+     * then report as platform-log degradation. That is a pre-existing WI-2 gap, tracked for a
+     * follow-up; it is stated here rather than quietly softening this contract, because the rule
+     * above is the one the package is converging on.
      */
     suspend fun recentEntries(sinceMillis: Long? = null, limit: Int): SourceResult
 }
