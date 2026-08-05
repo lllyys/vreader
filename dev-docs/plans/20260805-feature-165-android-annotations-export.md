@@ -98,15 +98,24 @@ currently offers anything annotation-file-related.
 
 ## 3. Rule-51 verdict (design gate) — checked, not assumed
 
-**Verdict: PROCEED. No `needs-design` filing is required for the scope in §5.** Every *state* the
-feature needs is depicted. Three secondary-text omissions are recorded in §3.3 as **absences**
-(never inventions) with rationale, and one judgement call is escalated in §11 (Q-3).
+**Verdict: PROCEED on the IMPORT half; the EXPORT half is BLOCKED on `needs-design` #2085.**
+
+- **Import** — every state is depicted (§3.1). Proceeds in full.
+- **Export** — the entry row and the (system) picker are designed; **failure feedback is not**.
+  Filed as `needs-design` **#2085** (2026-08-05, this session). WI-6's Export row and WI-7's
+  export result wiring are `BLOCKED: needs-design (#2085)` — §10. The export *writer* (WI-2) and
+  its bounded I/O path (WI-4b) are foundational and still ship; they are simply not user-reachable
+  until #2085 lands, and per rule 47 Gate 5 the export half is **capped at `DONE`** until then.
+
+Three secondary-text omissions are recorded in §3.3 as **absences** (never inventions); one
+candidate omission (A-4) was rejected and is built; one (A-5) became the #2085 filing.
 
 ### 3.1 State-by-state evidence
 
 | Required state | Depicted? | Artboard |
 |---|---|---|
 | Export entry (a row in a card the user can reach) | **yes** | `vreader-book-details.jsx:215` — `{ icon: Icons.Download, label: 'Export annotations…' }` inside `ActionList`, the same card Android ships at `BookDetailsRows.kt:228` |
+| **Export result — failure** | **NO → filed** | Nothing depicts it; no shipped string fits verbatim (`MainActivity.kt:59-64` is all import copy). **`needs-design` #2085**, §7 D-10. Export success stays silent by the #155 precedent (D-10a). |
 | Import entry | **yes** | `vreader-annotation-import.jsx:317-325` — `BookDetailsActionsCard variant='B1-paired'` puts `Import annotations…` (accent, `IconUpload`) directly under `Export annotations…` in the Actions card |
 | Post-pick preview / confirm | **yes** | `vreader-annotation-import.jsx:425-558` `ImportPreviewSheet` — file header + source badge, `Highlights` / `Notes` / `Skipped` count chips, "Preview · first three" sample list, merge copy, `Cancel` / `Import N items` |
 | Import failure (unreadable / wrong-shape / empty file) | **yes** | same sheet, `error` branch `:477-484` (tinted error blob) + the disabled primary `Import 0 items` at `:548-554` |
@@ -132,7 +141,7 @@ feature needs is depicted. Three secondary-text omissions are recorded in §3.3 
   (`:477-484`) with the failure text; the transaction is atomic, so the choice is genuinely "all or
   the error blob".
 
-### 3.3 Design-fidelity ledger — three omissions (all absences) + one rejected omission
+### 3.3 Design-fidelity ledger — three absences, one rejected omission (built), one filing
 
 Rule 51 prohibits **inventing**. Omitting depicted decorative/secondary text where the underlying
 data does not exist is the same class of absence #134 WI-4 already exercised
@@ -156,6 +165,15 @@ optional extra). Test tag `details-annotations-footnote`; asserted present in
 `AnnotationsIoEntryTest`. Copy accuracy: "by passage match" is exact for highlights and bookmarks
 (`profileKey` is a hash of the canonical locator, i.e. the position) and approximate for notes,
 which dedupe by id only — recorded as **K-1**, not silently glossed.
+
+**A-5 is NOT an omission either — it is a FILING.** Export-failure feedback has no depicted
+surface and no reusable shipped string, so it is not an absence to rationalize away: it is
+`needs-design` **#2085**, filed unconditionally in this session, with WI-6's Export row and WI-7's
+export wiring marked `BLOCKED: needs-design (#2085)` (§10). The distinction from A-1/A-2/A-3
+matters and is the line this ledger exists to hold: **omitting a decorative sub-line whose data
+does not exist is an absence; omitting a required state is a design gap.** A-1/A-2/A-3 remove
+text; A-5 would have had to *invent* a notification. Round 2 got this wrong by reaching for a
+`Toast` — see D-10.
 
 The **error blob**, the **count chips** (including `Skipped`), the **merge-policy copy** (both the
 in-sheet line and the Actions-card footnote), the **Cancel / Import N items** button pair and the
@@ -591,12 +609,36 @@ is up.
 - **D-9 — Export/import rows are capability-gated.** A null callback renders **no row** (not a
   disabled one). Keeps every existing `BookDetailsSheet` caller and its 44 shipped connected
   assertions valid, and guarantees no dead affordance if a host forgets to wire it.
-- **D-10 — Export failure surfaces as a `Toast`.** Judgement call, escalated as **Q-3b** (§11).
-  Rationale: (i) an Android `Toast` is OS-rendered system chrome, the class rule 51 exempts;
-  (ii) this repo already ships exactly this pattern for the sibling failure — `MainActivity.kt:97`
-  and `:108` toast an import failure; (iii) silently swallowing an IO error violates rule 50 §6.
-  The alternative is to file a `needs-design` for an "export result" surface; the auditor may
-  prefer that and this plan will not resist it.
+- **D-10 — Export failure is DESIGN-BLOCKED on `needs-design` #2085; the export entry point does
+  not ship until it lands.** *(Supersedes round 2's "surface it as a `Toast`" — that was an
+  invented surface wearing system-chrome clothing.)* The orchestrator's Gate-2 round-2 ruling was
+  **reuse a shipped designed string verbatim, or file — no third option.** Both alternatives were
+  checked against the code, and both fail:
+  1. **Reuse.** The complete shipped Android failure copy is `MainActivity.kt:59-64`:
+     `"Unsupported format: <name>"`, `"Couldn't open the file"`, `"Import failed"`. All three
+     describe **import**. `"Couldn't open the file"` is *factually wrong* for a write failure, and
+     `"Import failed"` names the wrong operation. **Nothing fits verbatim.**
+  2. **Silence.** Violates rule 50 §6 and tells the user a file was saved when it was not.
+  Nor does the neighbouring **#2030** ("Android book-**import** feedback … for feature #155")
+  absorb it — different operation, different feature. Its own KDoc
+  (`MainActivity.kt:49-58`) is the precedent shape for this decision: *"every string here is the
+  ALREADY-SHIPPED SAF-import copy … reused verbatim; nothing new is introduced. The designed …
+  treatments are BLOCKED on needs-design #2030 and are not invented here."*
+  **Filed 2026-08-05, unconditionally, in this session: `needs-design` #2085** — *"Design needed:
+  Android annotations-export result feedback for feature #165"*, labels `enhancement` +
+  `needs-design`, listing three required failure states (write failure, timeout/unresponsive
+  destination, book-no-longer-available) with line-cited current chrome. Verified open via
+  `gh issue list --label needs-design --state open`. **Consequence** in §10 and §3.3 A-5. No
+  "if/when" phrasing appears anywhere in this plan.
+- **D-10a — Export SUCCESS stays silent, and that is not a design gap.** #155 shipped silent
+  success deliberately ("Success is SILENT for a new book AND for a duplicate, matching iOS" —
+  `MainActivity.kt:53-54`), and the file appearing at the location the user chose in the system
+  picker is self-evidencing. #2085 asks the designer whether Android wants a save confirmation,
+  but silence needs no design to ship.
+- **D-10b — Import failure needs nothing new.** Every import failure — including `Busy`,
+  `Timeout` and `BookMissing` — renders in the **committed** `ImportPreviewSheet` error branch
+  (`vreader-annotation-import.jsx:477-484`) with the disabled primary (`:548-554`). The import
+  half is unblocked.
 
 ---
 
@@ -728,6 +770,11 @@ Round-trip features false-green easily: "the file was written" and "no exception
 pass with **zero annotations surviving**. For each criterion: the naive test that would go green on
 a broken build, and the assertion that discriminates.
 
+> **A-1 and A-2 are the EXPORT criteria.** Their *unit* assertions ship with WI-2 (the writer is
+> testable without any UI). Their **end-to-end leg** — writing through a real SAF destination from
+> a production entry point — is blocked with WI-8 on `needs-design` #2085, which is precisely why
+> the export half is capped at `DONE` (§10). A-3…A-12 are unaffected.
+
 | # | Acceptance criterion | A test that passes while broken | The discriminating assertion |
 |---|---|---|---|
 | A-1 | Export writes a valid `annotations.json` for the current book | `assertTrue(file.exists())` / `assertTrue(json.isNotEmpty())` — passes for `{}` and for `{"schemaVersion":3,"highlights":[],"bookmarks":[],"notes":[]}` on a book with 12 highlights | Decode the written bytes back into `BackupAnnotationsEnvelope` and assert **set equality of `(highlightId, locatorJSON, selectedText, color, note, createdAt, updatedAt)` tuples** against the repository's own rows. Counts alone are insufficient — a mapper that writes every row's `selectedText` as `""` keeps the count. |
@@ -762,7 +809,7 @@ a broken build, and the assertion that discriminates.
 |---|---|
 | `AnnotationImportPreviewSheetTest.kt` | render + click. Populated (chips show H/N/Skipped, sample rows, `Import N items` enabled); error variant (blob shown, primary disabled, tapping it does nothing); zero-importable (C-8); Cancel dismisses and applies nothing; CJK text renders |
 | `AnnotationsIoEntryTest.kt` | the two Details rows render, carry their tags, invoke their callbacks; **B1's merge-policy footnote renders** (§3.3 A-4, tag `details-annotations-footnote`); **and the absence assertions** — no fourth row, no sub-line under either row (A-1/A-2 of §3.3), Share row unchanged |
-| `AnnotationsRoundTripConnectedTest.kt` | WI-7 acceptance: export → read the file back through `ContentResolver` → wipe rows → import → assert the snapshot equals the original |
+| `AnnotationsRoundTripConnectedTest.kt` | **WI-7 (import leg)**: seed a fixture `annotations.json` on the device → import it through the production path → wipe → re-import → assert the snapshot equals the original and the second run applies 0. The **export→import** round trip needs a user-reachable export, so that variant lands with **WI-8** (blocked on #2085). Writing it against a *file the test wrote itself* would be a round trip that never touches the export entry point — the false-green this table exists to prevent. |
 
 > **Binding lesson from #133 and #135** (memory: *Android connected tests merged compile-only during
 > host WIs are UNVERIFIED until the Gate-5 connected run*): connected tests written in WI-5/WI-6 are
@@ -825,8 +872,9 @@ nothing). Never a bare `./gradlew`.
 | **WI-4** | foundational | `AnnotationsImportApplier` over `restoreAnnotations`: `existingState`, C-5b's two layers, A-11's `preview.importable == applied` invariant; in-memory-Room merge tests | M | none |
 | **WI-4b** | foundational | **`AnnotationsIoController` — the whole blocking-call boundary** (§8.1): bounded `query`/open/transfer for import AND export, mandatory `dispose`, admission checks, §8.4 name sanitization, and A-12's hostile-provider suite | **M–L** | none (JVM fakes reach the parked path; the emulator cannot) |
 | **WI-5** | behavioral | `AnnotationImportPreviewSheet` (+ `…Content` split) exactly as designed, incl. the error + zero-importable states | M | slice: connected render/click on the emulator |
-| **WI-6** | behavioral | The two designed `ActionList` rows **+ B1's merge-policy footnote**; threading through `BookDetailsSheet` / `ReaderChromeScaffold` / `EpubReaderChrome`; rule-22 KDoc repairs (incl. W15) | M | slice: rows + footnote visible, rows tappable via **⋯ More → Details** on a real book |
-| **WI-7** | behavioral, **final** | SAF launchers in the 4 reader activities + `VReaderApp` wiring (injecting the **existing** gate); the connected round-trip; the audit grep from §8.5 (no bare resolver call in `annotations/`); the test-hardening pass for any RED-when-run connected test from WI-5/6 | M | **full acceptance**: A-1…A-12, real EPUB + real CJK TXT, release-configured build, production path named in the evidence file |
+| **WI-6** | behavioral | The **Import** `ActionList` row **+ B1's merge-policy footnote**; threading through `BookDetailsSheet` / `ReaderChromeScaffold` / `EpubReaderChrome`; rule-22 KDoc repairs (incl. W15). **The Export row is `BLOCKED: needs-design (#2085)` and is NOT built** — the capability-gate (D-9) means passing a null `onExportAnnotations` renders no row, so the block costs one null argument, not a code branch. | M | slice: Import row + footnote visible, row tappable via **⋯ More → Details** on a real book |
+| **WI-7** | behavioral, **final** | The **import** SAF launcher in the 4 reader activities + `VReaderApp` wiring (injecting the **existing** gate); the connected round-trip; the audit grep from §8.5 (no bare resolver call in `annotations/`); the test-hardening pass for any RED-when-run connected test from WI-5/6. **The export result wiring is `BLOCKED: needs-design (#2085)`.** | M | **acceptance for the import half**: A-3…A-12, real EPUB + real CJK TXT, release-configured build, production path named in the evidence file |
+| **WI-8** | behavioral | **BLOCKED: `needs-design` (#2085).** The Export row + export result wiring + A-1/A-2's end-to-end export leg, once the design lands. Unblocks the round-trip acceptance (export → import) end to end. | S | full export acceptance: A-1, A-2, and the real round-trip |
 
 Rationale for the split: WI-1…WI-4b are pure JVM and need no emulator, so they can be gated fast and
 audited independently. Three boundaries, three WIs, each auditable alone: **parse** (untrusted bytes,
@@ -837,10 +885,29 @@ independently-audited unit with its own hostile-provider suite, and shrinks WI-7
 WI-5/6 are the two designed surfaces.
 
 **Dependencies:** WI-2 → WI-1; WI-4 → WI-3; WI-4b → WI-3, WI-4; WI-5 → WI-3; WI-6 → (nothing hard,
-but ships after WI-5 so the row it launches has a destination); WI-7 → WI-2, WI-4b, WI-5, WI-6.
+but ships after WI-5 so the row it launches has a destination); WI-7 → WI-2, WI-4b, WI-5, WI-6;
+**WI-8 → `needs-design` #2085 (design blocker) + WI-7**.
 No dependency on any other feature row. The tracker records #165 as disjoint from #164. **#165 must
 not run in a lane concurrent with any #155 lane that writes `imports/`** — #165 only reads it, but a
-concurrent refactor there would break #165's call sites mid-flight.
+concurrent refactor there would break #165's call sites mid-flight. **This is the constraint the
+orchestrator is most likely to trip over, because the orchestrator is the one who dispatches both.**
+
+### What the #2085 block does and does not stop
+
+| | Status |
+|---|---|
+| WI-1, WI-2 (export writer), WI-4b's export path | **ship** — foundational, fully tested on the JVM, no UI |
+| WI-3, WI-4, WI-4b, WI-5, WI-6, WI-7 (import) | **ship** — the import half is fully designed |
+| The `Export annotations…` row + export result wiring | **blocked** (WI-8) |
+| Feature row status | reaches `DONE` for the import half; **cannot reach `VERIFIED` until WI-8 lands** (rule 47 Gate 5 "capped at `DONE`" — the export acceptance criteria A-1/A-2 have no production entry point until then) |
+
+**Deliberate consequence, stated rather than hidden:** WI-2 ships an `AnnotationsExportWriter`
+with **no production call site** until WI-8. That is the orphan-surface shape
+`scripts/check-orphan-surfaces.sh` detects (it flags composables, so a plain class will not trip
+it — which is exactly why it is written down here instead). It is accepted because the alternative
+is either inventing #2085's surface or stalling the whole feature over one notification. **The
+tracker row must carry `BLOCKED: needs-design (#2085)` against WI-8** — an orchestrator-owned
+edit; this plan proposes the exact text and does not make it.
 
 ---
 
@@ -889,6 +956,11 @@ concurrent refactor there would break #165's call sites mid-flight.
 - **K-3** — Import is per-book. A library-wide annotations file must be imported once per book.
 - **K-4** — Export offers one format. The design's "Markdown · JSON · VReader JSON" subtitle is not
   shipped (§3.3 A-1).
+- **K-6** — **The export half does not ship in the first pass.** `needs-design` #2085 blocks the
+  `Export annotations…` row and its result wiring (WI-8). Until it lands: the export writer exists
+  and is tested but is not user-reachable, the feature row is capped at `DONE`, and the only way to
+  produce an importable file is a WebDAV backup archive's `annotations.json`. Not a deferral — a
+  filed, labelled, open blocker with a WI attached.
 - **K-5** — The imported row's `anchor` is null (inherited from `restoreAnnotations`,
   `AnnotationsRepository.kt:177`), so a highlight re-anchors by locator rather than by its precise
   engine anchor. Identical to the behaviour a WebDAV restore already has.
@@ -906,10 +978,15 @@ concurrent refactor there would break #165's call sites mid-flight.
   canonical **A1 + C1** was **not challenged in Gate-2 round 1 and stands**. Round 2 additionally
   builds B1's merge-policy footnote (§3.3 A-4), so B1 now ships complete rather than partially
   cited.
-- **Q-3b (open).** D-10's `Toast` for export failure — system chrome with an in-repo precedent
-  (`MainActivity.kt:97,108`), or a `needs-design` filing for an export-result surface? Round 1 did
-  not challenge it; flagging it again rather than letting silence become consent.
-  Also still worth a second opinion: §3.3's three remaining absences (A-1/A-2/A-3).
+- **Q-3b — RESOLVED by filing.** The orchestrator's round-2 ruling was *reuse a shipped designed
+  string verbatim, or file — no third option.* Reuse was checked against `MainActivity.kt:59-64`
+  and **fails** (all three shipped strings describe import; `"Couldn't open the file"` is false for
+  a write failure). **`needs-design` #2085 filed 2026-08-05, verified open**; WI-8 carries the
+  block. Round 2's `Toast` answer is **withdrawn** — an OS-rendered widget carrying app-authored
+  copy is still an invented notification, and calling it "system chrome" was the move rule 51's
+  anti-pattern table names ("it's a small dialog, an Apple HIG default works fine"). Details in
+  §7 D-10 / D-10a / D-10b.
+  Still worth a second opinion: §3.3's three remaining absences (A-1/A-2/A-3).
 - **Q-4 (pre-existing, out of scope but should be tracked).** W12: `BackupRestoreScreen` — the whole
   WebDAV backup/restore UI — has **no production call site**; its only host is
   `android/app/src/debug/.../BackupDebugActivity.kt:27`. That is the #114 reachability class still
@@ -932,5 +1009,6 @@ concurrent refactor there would break #165's call sites mid-flight.
 
 | Rev | Date | Change |
 |---|---|---|
+| **v3** | **2026-08-05** | **Q-3b folded in (orchestrator's round-2 ruling: reuse verbatim or file, no third option).** Reuse checked against the complete shipped failure copy (`MainActivity.kt:59-64`) — all three strings describe *import*, and `"Couldn't open the file"` is factually wrong for a write failure, so **nothing fits**. #2030 covers book-**import** feedback for #155, a different operation, so it does not absorb the ask. **Filed `needs-design` #2085** ("Android annotations-export result feedback for feature #165", `enhancement` + `needs-design`, three required failure states, line-cited chrome), verified open. **D-10 rewritten** — round 2's `Toast` answer is withdrawn as an invented notification wearing system-chrome clothing; **D-10a** records that silent success needs no design (#155 precedent); **D-10b** records that import failure is fully covered by the committed `ImportPreviewSheet` error state. **§3 verdict split**: import PROCEEDS, export BLOCKED. **§3.3 gains A-5** and the absence-vs-gap line ("omitting a decorative sub-line whose data does not exist is an absence; omitting a required state is a design gap"). **§10 gains WI-8** (blocked) and a table of exactly what the block does and does not stop, incl. the accepted orphan `AnnotationsExportWriter` and the `BLOCKED: needs-design (#2085)` row text the orchestrator must apply. New **K-6**. Nothing else reopened. |
 | v1 | 2026-08-05 | Gate-1 draft. |
 | **v2** | **2026-08-05** | **Gate-2 round 1 (Codex gpt-5.5/high) — 2 High, 4 Medium, 2 Low, all addressed.** **H1 (SAF liveness — #155's defect repeated while citing #155):** §8.1 rewritten — every `ContentResolver` call on **both** the import and export paths now runs through the **shipped** `BoundedCallGate` (W26–W29) with admission checks, mandatory late-result `dispose`, and the guaranteed-vs-best-effort split stated separately; new **WI-4b** makes this an independently-audited boundary instead of activity wiring; new **A-12** hostile-provider suite; new **D-6**, R-3/R-3b/R-3c, §8.5 prohibitions incl. an audit grep. **H2 (intra-file collisions):** new **§6.4** — five collapse rules (F-1…F-5) with a fixed, deterministic order, a cross-kind global id set restoring iOS semantics, the already-present filter, and the asserted invariant `preview.importable == applied` (new **A-11**); new D-11/D-12; `AnnotationsImportReader` signature gains `ExistingAnnotationState`. **M1:** new **C-5b** (target book absent/stale) with a two-layer fix and an explicit check-then-act caveat. **M2:** new **§8.4** — `ImportPreview.fileName` sanitized via `IncomingBookResolver.sanitizeDisplayName` (W30), 8 test cases. **M3:** B1's merge-policy footnote is now **built**, not just cited (§3.3 A-4 rejects it as an absence); K-1 records the notes-vs-"passage match" copy nuance. **M4:** A-2 gains an explicit `schemaVersion == CURRENT_SCHEMA_VERSION` assertion; C-6 now gates on the shipped `BackupSchema.ACCEPTED_SCHEMA_VERSIONS` (W31) instead of a hand-rolled range. **L1/L2:** citation fixes — `RestoreImporter.kt:119` is the seam (`:105` is the wrapper call); W12 restated as "no `main`/release call site" with the `androidTest`-excluding grep shown. Orchestrator rulings recorded: Q-1 resolved (interop → feature #173 / GH #2082), Q-3a resolved (B1 stands). New Q-6. |
