@@ -626,6 +626,17 @@ Design **X1** is canonical: nav-trailing share icon → system share sheet with 
 
 ### 6.3 Android's `WARN` has no designed home — mapping, not invention
 
+> **`ASSERT` and `VERBOSE` closed here too (added 2026-08-05 from WI-6a's HANDOFF).** This section
+> adjudicated `WARN` and was silent on the other two of Android's six priorities. WI-6a's
+> implementation maps **`ASSERT` → the error treatment** and **`VERBOSE` → the debug treatment**,
+> and that is now the plan's ruling rather than an implementer's choice. It is *derivable, not
+> invented*: WI-5 already ships those exact groupings as the chips' **level sets** (`Errors =
+> {ERROR, ASSERT}`, `Debug = {VERBOSE, DEBUG}`), so a row whose treatment disagreed with the chip
+> that selects it would be self-contradictory — an `ASSERT` entry surfacing under **Errors** while
+> rendering in the debug colour. No new visual token is introduced (unlike the withdrawn v1 WARN
+> proposal below, which is exactly why that one was rejected). Recorded in `DiagnosticsLevelStyle.kt`'s
+> header.
+
 The design provides **four level chips** (`All`, `Errors`, `Debug`, `Info`) and **three** row color
 treatments (error / info / debug). Android has six priorities (`V D I W E F`), and **all 6 existing
 production log sites are `Log.w`** — so a naive `Errors = {E, F}` mapping would leave vreader's own
