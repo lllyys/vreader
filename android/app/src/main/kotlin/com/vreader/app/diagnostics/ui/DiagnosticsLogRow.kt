@@ -4,7 +4,6 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -15,8 +14,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -62,13 +59,12 @@ import java.util.Locale
  * - **`maxLines` IS the design's 3-line clamp** (`WebkitLineClamp: 3`); expansion lifts it. The
  *   collapsed height is asserted against the line height rather than trusted.
  *
- * Accepted, NOT mitigated (Gate-4 round 1, both are design-owned decisions this WI may not make):
- * - The design's `Icons.Copy` is REFERENCED at `vreader-diagnostics.jsx:295` but is not defined in
- *   the committed icon set, so no committed glyph path exists to transcribe. The affordance itself
- *   IS designed (position, 11px size, accent color, "Copy entry" label); only the glyph outline is
- *   missing, and the platform copy glyph is what this app already ships for a copy affordance
- *   (`SelectionPopover`, `BookDetailsRows`). Substituting it renders LESS invention than omitting a
- *   depicted element; flagged for the design bundle to close.
+ * The "Copy entry" glyph is the BUNDLE's copy path ([DiagnosticsIcons.Copy]), not Material's:
+ * `vreader-icons.jsx` has no `Copy` entry for `vreader-diagnostics.jsx:295` to resolve, but the same
+ * bundle draws this glyph twice elsewhere, so there was a committed path to transcribe after all
+ * (Gate-4 round 2 caught the first implementation's Material substitution).
+ *
+ * Accepted, NOT mitigated (Gate-4 rounds 1-2 — design-owned decisions this WI may not make):
  * - The designed control heights (a ~26dp chip, a ~25dp Copy pill) are below the 48dp accessibility
  *   touch-target guidance. Growing them would change the depicted geometry and the row's vertical
  *   rhythm, which is exactly what rule 51 reserves to the design; the whole row is a large tap
@@ -237,11 +233,12 @@ fun DiagnosticsLogRow(
 @Composable
 private fun CopyEntryButton(message: String, tokens: DiagnosticsTokens) {
     val context = LocalContext.current
+    val shape = RoundedCornerShape(percent = 50)
     Row(
         Modifier
             .padding(top = 9.dp)
-            .clip(RoundedCornerShape(percent = 50))
-            .border(0.5.dp, tokens.rule, RoundedCornerShape(percent = 50))
+            .clip(shape)
+            .diagnosticsOutline(tokens.rule, shape)
             .clickable {
                 val clipboard =
                     context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
@@ -258,7 +255,7 @@ private fun CopyEntryButton(message: String, tokens: DiagnosticsTokens) {
         horizontalArrangement = Arrangement.spacedBy(5.dp),
     ) {
         Icon(
-            Icons.Outlined.ContentCopy,
+            DiagnosticsIcons.Copy,
             contentDescription = null,
             tint = tokens.accent,
             modifier = Modifier.size(11.dp),

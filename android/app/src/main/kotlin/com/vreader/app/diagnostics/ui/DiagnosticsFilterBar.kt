@@ -1,7 +1,6 @@
 package com.vreader.app.diagnostics.ui
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -161,18 +160,16 @@ private fun DiagnosticsChip(
         tint != null -> Color.White
         else -> tokens.onInk
     }
+    val shape = RoundedCornerShape(percent = 50)
     Row(
         Modifier
-            .clip(RoundedCornerShape(percent = 50))
+            .clip(shape)
             .background(fill)
-            .border(0.5.dp, outline, RoundedCornerShape(percent = 50))
+            .diagnosticsOutline(outline, shape)
             .clickable(onClick = onClick)
             .padding(horizontal = 11.dp, vertical = 5.dp)
             .testTag(tag)
-            .semantics {
-                diagnosticsColor = fill.toArgb()
-                diagnosticsBorderColor = outline.toArgb()
-            },
+            .semantics { diagnosticsColor = fill.toArgb() },
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(5.dp),
     ) {

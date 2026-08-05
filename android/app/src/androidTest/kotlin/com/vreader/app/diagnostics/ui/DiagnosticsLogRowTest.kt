@@ -68,6 +68,9 @@ class DiagnosticsLogRowTest {
      */
     private val sentinel = "SENTINEL-NOTHING-WAS-COPIED"
 
+    /** logd's per-entry payload ceiling — the size at which a message arrives tail-truncated. */
+    private val LOGD_MAX_PAYLOAD_BYTES = 4068
+
     private fun clipboardOf(context: Context): ClipboardManager =
         context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
 
@@ -419,6 +422,11 @@ class DiagnosticsLogRowTest {
             )
         }
 
+        // The name promises rendering too — assert the visible message before touching the clipboard,
+        // or a regression that dropped the message node would still pass (Gate-4 round 2).
+        compose.onNodeWithTag(DiagnosticsRowTags.MESSAGE, useUnmergedTree = true).assertExists()
+        assertEquals("\n\n\n", messageText())
+
         compose.onNodeWithTag(DiagnosticsRowTags.COPY, useUnmergedTree = true).performClick()
         compose.waitForIdle()
         assertEquals("\n\n\n", clipText(context))
@@ -451,8 +459,11 @@ class DiagnosticsLogRowTest {
 
     @Test fun aTruncationSizedMessageStillRedactsOnCopy() {
         // logd truncates a payload at 4068 bytes; the tail is where a credential can end up sitting.
-        val filler = "context ".repeat(500)
-        val message = (filler + "Authorization: Bearer sk-live-TailSecret0987654321").take(4068)
+        // The message is built to be EXACTLY that size — an earlier version merely `take(4068)`-ed a
+        // shorter string and so never reached the boundary it claimed to test (Gate-4 round 2).
+        val tail = "Authorization: Bearer sk-live-TailSecret0987654321"
+        val message = "x".repeat(LOGD_MAX_PAYLOAD_BYTES - tail.toByteArray(Charsets.UTF_8).size) + tail
+        assertEquals(LOGD_MAX_PAYLOAD_BYTES, message.toByteArray(Charsets.UTF_8).size)
         lateinit var context: Context
         compose.setContent {
             context = LocalContext.current

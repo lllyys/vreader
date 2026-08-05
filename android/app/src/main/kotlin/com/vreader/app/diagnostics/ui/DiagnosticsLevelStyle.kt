@@ -1,11 +1,17 @@
 package com.vreader.app.diagnostics.ui
 
+import androidx.compose.foundation.border
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.semantics.SemanticsPropertyKey
 import androidx.compose.ui.semantics.SemanticsPropertyReceiver
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.unit.dp
 import com.vreader.app.diagnostics.DiagnosticsLevel
 
 /**
@@ -157,7 +163,25 @@ var SemanticsPropertyReceiver.diagnosticsColor by DiagnosticsColorKey
  * design's INACTIVE chip is defined by its border, so a fill-only assertion would keep passing if
  * the outline were deleted (Gate-4 round 1). An active chip publishes a TRANSPARENT border, because
  * the design gives it one too — same box, same size, no jitter when a chip is selected.
+ *
+ * Only [Modifier.diagnosticsOutline] writes it, so the value cannot drift from what is drawn.
  */
 val DiagnosticsBorderColorKey = SemanticsPropertyKey<Int>("DiagnosticsBorderColor")
 
 var SemanticsPropertyReceiver.diagnosticsBorderColor by DiagnosticsBorderColorKey
+
+/** The design's hairline outline weight for a chip (`border: 0.5px`). */
+val DIAGNOSTICS_OUTLINE_WIDTH = 0.5.dp
+
+/**
+ * Draws the design's 0.5dp outline in [color] on [shape] AND publishes it to the semantics tree.
+ *
+ * The two are ONE expression on purpose (Gate-4 round 2): a separate `.border(…)` plus a separate
+ * `.semantics { diagnosticsBorderColor = … }` could be half-deleted, leaving the assertion passing
+ * over a chip that no longer has an outline. Deleting this call removes the assertion's evidence
+ * with the border, so the test fails. (It is a seam, not a proof: an edit INSIDE this function could
+ * still separate them — that is what the function's own single-line body is there to make obvious.)
+ */
+fun Modifier.diagnosticsOutline(color: Color, shape: Shape): Modifier =
+    border(DIAGNOSTICS_OUTLINE_WIDTH, color, shape)
+        .semantics { diagnosticsBorderColor = color.toArgb() }
