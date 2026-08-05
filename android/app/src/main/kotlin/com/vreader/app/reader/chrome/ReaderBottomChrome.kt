@@ -5,7 +5,9 @@
 // (WI-4: the TXT/MD read-aloud entry). #132 WI-5 un-omits the design's "Contents" and "Notes" toolbar
 // slots as nullable-default params (onOpenContents / onOpenNotes) — each renders ONLY when non-null, so
 // a #129-era Display-only caller stays valid by construction (the no-dead-controls rule). The design
-// toolbar order is Contents · Notes · Display · AI; AI stays omitted until feature D. Renders in the
+// toolbar order is Contents · Notes · Display · AI; AI stays omitted until feature D. feature #140 WI-6
+// promotes [ToolbarIconButton] to `internal` so the AZW3 host's Contents/Notes-only bottom chrome
+// (Azw3BottomChrome) renders the SAME designed slot rather than a look-alike copy. Renders in the
 // active [ReaderTheme]'s colors (chrome = the theme background + a top rule — a local mapping of the
 // design's chrome/rule tokens). Pure function of state + callbacks.
 package com.vreader.app.reader.chrome
@@ -157,9 +159,14 @@ fun ReaderBottomChrome(
  * One toolbar slot — the design's icon-above-label button (`vreader-reader.jsx` toolbar `<b.icon/> +
  * <span>`). A 22dp icon over the 10sp label, both tinted from the theme, in a tappable column tagged
  * for tests. The [label] is on the tappable node's semantics so accessibility + tests can target it.
+ *
+ * `internal` rather than private (feature #140 WI-6): the AZW3 host's own bottom chrome
+ * (`Azw3BottomChrome`) renders a Contents/Notes subset of this toolbar without the scrubber or the
+ * Display slot, and reuses THIS composable so its slot treatment cannot drift from the EPUB/TXT one.
+ * It is not part of any public API — module-visible only, for that one sibling.
  */
 @Composable
-private fun ToolbarIconButton(
+internal fun ToolbarIconButton(
     tag: String,
     label: String,
     icon: ImageVector,

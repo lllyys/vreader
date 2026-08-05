@@ -6,12 +6,20 @@
 // + flushes on onStop, and recreates the WebView on render-process death.
 // Feature #126 WI-4 + WI-6. Routing from MainActivity; AZW3 import already exists.
 //
-// feature #132 WI-7-hosts: the Ready state now renders the shared ReaderChromeScaffold via
-// Azw3ReaderChrome (top bar + Notes review sheet) over the WebView body. AZW3 has no reader TOC →
-// Contents is hidden (empty tocEntries / EmptyTocProvider posture); it has no Display control (the #129
-// CSS is applied live from the store with no control surface), so the bottom chrome is Notes-only.
-// onJumpToAnnotation is NULL (review-only capability gate — no in-session goTo until #135; FoliateBridge/
-// Azw3Document/foliate-js stay UNTOUCHED, and the MATCH_PARENT WebView sizing (bug #357) is undisturbed).
+// feature #132 WI-7-hosts: the Ready state renders the shared ReaderChromeScaffold via Azw3ReaderChrome
+// (top bar + the Contents|Bookmarks and Notes sheets) over the WebView body. AZW3 has no Display control
+// (the #129 CSS is applied live from the store with no control surface), so the bottom chrome is the
+// Contents · Notes subset of the designed toolbar. onJumpToAnnotation is NULL (review-only capability
+// gate; FoliateBridge/Azw3Document/foliate-js stay UNTOUCHED, and the MATCH_PARENT WebView sizing
+// (bug #357) is undisturbed).
+//
+// feature #140 WI-6: AZW3 now HAS a table of contents. The `book-ready` TOC tree — which the bundle has
+// always posted and Kotlin used to discard — is hoisted out of Azw3ReaderHost (onToc, mirroring
+// onRelocate/onDocument), flattened by FoliateTocProvider into `tocEntries`, and handed to the chrome
+// together with `currentTocIndex` (foliateTocIndexFor over the live relocate.tocHref) and `onJumpToc`
+// (the EXISTING #135 azw3JumpDecision + awaited goTo seam, reused unchanged). Nothing is persisted, and
+// a book whose file carries no usable TOC yields an empty list — i.e. exactly the pre-#140 behaviour,
+// Contents control hidden.
 package com.vreader.app.reader
 
 import android.os.Bundle
@@ -72,9 +80,15 @@ import com.vreader.app.reader.foliate.Azw3Document
 import com.vreader.app.reader.foliate.Azw3GoToResult
 import com.vreader.app.reader.foliate.Azw3LocatorBridge
 import com.vreader.app.reader.foliate.FoliateMessage
+import com.vreader.app.reader.foliate.FoliateTocItem
 import com.vreader.app.reader.nav.BookmarkTocIndex
+import com.vreader.app.reader.nav.FoliateTocProvider
 import com.vreader.app.reader.nav.JumpResult
+import com.vreader.app.reader.nav.TocEntry
+import com.vreader.app.reader.nav.foliateTocIndexFor
 import com.vreader.app.ui.theme.VReaderFonts
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 import vreader.contracts.BookFormat
@@ -133,9 +147,13 @@ class Azw3ReaderActivity : ComponentActivity() {
                         com.vreader.app.reader.details.BookDetailsMapper.map(o.book, collectionNames, pageCount = null)
                     }
 
-                    // feature #135 WI-7 — the bookmark wiring. AZW3 has no reader TOC, so the row projection
-                    // has no chapter/page (the WI-4 EPUB/AZW3 branch degrades to null fields — no crash) — a
-                    // null tocIndex. The current position comes from the relocate-derived canonical Locator;
+                    // feature #135 WI-7 — the bookmark wiring. Bookmark ROWS still project no chapter/page
+                    // label: the row projection needs a bookmark's position mapped onto a chapter, and this
+                    // host's TOC is keyed by href while a bookmark anchors on a cfi/fraction, so there is no
+                    // mapping to feed it — hence a null tocIndex (the WI-4 EPUB/AZW3 branch degrades to null
+                    // fields, no crash) even though the READER now has a TOC (#140 WI-6, below). Projecting
+                    // one would need an href↔position bridge, which is the tracked bookmark-from-TOC
+                    // follow-up. The current position comes from the relocate-derived canonical Locator;
                     // the jump uses Azw3Document.goTo (CFI-first→fraction, render-death carry-across).
                     val bookmarkRecords by container.annotationsRepository.bookmarks(bookKey)
                         .collectAsStateWithLifecycle(initialValue = emptyList())
@@ -153,6 +171,58 @@ class Azw3ReaderActivity : ComponentActivity() {
                         value = c != null && runCatching { container.annotationsRepository.isBookmarked(bookKey, c) }.getOrDefault(false)
                     }
                     val jumpScope = rememberCoroutineScope()
+
+                    // feature #140 WI-6 — the table of contents. The tree arrives on `book-ready` and is
+                    // hoisted out of the body host (onToc, mirroring onRelocate/onDocument); the provider
+                    // flattens it on its OWN injected dispatcher (the host never wraps the call — rule 50
+                    // §12.1). Nothing is persisted: the TOC is derived from a message already in flight.
+                    var tocItems by remember(bookKey) { mutableStateOf<List<FoliateTocItem>>(emptyList()) }
+                    // Empty until the flatten publishes → the scaffold hides Contents → the pre-publish
+                    // frame is byte-identical to pre-#140. Entries are KEPT across a render-process death
+                    // (onToc only ever fires with a loaded book's tree), so the control never blinks.
+                    val tocEntriesState = remember(bookKey) { mutableStateOf(emptyList<TocEntry>()) }
+                    LaunchedEffect(tocItems, o.book) {
+                        if (tocItems.isEmpty()) return@LaunchedEffect
+                        val provider = FoliateTocProvider(
+                            items = tocItems, book = o.book, dispatcher = Dispatchers.Default,
+                        )
+                        // NOT runCatching (Gate-4 R1 Medium): it swallows CancellationException too, so a
+                        // flatten cancelled by a book change or by this effect leaving composition would
+                        // publish an EMPTY list — blinking the Contents control off, or clobbering the next
+                        // book's rows. Cancellation must propagate; only a genuine failure degrades to "no
+                        // TOC", which is the same hide-the-control signal a book without one produces.
+                        val flattened = try {
+                            provider.toc()
+                        } catch (cancellation: CancellationException) {
+                            throw cancellation
+                        } catch (failure: Exception) {
+                            emptyList()
+                        }
+                        tocEntriesState.value = flattened
+                    }
+                    val tocEntries = tocEntriesState.value
+                    // The highlighted row: foliate's OWN current-chapter answer (relocate.tocHref), matched
+                    // byte-exactly against the row hrefs. -1 only when there is no TOC at all.
+                    val tocHrefs = remember(tocEntries) { tocEntries.map { it.canonicalLocator.href } }
+                    var currentTocHref by remember(bookKey) { mutableStateOf<String?>(null) }
+                    val currentTocIndex = foliateTocIndexFor(currentTocHref, tocHrefs)
+                    // A tapped row reuses the EXISTING #135 jump seam verbatim: the synchronous
+                    // [azw3TocJumpDecision] drives the sheet's dismiss from target validity, while the
+                    // awaited goTo — which blocks on the bundle's ack and so CANNOT run on the tap thread —
+                    // is ISSUED off the jump scope. Note what the decision does NOT claim: foliate's
+                    // view.goTo swallows a failed resolution and acks anyway, so neither the decision nor
+                    // the ack is evidence the reader moved (WI-7's real-book round-trip is). An
+                    // out-of-range row, or the document-less window right after a render-process death,
+                    // degrades to false → the sheet stays open, no invented error surface (rule 51).
+                    val onJumpToc: (Int) -> Boolean = { index ->
+                        val decision = azw3TocJumpDecision(liveDocument, tocEntries, index)
+                        val doc = liveDocument
+                        val entry = tocEntries.getOrNull(index)
+                        if (decision == JumpResult.Succeeded && doc != null && entry != null) {
+                            jumpScope.launch { runCatching { doc.goTo(entry.canonicalLocator) } }
+                        }
+                        decision == JumpResult.Succeeded
+                    }
 
                     Azw3ReaderChrome(
                         theme = displayTheme.theme,
@@ -175,16 +245,22 @@ class Azw3ReaderActivity : ComponentActivity() {
                             }
                         } else null,
                         currentLocator = currentCanonical,
+                        // feature #140 WI-6 — the book's real chapters + the live highlight + the row
+                        // jump. An EMPTY list keeps the Contents control hidden (the scaffold's rule).
+                        tocEntries = tocEntries,
+                        currentTocIndex = currentTocIndex,
+                        onJumpToc = onJumpToc,
                         bookmarks = bookmarkRows,
                         onJumpBookmark = { record ->
                             val doc = liveDocument
                             // Decide the sheet's dismiss SYNCHRONOUSLY from target validity: an unjumpable
                             // bookmark (no cfi + no finite progression) → Failed (sheet stays open, no
                             // invented error surface — rule 51); a jumpable one → Succeeded (dismiss). The
-                            // ACTUAL landing is the awaited Azw3Document.goTo (CFI-first→fraction) launched
-                            // off the jump scope — it blocks ~3s on the bundle relocate ack, so it CANNOT run
-                            // on the tap thread (that would ANR). render-death mid-jump is carried across by
-                            // the host's recreate path (takePendingGoTo → run(pendingGoTo=)); goTo re-lands once.
+                            // awaited Azw3Document.goTo (CFI-first→fraction) is ISSUED off the jump scope —
+                            // it blocks ~3s on the bundle ack, so it CANNOT run on the tap thread (that
+                            // would ANR) — and its Succeeded means ACKNOWLEDGED, not moved. render-death
+                            // mid-jump is carried across by the host's recreate path (takePendingGoTo →
+                            // run(pendingGoTo=)); the jump is then re-issued exactly once.
                             val decision = azw3JumpDecision(doc, record.locator)
                             if (decision == JumpResult.Succeeded && doc != null) {
                                 jumpScope.launch {
@@ -210,8 +286,13 @@ class Azw3ReaderActivity : ComponentActivity() {
                                     currentCanonical = Azw3LocatorBridge
                                         .toEnvelope(rel, o.book.contentSHA256, o.book.fileByteCount)
                                         .legacyLocator?.copy(format = BookFormat.azw3.name)?.validatedOrNull()
+                                    // feature #140 WI-6 — foliate's own current-chapter href, carried
+                                    // verbatim (null = unknown chapter, never "no TOC").
+                                    currentTocHref = rel.tocHref
                                 },
                                 onDocument = { doc -> liveDocument = doc },
+                                // feature #140 WI-6 — the book's TOC tree, hoisted out of the body host.
+                                onToc = { items -> tocItems = items },
                             )
                         },
                     )
@@ -298,6 +379,11 @@ private fun Azw3ReaderHost(
     // with the fresh document on each (re)create (render-death recovery swaps the WebView + document), and
     // with null on dispose — so the chrome always jumps into the live document, never a dead one.
     onDocument: (Azw3Document?) -> Unit = {},
+    // feature #140 WI-6 — hoist the book's TOC tree up so the chrome can build its Contents rows. Fired
+    // ONLY with a LOADED document's tree (never on Loading/Corrupt/Empty), so a render-process death
+    // leaves the previously published entries standing rather than blinking the control off and on; the
+    // replacement document re-opens the book and re-fires with a fresh tree.
+    onToc: (List<FoliateTocItem>) -> Unit = {},
 ) {
     val context = LocalContext.current
     var reloadKey by remember { mutableIntStateOf(0) }
@@ -344,6 +430,12 @@ private fun Azw3ReaderHost(
     // Holder-scoped: the collector lives exactly as long as this holder (cancelled on reload/dispose). Seed
     // any carried bookmark goTo so a render death mid-jump re-lands the position once on the replacement.
     LaunchedEffect(holder) { holder.document.run(resume, pendingGoTo = carriedGoTo) }
+
+    // feature #140 WI-6 — publish the book's TOC once the document reports Loaded. Keyed on the state, so
+    // it fires on the first load AND again after a render-death recreate re-opens the book.
+    LaunchedEffect(state) {
+        (state as? Azw3DocState.Loaded)?.let { onToc(it.toc) }
+    }
 
     // feature #129 WI-6 — apply the Display CSS to the current document. Re-keyed on `holder` so a fresh
     // render (reload / render-death recovery) re-records the CSS, and on `displaySettings` so a live

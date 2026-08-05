@@ -342,6 +342,59 @@ class FoliateTocProviderTest {
         assertEquals(padded, singleRow(padded).canonicalLocator.href)
     }
 
+    // ------------------------------------------------ the end-to-end target-resolution invariant
+
+    /**
+     * Feature #140 WI-6 — the END-TO-END form of the invariant WI-3 pins in the abstract: for every row
+     * a REAL provider emits, `FoliateGoToTarget.from(row.canonicalLocator)` is an
+     * [com.vreader.app.reader.foliate.FoliateGoToTarget.Href] carrying that row's href verbatim —
+     * never `null` (which would make `azw3JumpDecision` report Failed and strand the row) and never a
+     * [com.vreader.app.reader.foliate.FoliateGoToTarget.Fraction] (which would send every chapter tap
+     * to the start of the book while foliate still acked `ok:true`, dismissing the sheet on a
+     * completely broken jump — plan §5.2).
+     *
+     * It lives in WI-6 rather than WI-2 because it needs BOTH the provider and WI-3's href leg; the
+     * `depends:` token is what a dispatcher reads, so pinning it earlier would have made a WI
+     * dispatchable with a known-red test.
+     *
+     * The fixture spans every real href shape at once — nested EPUB-relative paths, a `#fragment`, a
+     * query, a decoded CJK path, the KF8 `kindle:pos:…` URI and the MOBI6 `filepos:…` form — plus
+     * skipped (blank label / blank href) containers, so the assertion runs over rows that actually
+     * SURVIVED the provider's filter rather than over a hand-built list.
+     */
+    @Test fun everyEmittedRow_resolvesToAnHrefTarget() {
+        val tree = listOf(
+            item(
+                "Part One", "text/part0001.html",
+                item("Chapter One", "text/part0001.html#c1"),
+                item("Chapter Two", "text/part0002.html?v=2#c2"),
+            ),
+            // A blank-label container whose real children must survive (iOS bug #262 parity).
+            item("   ", "text/part0003.html", item("第一章 序章", "文本/第一章 序章.xhtml#节1")),
+            // A blank-HREF container — the node itself is dropped, its children are not.
+            item("Untitled Part", "", item("KF8 chapter", "kindle:pos:fid:0AB1:off:0000001234")),
+            item("MOBI6 chapter", "filepos:0000012345"),
+        )
+        val entries = toc(tree)
+        // Size first: an accidentally-empty list would make the loop below assert nothing.
+        assertEquals(
+            listOf("Part One", "Chapter One", "Chapter Two", "第一章 序章", "KF8 chapter", "MOBI6 chapter"),
+            entries.map { it.title },
+        )
+        for (entry in entries) {
+            val target = com.vreader.app.reader.foliate.FoliateGoToTarget.from(entry.canonicalLocator)
+            assertTrue(
+                "row '${entry.title}' resolved to $target, not an Href",
+                target is com.vreader.app.reader.foliate.FoliateGoToTarget.Href,
+            )
+            assertEquals(
+                "the href must reach foliate byte-for-byte",
+                entry.canonicalLocator.href,
+                (target as com.vreader.app.reader.foliate.FoliateGoToTarget.Href).href,
+            )
+        }
+    }
+
     // ------------------------------------------------------------------ threading + cancellation
 
     @Test fun runsOnTheInjectedDispatcher_notTheCaller() {

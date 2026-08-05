@@ -658,9 +658,7 @@ NOT a filter on `MainActivity`: every activity is launchMode `standard`, so a
   degrade if the Readium anchor won't reapply.
 - `reader.nav.TxtMdTocProvider` (feature #139) is the `TocProvider`
   implementation for TXT/MD — the auto-generated Contents source beside
-  `ReadiumTocProvider` (EPUB) and `EmptyTocProvider` (PDF/AZW3). *(Host wiring
-  lands in #139 WI-7; until then `TxtReaderActivity` still passes an empty
-  `tocEntries`, so the Contents control stays hidden on TXT/MD.)* It runs the
+  `ReadiumTocProvider` (EPUB) and `EmptyTocProvider` (PDF). It runs the
   ported iOS heuristics over the
   already-decoded document on an **injected** dispatcher it hops onto itself
   (`TxtTocRuleEngine` = the 25 Legado-derived regex rules with the ICU→Java
@@ -675,9 +673,15 @@ NOT a filter on `MainActivity`: every activity is launchMode `standard`, so a
 - `reader.nav.FoliateTocProvider` (feature #140) is the `TocProvider` for the
   foliate-hosted Kindle formats (AZW3/MOBI/KF8) — the third Contents source
   beside `ReadiumTocProvider` (EPUB) and `TxtMdTocProvider` (TXT/MD), leaving
-  `EmptyTocProvider` for PDF. *(Host wiring lands in #140 WI-6; until then
-  `Azw3ReaderActivity` still passes an empty `tocEntries`, so the Contents
-  control stays hidden on AZW3.)* It flattens the `{label, href, subitems}`
+  `EmptyTocProvider` for **PDF alone** — TXT/MD (#139), EPUB (Readium) and
+  AZW3/MOBI/KF8 (#140) all have real providers now. **The AZW3 host wiring is
+  live** (#140 WI-6): `Azw3Document` carries the tree out on
+  `Azw3DocState.Loaded`, `Azw3ReaderActivity` hoists it via `onToc` and flattens
+  it on an injected dispatcher, and the bottom chrome renders the designed
+  Contents slot — so a Kindle book whose file carries an NCX now shows Contents,
+  with the current chapter highlighted from `relocate.tocHref` via
+  `foliateTocIndexFor`. A book with no usable TOC yields an empty list, which is
+  the scaffold's hide-the-control signal. It flattens the `{label, href, subitems}`
   tree the SHA-pinned foliate-js bundle already posts on every `book-ready`
   (parsed by `FoliateTocParser`, bounded at `MAX_TOC_DEPTH = 12` /
   `MAX_TOC_ENTRIES = 10_000`) depth-first with iOS #38's semantics: parent
