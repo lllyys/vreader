@@ -417,13 +417,22 @@ class CompositeDiagnosticsSourceTest {
         assertEquals(listOf("platform"), merge(logcat, ring).entries().map { it.message })
     }
 
+    /**
+     * The reasons are asserted, not just the subtype: a contained throw is the only record of what
+     * killed a leg, so a mutation that discarded the generated text would otherwise survive and
+     * leave both failures undiagnosable.
+     */
     @Test
     fun bothThrowingReportsUnavailableRatherThanCrashing() = runTest {
         val result = merge(
-            FakeSource(error = IOException("a")),
-            FakeSource(error = IOException("b")),
+            FakeSource(error = IOException("primary died")),
+            FakeSource(error = IllegalStateException("secondary died")),
         )
+
         assertTrue("expected Unavailable, got $result", result is SourceResult.Unavailable)
+        val reason = (result as SourceResult.Unavailable).reason
+        assertTrue(reason, reason.contains("IOException") && reason.contains("primary died"))
+        assertTrue(reason, reason.contains("IllegalStateException") && reason.contains("secondary died"))
     }
 
     /**

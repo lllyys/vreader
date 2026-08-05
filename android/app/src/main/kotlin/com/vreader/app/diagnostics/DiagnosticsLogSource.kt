@@ -18,10 +18,15 @@ interface DiagnosticsLogSource {
      * Up to [limit] entries, oldest -> newest, optionally bounded to entries at or after
      * [sinceMillis].
      *
-     * NEVER throws to signal a source failure — the reader could not be opened, the platform
+     * NEVER throws an ordinary operational failure — the reader could not be opened, the platform
      * denied it, it timed out — all of those are reported as [SourceResult.Unavailable].
-     * `CancellationException` is the one exception that still propagates, as it must:
-     * cancelling the caller is not a source failure and must not be swallowed.
+     *
+     * Two kinds of throw still propagate, and callers containing failures must let them:
+     * `CancellationException`, because cancelling the caller is not a source failure and must not be
+     * swallowed; and an `Error` (OOM, `LinkageError`), because it is not containable and reporting a
+     * JVM failure as a degraded log would blame the wrong subsystem. Both
+     * [CompositeDiagnosticsSource] and [DiagnosticsLogStore] therefore contain `Exception`, never
+     * `Throwable`.
      */
     suspend fun recentEntries(sinceMillis: Long? = null, limit: Int): SourceResult
 }
