@@ -45,6 +45,10 @@ import android.os.Build
 import android.os.SystemClock
 import android.provider.MediaStore
 import androidx.annotation.RequiresApi
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.ViewModelStore
+import androidx.lifecycle.viewmodel.initializer
+import androidx.lifecycle.viewmodel.viewModelFactory
 import androidx.room.Room
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.filters.SdkSuppress
@@ -328,6 +332,11 @@ class IncomingIntentImportConnectedTest {
 
         val uris = arrayListOf(
             Uri.parse("content://${context.packageName}.fileprovider/books/ours.epub"),
+            // Our own private storage, named directly: a file:// URI has no authority at all, and
+            // openInputStream would read it with OUR uid.
+            Uri.fromFile(File(context.filesDir, "books/private.epub")),
+            // A scheme this entry point never advertises.
+            Uri.parse("https://evil.example/book.epub"),
             Uri.parse("content://throws/a.epub"),
             Uri.parse("content://stall/b.epub"),
             Uri.parse("content://refuses/c.epub"),
@@ -347,6 +356,8 @@ class IncomingIntentImportConnectedTest {
         assertEquals(
             listOf(
                 IncomingImportOutcome.Unreadable,                       // our own FileProvider
+                IncomingImportOutcome.Unreadable,                       // our own private path
+                IncomingImportOutcome.Unreadable,                       // an unadvertised scheme
                 IncomingImportOutcome.Unreadable,                       // query threw
                 IncomingImportOutcome.Failed,                           // query parked past the bound
                 IncomingImportOutcome.Unreadable,                       // provider refused to open
@@ -358,7 +369,8 @@ class IncomingIntentImportConnectedTest {
         )
         assertTrue("the last URI must import", outcomes[uris.size - 1] is IncomingImportOutcome.Imported)
 
-        // Nothing was opened for the rejected-before-open classes (guard / query failure / oversize).
+        // Nothing was opened for the rejected-before-open classes (the three self-targeted /
+        // unadvertised URIs, the failing query, the stall, and the declared oversize).
         assertEquals("only the four openable URIs may reach the open call", 4, opens.get())
         // PERMIT BALANCE: the whole budget is back, so a 21st import still admits.
         val held = (0 until IncomingImportCoordinator.MAX_IN_FLIGHT).map {
@@ -482,29 +494,47 @@ class IncomingIntentImportConnectedTest {
     @Test
     @SdkSuppress(minSdkVersion = Build.VERSION_CODES.Q)
     fun failureOutcomesReuseTheShippedToastCopyAndSuccessIsSilent() {
-        val viewModel = LibraryViewModel(
-            repository = repository,
-            importer = BookImporter(booksDir, repository, lane),
-            collectionRepository = CollectionRepository(db.collectionDao()),
-            resolver = context.contentResolver,
-        )
+        // Owned by a ViewModelStore so the VM's own scope is CLEARED before teardown closes the
+        // database underneath it (a bare `LibraryViewModel(...)` would keep collecting).
+        val store = ViewModelStore()
         val emitted = CopyOnWriteArrayList<String>()
-        val collector = appScope.launch {
-            viewModel.events.collect { if (it is LibraryEvent.ImportFailed) emitted += it.message }
+        val generic: String
+        val unsupported: String
+        val storedName: String
+        val collector: Job
+        try {
+            val viewModel = ViewModelProvider(
+                store,
+                viewModelFactory {
+                    initializer {
+                        LibraryViewModel(
+                            repository = repository,
+                            importer = BookImporter(booksDir, repository, lane),
+                            collectionRepository = CollectionRepository(db.collectionDao()),
+                            resolver = context.contentResolver,
+                        )
+                    }
+                },
+            )[LibraryViewModel::class.java]
+            collector = appScope.launch {
+                viewModel.events.collect { if (it is LibraryEvent.ImportFailed) emitted += it.message }
+            }
+
+            // (1) a document no provider will hand over — the SHIPPED generic failure copy.
+            viewModel.import(Uri.parse("content://com.example.absent/missing.epub"))
+            awaitTrue("the shipped ViewModel emitted no generic failure") { emitted.size >= 1 }
+            generic = emitted[0]
+
+            // (2) a REAL, openable document whose extension names no known format — the SHIPPED
+            // unsupported copy, carrying the provider's own display name.
+            val row = insertDownload("wi5-copy-${UUID.randomUUID()}.docx", bookBytes, "application/octet-stream")
+            storedName = displayNameOf(row)
+            viewModel.import(row)
+            awaitTrue("the shipped ViewModel emitted no unsupported failure") { emitted.size >= 2 }
+            unsupported = emitted[1]
+        } finally {
+            instrumentation.runOnMainSync { store.clear() }
         }
-
-        // (1) a document no provider will hand over — the SHIPPED generic failure copy.
-        viewModel.import(Uri.parse("content://com.example.absent/missing.epub"))
-        awaitTrue("the shipped ViewModel emitted no generic failure") { emitted.size >= 1 }
-        val generic = emitted[0]
-
-        // (2) a REAL, openable document whose extension names no known format — the SHIPPED
-        // unsupported copy, carrying the provider's own display name.
-        val row = insertDownload("wi5-copy-${UUID.randomUUID()}.docx", bookBytes, "application/octet-stream")
-        val storedName = displayNameOf(row)
-        viewModel.import(row)
-        awaitTrue("the shipped ViewModel emitted no unsupported failure") { emitted.size >= 2 }
-        val unsupported = emitted[1]
         collector.cancel()
 
         assertEquals(generic, importFailureMessage(IncomingImportOutcome.Failed))

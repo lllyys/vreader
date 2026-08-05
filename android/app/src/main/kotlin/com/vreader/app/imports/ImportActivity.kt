@@ -40,6 +40,7 @@
 //   outcomes), MainActivity (collects those outcomes and shows the shipped failure toast)
 package com.vreader.app.imports
 
+import android.content.ContentResolver
 import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.net.Uri
@@ -139,12 +140,20 @@ class ImportActivity : ComponentActivity() {
      * items had already changed hands (double-releasing is harmless — a slot release is idempotent
      * — but double-closing a stream the coordinator now owns is not ours to do).
      *
-     * SCOPE OF THE INVARIANT: one outcome per URI holds for a batch that RUNS TO COMPLETION. A batch
-     * cancelled by the activity's destruction is abandoned wholesale — nothing is enqueued, every
-     * opened stream is closed and every slot returned, and no outcome is emitted. That is the plan's
-     * chosen behaviour for a mid-loop cancellation (the alternative, importing documents for a user
-     * who has already navigated away, was not the trade it made) and it is what
-     * `aCancelledBatchLeaksNoSlotAndNoDescriptor` pins.
+     * SCOPE OF THE INVARIANT, precisely. Cancellation (the activity being destroyed) is cooperative,
+     * so it can only be observed at a suspension point, and there are exactly two windows:
+     *
+     *  * DURING CONSTRUCTION — the batch is abandoned wholesale: nothing is enqueued, every opened
+     *    stream is closed and every slot returned, and NO outcome is emitted. That is the plan's
+     *    chosen trade for a mid-loop cancellation (the alternative, importing documents for a user
+     *    who has already navigated away, is not what it picked), and
+     *    `aCancelledBatchLeaksNoSlotAndNoDescriptor` pins it.
+     *  * AFTER CONSTRUCTION — the transfer loop below contains no suspension point, so once it is
+     *    entered it always runs to completion: every item reaches the coordinator and every outcome
+     *    is still emitted. Only the hand-off is skipped, and the coordinator buffers those outcomes
+     *    until MainActivity is next opened.
+     *
+     * So one outcome per URI holds for every batch except one cancelled mid-construction.
      */
     private suspend fun admit(uris: List<Uri>, deps: ImportDependencies) {
         val items = ArrayList<IncomingItem>(uris.size)
@@ -208,10 +217,11 @@ class ImportActivity : ComponentActivity() {
     }
 
     private suspend fun admitOne(uri: Uri, deps: ImportDependencies): IncomingItem {
-        // CONFUSED-DEPUTY GUARD (plan R13): a hostile sender can name OUR OWN FileProvider and
-        // trick us into copying our own private file. Rejected BEFORE anything else — and it
-        // still emits an item, because a silently dropped URI breaks one-outcome-per-URI.
-        if (isOwnAuthority(uri.authority)) return unreadable()
+        // CONFUSED-DEPUTY GUARD (plan R13): a hostile sender can point us at OUR OWN private
+        // storage and have us copy it into the library on its say-so. Rejected BEFORE anything
+        // else — and it still emits an item, because a silently dropped URI breaks
+        // one-outcome-per-URI.
+        if (isSelfTargeted(uri)) return unreadable()
 
         val gate = deps.coordinator.boundedCalls
         // ADMISSION FOR THE RESOLVER CALL ITSELF. Taking the import slot last (below) means a
@@ -236,6 +246,10 @@ class ImportActivity : ComponentActivity() {
             }
             if (deps.freeSpaceDir.usableSpace <= declared + FREE_SPACE_HEADROOM_BYTES) return failed()
         }
+
+        // Re-checked here, not just before `peek`: a concurrent activity may have exhausted the
+        // budget while this one was inside its cursor query.
+        if (gate.abandonedCalls >= IncomingImportCoordinator.MAX_ABANDONED_CALLS) return failed()
 
         val opened = gate.call<PendingImport?>(
             timeoutMillis = deps.resolveTimeoutMillis,
@@ -293,6 +307,22 @@ class ImportActivity : ComponentActivity() {
     }
 
     /**
+     * Would honouring [uri] make us read OUR OWN storage on a stranger's say-so?
+     *
+     * Two shapes, because the manifest routes two schemes. A `content://` URI can name one of our
+     * own FileProviders. A `file://` URI is the sharper one: it carries no authority at all, and
+     * `ContentResolver.openInputStream` on it opens the path with THIS process's uid — so a sender
+     * that suppresses its own StrictMode can hand us `file:///data/data/<us>/databases/…` and have
+     * the result land in the library as a "book". Anything else is refused outright: the only
+     * schemes this entry point can read are the two the manifest advertises.
+     */
+    private fun isSelfTargeted(uri: Uri): Boolean = when (uri.scheme?.lowercase()) {
+        ContentResolver.SCHEME_CONTENT -> uri.authority.isNullOrEmpty() || isOwnAuthority(uri.authority)
+        ContentResolver.SCHEME_FILE -> isAppPrivatePath(uri.path)
+        else -> true
+    }
+
+    /**
      * Is [authority] served by one of OUR OWN providers?
      *
      * The literal application-ID prefix is checked FIRST so the guard cannot fail OPEN: every
@@ -308,6 +338,31 @@ class ImportActivity : ComponentActivity() {
         @Suppress("DEPRECATION")
         val info = runCatching { packageManager.resolveContentProvider(authority, 0) }.getOrNull()
         return info?.packageName == packageName
+    }
+
+    /**
+     * Does [path] live inside app-private storage? CANONICALIZED on both sides, so neither `..`
+     * segments nor the `/data/data` → `/data/user/0` symlink can walk around it, and FAILING CLOSED
+     * on an empty path or a canonicalization error — a path we cannot even resolve is not one we
+     * should be opening with our own uid.
+     */
+    private fun isAppPrivatePath(path: String?): Boolean {
+        if (path.isNullOrEmpty()) return true
+        val target = runCatching { File(path).canonicalPath }.getOrNull() ?: return true
+        return appPrivateRoots().any { root -> target == root || target.startsWith("$root/") }
+    }
+
+    /** Internal storage plus the app-private directories on every external volume. */
+    private fun appPrivateRoots(): List<String> = buildList {
+        fun add(file: File?) {
+            runCatching { file?.canonicalPath }.getOrNull()?.let { add(it) }
+        }
+        add(File(applicationInfo.dataDir))
+        add(filesDir)
+        add(cacheDir)
+        add(noBackupFilesDir)
+        add(externalCacheDir)
+        runCatching { getExternalFilesDirs(null) }.getOrNull()?.forEach(::add)
     }
 
     /**
