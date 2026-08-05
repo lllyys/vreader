@@ -180,6 +180,15 @@ object BookMagicSniffer {
      * looks like, binary. Without that distinction the single byte `C2` would sniff as
      * text, decoding to nothing at all.
      *
+     * ACCEPTED RESIDUAL (Gate-4 round 2): a file of EXACTLY [PROBE_BYTES] bytes whose last
+     * byte starts an incomplete sequence is indistinguishable, from inside the budget, from
+     * a longer file cut at the boundary — both look like `FULL` with a short remainder. It
+     * is therefore hinted `txt`. Resolving it would need either a 4097th byte (weakening
+     * the read ceiling this file exists to guarantee) or rejecting every boundary-cut CJK
+     * file. The consequence is a nameless, typeless, exactly-4096-byte corrupt file
+     * importing as text — a precision loss in a best-effort hint, with no identity or
+     * memory-safety consequence.
+     *
      * A NUL or other non-whitespace C0 control also makes it binary, which is what turns
      * "random bytes are not text" into a structural answer instead of a probabilistic one.
      * Both rules only ever NARROW `txt`.

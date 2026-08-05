@@ -128,13 +128,17 @@ class IncomingBookResolver(
         // allocation cannot strand the open descriptor between the two.
         var owned: InputStream = opened
         try {
-            // Sniffing needs mark/reset. Wrapping (never rejecting) keeps providers that
-            // hand back a plain FileInputStream working.
-            val stream = if (opened.markSupported()) {
-                opened
-            } else {
-                BufferedInputStream(opened, BookMagicSniffer.PROBE_BYTES * 2).also { owned = it }
-            }
+            // ALWAYS wrap, even when the source claims mark support. A hostile stream can
+            // return true from `markSupported()` and implement `reset()` as a SUCCESSFUL
+            // no-op; the sniffer would then hand back a verdict on a stream that is still
+            // advanced, and BookImporter would hash only the suffix — a silently wrong
+            // canonical key. A resolver-owned buffer is the only mark/reset we trust.
+            //
+            // Sizing it at exactly PROBE_BYTES also keeps the PROVIDER-facing read inside
+            // the sniffer's stated budget: a larger buffer would prefetch more bytes from
+            // the provider than the probe ever looks at.
+            val stream = BufferedInputStream(opened, BookMagicSniffer.PROBE_BYTES)
+            owned = stream
 
             val declaredName = cleanedName(metadata.displayName)
             val nameFormat = declaredName?.let { DocumentFingerprint.formatForFilename(it) }
@@ -298,11 +302,13 @@ class IncomingBookResolver(
             // title, so "../../etc/passwd" reduces to "passwd" and no traversal survives —
             // and everything downstream works on a bounded string. NFC never introduces or
             // removes an ASCII separator, so splitting before normalizing is equivalent.
-            val leaf = raw.substringAfterLast('/').substringAfterLast('\\')
-            val bounded = capLength(leaf, MAX_RAW_NAME_CHARS)
+            val leafStart = maxOf(raw.lastIndexOf('/'), raw.lastIndexOf('\\')) + 1
+            if (leafStart >= raw.length) return null
+            val bounded = boundedLeaf(raw, leafStart)
 
-            val normalized = runCatching { Normalizer.normalize(bounded, Normalizer.Form.NFC) }
-                .getOrDefault(bounded)
+            // Normalizer.normalize only rejects a null argument; no guard is needed, and a
+            // runCatching here would swallow cancellation and JVM errors alike.
+            val normalized = Normalizer.normalize(bounded, Normalizer.Form.NFC)
 
             val stripped = buildString(normalized.length) {
                 var index = 0
@@ -326,6 +332,26 @@ class IncomingBookResolver(
             val collapsed = stripped.replace(SPACE_RUN, " ").trim()
             if (collapsed.isEmpty() || collapsed.all { it == '.' }) return null
             return capLength(collapsed, MAX_NAME_CHARS)
+        }
+
+        /**
+         * The last path component of [raw], never longer than [MAX_RAW_NAME_CHARS].
+         *
+         * Deliberately index-based: `substringAfterLast` would first materialise the whole
+         * attacker-sized leaf, and the bound exists precisely to stop that. Only the kept
+         * prefix and the extension are ever copied.
+         */
+        private fun boundedLeaf(raw: String, leafStart: Int): String {
+            if (raw.length - leafStart <= MAX_RAW_NAME_CHARS) return raw.substring(leafStart)
+            val dot = raw.lastIndexOf('.')
+            val extension = if (dot > leafStart && raw.length - dot in 2..MAX_EXTENSION_CHARS) {
+                raw.substring(dot)
+            } else {
+                ""
+            }
+            var end = leafStart + MAX_RAW_NAME_CHARS - extension.length
+            if (end > leafStart && Character.isHighSurrogate(raw[end - 1])) end--
+            return raw.substring(leafStart, end) + extension
         }
 
         private fun capLength(name: String, limit: Int): String {

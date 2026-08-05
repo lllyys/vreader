@@ -38,6 +38,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withContext
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -114,15 +115,27 @@ class IncomingBookResolverTest {
         ): Int = 0
     }
 
-    /** A stream that records its own close, so a leak is observable. */
+    /** A stream that records its own closes, so a leak — or a double close — is observable. */
     private class TrackingStream(bytes: ByteArray) : ByteArrayInputStream(bytes) {
-        var closed = false
+        var closeCount = 0
             private set
+        val closed: Boolean get() = closeCount > 0
 
         override fun close() {
-            closed = true
+            closeCount++
             super.close()
         }
+    }
+
+    /**
+     * Claims mark support and implements `reset()` as a SUCCESSFUL no-op. A provider that
+     * lies this way would leave the sniffed bytes consumed, so the importer would hash only
+     * the suffix and mint a wrong canonical key.
+     */
+    private class LyingMarkStream(bytes: ByteArray) : ByteArrayInputStream(bytes) {
+        override fun markSupported(): Boolean = true
+        override fun mark(readAheadLimit: Int) = Unit
+        override fun reset() = Unit
     }
 
     /** Counts every read, so "the stream was untouched" can be asserted, not inferred. */
@@ -141,23 +154,40 @@ class IncomingBookResolverTest {
         override fun close() { closed = true; super.close() }
     }
 
-    /** A stream whose `markSupported()` throws — the leak window between open and wrap. */
+    /** A stream whose `markSupported()` throws — the resolver must never ask it. */
     private class HostileMarkStream : InputStream() {
         var closed = false
             private set
+        var markSupportedConsulted = false
+            private set
 
         override fun read(): Int = -1
-        override fun markSupported(): Boolean = throw IllegalStateException("hostile provider")
+        override fun markSupported(): Boolean {
+            markSupportedConsulted = true
+            throw IllegalStateException("hostile provider")
+        }
+
         override fun close() { closed = true }
     }
 
-    /** A stream with no mark support — the resolver must WRAP it, not reject it. */
+    /**
+     * A stream with no mark support — the resolver must WRAP it, not reject it — that also
+     * counts the bytes pulled from the SOURCE, which is where the probe budget really has
+     * to hold (a generously-sized wrapper would prefetch past it).
+     */
     private class NoMarkStream(private val bytes: ByteArray) : InputStream() {
         private var pos = 0
+        var bytesRead = 0
+            private set
         var closed = false
             private set
 
-        override fun read(): Int = if (pos < bytes.size) bytes[pos++].toInt() and 0xFF else -1
+        override fun read(): Int {
+            if (pos >= bytes.size) return -1
+            bytesRead++
+            return bytes[pos++].toInt() and 0xFF
+        }
+
         override fun markSupported(): Boolean = false
         override fun close() { closed = true }
     }
@@ -495,6 +525,48 @@ class IncomingBookResolverTest {
     }
 
     @Test
+    fun aStreamThatLiesAboutMarkSupportStillYieldsTheFullBytes() {
+        // markSupported() == true with a no-op reset(). If the resolver trusted it, the
+        // sniffed prefix would be gone and the importer would hash only the suffix — the
+        // same bytes would land under a DIFFERENT canonical key. The resolver's own buffer
+        // is what makes the rewind real.
+        val target = uri("mark2/12345")
+        val bytes = epubBytes()
+        serve(target, bytes) { LyingMarkStream(it) }
+        declare(null)
+
+        runBlocking {
+            val pending = open(target)
+            assertEquals(BookFormat.epub, pending.format)
+            assertEquals(sha(bytes), sha(pending.stream.readBytes()))
+            pending.stream.close()
+        }
+    }
+
+    @Test
+    fun theProviderIsNeverReadPastTheProbeBudgetDuringResolution() {
+        // The budget has to hold at the PROVIDER, not merely at the sniffer's argument:
+        // an over-sized wrapper buffer would prefetch bytes the probe never looks at.
+        val target = uri("budget1/12345")
+        val bytes = pdfBytes() + ByteArray(64 * 1024) { (it % 251).toByte() }
+        val last = serve(target, bytes) { NoMarkStream(it) }
+        declare(null)
+
+        runBlocking {
+            val pending = open(target)
+            assertEquals(BookFormat.pdf, pending.format)          // the sniff really ran
+            val source = last() as NoMarkStream
+            assertTrue(
+                "resolution pulled ${source.bytesRead} bytes from the provider, past the " +
+                    "${BookMagicSniffer.PROBE_BYTES}-byte probe budget",
+                source.bytesRead <= BookMagicSniffer.PROBE_BYTES,
+            )
+            assertEquals(sha(bytes), sha(pending.stream.readBytes()))
+            pending.stream.close()
+        }
+    }
+
+    @Test
     fun resolveAndOpenOpensExactlyOneStream() = runTest {
         val target = uri("count1/12345")
         declare("book.epub", size = 10)
@@ -576,17 +648,22 @@ class IncomingBookResolverTest {
     }
 
     @Test
-    fun aStreamWhoseMarkSupportedThrowsIsClosedNotLeaked() = runTest {
-        // The window between `openInputStream` returning and the mark-wrapping decision:
-        // a throw there must not strand the descriptor.
+    fun aHostileMarkSupportedIsNeverConsulted() = runTest {
+        // Round 1 flagged the window between `openInputStream` returning and the
+        // mark-wrapping decision. Round 2 closed it outright: the resolver no longer ASKS
+        // the source whether it supports marking, it always supplies its own buffer. A
+        // stream whose `markSupported()` throws therefore cannot derail resolution at all.
         val target = uri("leak3/12345")
         declare("book.epub")
         val hostile = HostileMarkStream()
         shadowOf(contentResolver).registerInputStreamSupplier(target) { hostile }
 
-        val error = runCatching { subject.resolveAndOpen(target) }.exceptionOrNull()
-        assertTrue("expected the provider's failure to propagate, got $error", error is IllegalStateException)
-        assertTrue("the stream leaked in the open-to-wrap window", hostile.closed)
+        val pending = open(target)
+        assertEquals(BookFormat.epub, pending.format)
+        assertTrue(pending.stream.markSupported())
+        assertTrue("the source's markSupported() was consulted", !hostile.markSupportedConsulted)
+        pending.stream.close()
+        assertTrue("closing the wrapper must close the source", hostile.closed)
     }
 
     @Test
@@ -607,17 +684,43 @@ class IncomingBookResolverTest {
             TrackingStream(epubBytes()).also { produced.set(it) }
         }
 
-        runBlocking {
+        val job = runBlocking {
             val job = launch(Dispatchers.Default) { subject.resolveAndOpen(target) }
             assertTrue("the open was never reached", opened.await(10, TimeUnit.SECONDS))
             job.cancel()                 // cancel while the blocking open is in flight
             proceed.countDown()          // let the block finish and try to deliver
             job.join()
+            job
         }
 
         val stream = produced.get()
         assertTrue("no stream was produced, so the race was not exercised", stream != null)
-        assertTrue("the stream leaked across the cancelled hand-off", stream!!.closed)
+        assertTrue("the job did not actually end cancelled", job.isCancelled)
+        // Exactly one close: a leak is 0, and a double close would mean two owners.
+        assertEquals("the stream leaked across the cancelled hand-off", 1, stream!!.closeCount)
+    }
+
+    @Test
+    fun aSuccessfulHandoffLeavesTheStreamOpenForTheCaller() {
+        // The control for the cancellation test above: on the SAME real-dispatcher path,
+        // an uncancelled caller must receive a live stream that the resolver has NOT
+        // closed. Without this, "always close it" would pass the cancellation test.
+        val target = uri("cancel2/12345")
+        declare("book.epub")
+        val bytes = epubBytes()
+        val produced = AtomicReference<TrackingStream?>(null)
+        shadowOf(contentResolver).registerInputStreamSupplier(target) {
+            TrackingStream(bytes).also { produced.set(it) }
+        }
+
+        runBlocking {
+            val pending = withContext(Dispatchers.Default) { subject.resolveAndOpen(target) }
+            assertTrue("nothing was resolved", pending != null)
+            assertEquals("the resolver closed a stream it delivered", 0, produced.get()!!.closeCount)
+            assertEquals(sha(bytes), sha(pending!!.stream.readBytes()))
+            pending.stream.close()
+            assertEquals(1, produced.get()!!.closeCount)
+        }
     }
 
     @Test

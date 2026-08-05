@@ -118,14 +118,19 @@ class BookMagicSnifferTest {
         write(trailing)
     }.toByteArray()
 
-    private fun validEpub(): ByteArray = zipHeader()
+    /**
+     * An OCF-SHAPED header — deliberately not a claim that this is a valid EPUB. Its CRC is
+     * zero and it has no central directory, because the sniffer is a bounded-prefix hint
+     * and cannot see either. Naming it `validEpub` would overstate what is being tested.
+     */
+    private fun ocfShapedEpub(): ByteArray = zipHeader()
 
     /** Every negative must coexist with a working positive, or it proves nothing. */
-    private fun assertAValidEpubStillSniffsAsEpub() {
+    private fun assertAnOcfShapedEpubStillSniffsAsEpub() {
         assertEquals(
-            "the negative passed but a VALID epub is also rejected — blanket failure, not discrimination",
+            "the negative passed but an OCF-shaped epub is ALSO rejected — that is blanket failure, not discrimination",
             BookFormat.epub,
-            assertSniff(validEpub()),
+            assertSniff(ocfShapedEpub()),
         )
     }
 
@@ -138,7 +143,23 @@ class BookMagicSnifferTest {
 
     @Test
     fun storedMimetypeZipIsEpub() {
-        assertEquals(BookFormat.epub, assertSniff(validEpub()))
+        assertEquals(BookFormat.epub, assertSniff(ocfShapedEpub()))
+    }
+
+    @Test
+    fun aFileExactlyTheProbeLengthWithATruncatedTailIsAcceptedAsText() {
+        // ACCEPTED RESIDUAL, pinned so it is a decision rather than an accident (Gate-4
+        // round 2). At exactly PROBE_BYTES the sniffer cannot tell "cut by EOF" from "cut
+        // by our own boundary" without reading a 4097th byte, which would weaken the read
+        // ceiling. It therefore extends the same benefit of the doubt a longer file gets.
+        val bytes = "a".repeat(BookMagicSniffer.PROBE_BYTES - 1).toByteArray() + byteArrayOf(0xC2.toByte())
+        assertEquals(BookMagicSniffer.PROBE_BYTES, bytes.size)
+        assertEquals(BookFormat.txt, assertSniff(bytes))
+
+        // One byte shorter, EOF is observed inside the budget and the same truncation IS
+        // rejected — so the residual is a boundary artefact, not a blanket hole.
+        val shorter = "a".repeat(BookMagicSniffer.PROBE_BYTES - 2).toByteArray() + byteArrayOf(0xC2.toByte())
+        assertNull(assertSniff(shorter))
     }
 
     @Test
@@ -153,7 +174,7 @@ class BookMagicSnifferTest {
         // "BOOKMOBI" earlier in a file must not be enough.
         val bytes = "BOOKMOBI".toByteArray(Charsets.US_ASCII) + ByteArray(120) { 0x00 }
         assertNull(assertSniff(bytes))
-        assertAValidEpubStillSniffsAsEpub()
+        assertAnOcfShapedEpubStillSniffsAsEpub()
     }
 
     @Test
@@ -206,13 +227,13 @@ class BookMagicSnifferTest {
         val rng = kotlin.random.Random(20260804)
         val bytes = byteArrayOf(0x80.toByte(), 0x81.toByte(), 0x00, 0x00) + ByteArray(512) { rng.nextInt().toByte() }
         assertNull(assertSniff(bytes))
-        assertAValidEpubStillSniffsAsEpub()
+        assertAnOcfShapedEpubStillSniffsAsEpub()
     }
 
     @Test
     fun deflatedFirstEntryIsNull() {
         assertNull(assertSniff(zipHeader(method = 8)))
-        assertAValidEpubStillSniffsAsEpub()
+        assertAnOcfShapedEpubStillSniffsAsEpub()
     }
 
     @Test
@@ -220,7 +241,7 @@ class BookMagicSnifferTest {
         assertNull(assertSniff(zipHeader(name = "META-INF")))          // same length, wrong name
         assertNull(assertSniff(zipHeader(name = "mimetypeX")))         // longer
         assertNull(assertSniff(zipHeader(name = "mime")))              // shorter
-        assertAValidEpubStillSniffsAsEpub()
+        assertAnOcfShapedEpubStillSniffsAsEpub()
     }
 
     @Test
@@ -239,7 +260,7 @@ class BookMagicSnifferTest {
         )
         assertNull(assertSniff(smuggled))
         assertNull(assertSniff(zipHeader(extra = ByteArray(4) { 0x00 })))
-        assertAValidEpubStillSniffsAsEpub()
+        assertAnOcfShapedEpubStillSniffsAsEpub()
     }
 
     @Test
@@ -248,17 +269,17 @@ class BookMagicSnifferTest {
         assertNull(assertSniff(zipHeader(compressed = 0, uncompressed = 0)))
         assertNull(assertSniff(zipHeader(compressed = 20, uncompressed = 21)))
         assertNull(assertSniff(zipHeader(compressed = 21, uncompressed = 20)))
-        assertAValidEpubStillSniffsAsEpub()
+        assertAnOcfShapedEpubStillSniffsAsEpub()
     }
 
     @Test
     fun truncatedLocalHeaderIsNull() {
-        val full = validEpub()
+        val full = ocfShapedEpub()
         // Every truncation point inside the header, plus one just short of the content.
         for (cut in intArrayOf(4, 10, 20, 29, 30, 37, 45, 57)) {
             assertNull("truncation at $cut byte(s) must be null", assertSniff(full.copyOf(cut)))
         }
-        assertAValidEpubStillSniffsAsEpub()
+        assertAnOcfShapedEpubStillSniffsAsEpub()
     }
 
     @Test
@@ -268,14 +289,14 @@ class BookMagicSnifferTest {
         assertNull(assertSniff(zipHeader(nameLenOverride = 60_000)))
         assertNull(assertSniff(zipHeader(extraLenOverride = 60_000)))
         assertNull(assertSniff(zipHeader(nameLenOverride = 65_535, extraLenOverride = 65_535)))
-        assertAValidEpubStillSniffsAsEpub()
+        assertAnOcfShapedEpubStillSniffsAsEpub()
     }
 
     @Test
     fun contentBytesOtherThanTheEpubMediaTypeIsNull() {
         assertNull(assertSniff(zipHeader(content = "application/zip+xxxx".toByteArray(Charsets.US_ASCII))))
         assertNull(assertSniff(zipHeader(content = ByteArray(20) { 0x00 })))
-        assertAValidEpubStillSniffsAsEpub()
+        assertAnOcfShapedEpubStillSniffsAsEpub()
     }
 
     @Test
@@ -294,7 +315,7 @@ class BookMagicSnifferTest {
         )
         assertTrue(bomb.size > BookMagicSniffer.PROBE_BYTES)
         assertNull(assertSniff(bomb))
-        assertAValidEpubStillSniffsAsEpub()
+        assertAnOcfShapedEpubStillSniffsAsEpub()
     }
 
     @Test
@@ -311,7 +332,7 @@ class BookMagicSnifferTest {
                 zipHeader(signature = byteArrayOf(0x50, 0x4B, 0x07, 0x08), trailing = ByteArray(64)),
             ),
         )
-        assertAValidEpubStillSniffsAsEpub()
+        assertAnOcfShapedEpubStillSniffsAsEpub()
     }
 
     @Test
@@ -321,7 +342,7 @@ class BookMagicSnifferTest {
         // flag check, an attacker could declare ciphertext and still be believed.
         assertNull(assertSniff(zipHeader(flags = 0x0001)))
         assertNull(assertSniff(zipHeader(flags = 0x0008)))
-        assertAValidEpubStillSniffsAsEpub()
+        assertAnOcfShapedEpubStillSniffsAsEpub()
     }
 
     @Test
@@ -353,13 +374,13 @@ class BookMagicSnifferTest {
             BookFormat.txt,
             assertSniff(byteArrayOf(0xFF.toByte(), 0xFE.toByte(), 0x41, 0x00, 0x42, 0x00)),
         )
-        assertAValidEpubStillSniffsAsEpub()
+        assertAnOcfShapedEpubStillSniffsAsEpub()
     }
 
     @Test
     fun zeroByteInputIsNull() {
         assertNull(assertSniff(ByteArray(0)))
-        assertAValidEpubStillSniffsAsEpub()
+        assertAnOcfShapedEpubStillSniffsAsEpub()
     }
 
     @Test
@@ -407,7 +428,7 @@ class BookMagicSnifferTest {
 
     @Test
     fun aStreamWhoseReadThrowsYieldsNullRatherThanPropagating() {
-        val source = object : ByteArrayInputStream(validEpub()) {
+        val source = object : ByteArrayInputStream(ocfShapedEpub()) {
             override fun read(b: ByteArray, off: Int, len: Int): Int =
                 throw java.io.IOException("provider died mid-probe")
         }
@@ -416,7 +437,7 @@ class BookMagicSnifferTest {
 
     @Test
     fun aStreamWhoseMarkThrowsYieldsNull() {
-        val source = object : ByteArrayInputStream(validEpub()) {
+        val source = object : ByteArrayInputStream(ocfShapedEpub()) {
             override fun mark(readAheadLimit: Int) = throw IllegalStateException("no marking")
         }
         assertNull(BookMagicSniffer.sniff(source))
