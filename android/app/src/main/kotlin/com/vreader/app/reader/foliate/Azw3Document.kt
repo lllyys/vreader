@@ -1,7 +1,8 @@
 // Purpose: the MAIN-THREAD controller for an AZW3/MOBI/KF8 reading session. Owns a WebView + the
 // secure FoliateBridge, drives the open → restore → render → navigate flow, and exposes the reading
 // state + the latest position (main-thread-owned, so the Activity's onStop can flush synchronously).
-// All methods are main-thread only (WebView is). Feature #126 WI-4.
+// All methods are main-thread only (WebView is). Feature #126 WI-4; feature #140 WI-6 carries the
+// book's table of contents out on [Azw3DocState.Loaded] so the host can build its Contents rows.
 package com.vreader.app.reader.foliate
 
 import android.content.Context
@@ -23,8 +24,17 @@ sealed interface Azw3DocState {
     data object Loading : Azw3DocState
     /** This device's System WebView is too old for the secure bridge (`addWebMessageListener`). */
     data object WebViewUnsupported : Azw3DocState
-    /** The book opened + rendered; `sectionTotal` spine items. */
-    data class Loaded(val sectionTotal: Int) : Azw3DocState
+    /**
+     * The book opened + rendered; `sectionTotal` spine items.
+     *
+     * [toc] is the book's table of contents exactly as `book-ready` delivered it (feature #140 WI-6) —
+     * the nested `{label, href, subitems}` tree [FoliateTocParser] already bounded. It rides the STATE
+     * rather than a separate callback because it arrives with, and is only meaningful alongside, a
+     * loaded book. Empty means "no usable TOC" (absent / malformed / over the entry cap), which the
+     * host turns into an empty `tocEntries` and the chrome into a hidden Contents control. Defaulted
+     * so every pre-#140 construction site still compiles.
+     */
+    data class Loaded(val sectionTotal: Int, val toc: List<FoliateTocItem> = emptyList()) : Azw3DocState
     /** The book parsed but had no readable sections. */
     data object Empty : Azw3DocState
     /** The book could not be opened/parsed (corrupt / unsupported / JS error before book-ready). */
@@ -113,7 +123,13 @@ class Azw3Document(
                 // Re-apply the latest Display CSS now the renderer exists (a setStyles issued before
                 // book-ready would be a no-op — view.renderer isn't wired yet).
                 pendingStylesCss?.let(bridge::setStyles)
-                _state.value = if (message.sectionTotal > 0) Azw3DocState.Loaded(message.sectionTotal) else Azw3DocState.Empty
+                // feature #140 WI-6 — carry the book's TOC out with the Loaded state; the host builds
+                // the Contents rows from it. A book with no TOC yields an empty list, never an error.
+                _state.value = if (message.sectionTotal > 0) {
+                    Azw3DocState.Loaded(message.sectionTotal, message.toc)
+                } else {
+                    Azw3DocState.Empty
+                }
                 // Re-issue a goTo that was pending across a render restart, EXACTLY ONCE (clear the
                 // field before re-issuing so a second render-death doesn't loop it forever). Fire and
                 // forget — the host's own goTo() already returned; this only re-lands the position.

@@ -2,15 +2,24 @@
 // Azw3ReaderActivity.kt (feature #140 WI-5 — a behaviour-preserving split; the activity was past the
 // ~300-line guideline). Same package `com.vreader.app.reader`, so no call site or test import changed:
 //   • [Azw3ReaderChrome]      — the shared ReaderChromeScaffold wiring for the AZW3 host (feature #132
-//                               WI-7-hosts + #134 WI-5 More/Details + #135 WI-7 bookmarks).
-//   • Azw3NotesBottomChrome   — the Notes-only bottom toolbar (private; AZW3 has no Contents/Display).
-//   • [azw3JumpResult] / [azw3JumpDecision] — the pure, JVM-testable bookmark-jump helpers.
+//                               WI-7-hosts + #134 WI-5 More/Details + #135 WI-7 bookmarks + #140 WI-6
+//                               Contents).
+//   • Azw3BottomChrome        — the Contents · Notes bottom toolbar (private), each slot rendered only
+//                               when the scaffold supplies its callback.
+//   • [azw3JumpResult] / [azw3JumpDecision] — the pure, JVM-testable jump helpers (shared by the
+//                               bookmark rows and, since #140 WI-6, the Contents rows).
 // The activity (Azw3ReaderActivity.kt) keeps the lifecycle, the WebView body host, and the plain
-// loading/error ReaderScaffold. Nothing here changed behaviour, visibility, defaults, or order.
+// loading/error ReaderScaffold.
+//
+// feature #140 WI-6 — AZW3 now HAS a table of contents (FoliateTocProvider over the tree the bundle
+// already posts on book-ready), so this file makes it REACHABLE. Two independent gates had to open:
+// the scaffold's `tocEntries.isEmpty()` show/hide rule (fed by the host's real entries) AND the
+// bottom-chrome slot, which used to discard the scaffold's Contents open-callback outright — a
+// non-empty TOC alone would have lit up nothing. The sheet, the rows, and the indentation are #132's,
+// reused unchanged (rule 51: no new visible element).
 package com.vreader.app.reader
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,32 +28,25 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Icon
-import androidx.compose.material3.Text
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.FormatListBulleted
 import androidx.compose.material.icons.outlined.BorderColor
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.MutableState
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.vreader.app.annotations.AnnotationsSnapshot
 import com.vreader.app.annotations.BookmarkRecord
 import com.vreader.app.reader.chrome.ReaderChromeScaffold
 import com.vreader.app.reader.chrome.ReaderChromeState
+import com.vreader.app.reader.chrome.ToolbarIconButton
 import com.vreader.app.reader.foliate.Azw3Document
 import com.vreader.app.reader.foliate.Azw3GoToResult
 import com.vreader.app.reader.nav.BookmarkRowItem
 import com.vreader.app.reader.nav.JumpResult
+import com.vreader.app.reader.nav.TocEntry
 import com.vreader.app.reader.settings.ReaderTheme
 import vreader.contracts.Locator
 
@@ -83,14 +85,21 @@ fun azw3JumpDecision(document: Azw3Document?, canonical: Locator): JumpResult {
 
 /**
  * The AZW3 reader host chrome — feature #132 WI-7-hosts (mirror of WI-6's [TxtReaderChrome]). Renders the
- * shared [ReaderChromeScaffold] (top bar + the Notes review sheet) over the AZW3 [body] (the WebView). AZW3
- * has no reader TOC → `tocEntries` is EMPTY (the EmptyTocProvider posture) → the scaffold hides the Contents
- * control. It has no Display control (the #129 CSS applies live from the store with no control surface); the
- * bottom chrome is a Notes-only toolbar ([Azw3NotesBottomChrome]). The top bar's Search/More/bookmark slots
- * are omitted (null — #133/#134/#135; no dead controls). [onJumpToAnnotation] is NULL — AZW3 review is
- * review-only (no in-session goTo until #135; the card is non-clickable, a capability gate — FoliateBridge/
- * Azw3Document/foliate-js stay untouched). Wrapped in a `systemBarsPadding()` Column so the chrome clears
- * the status/nav bars. Extracted (internal) so the host wiring is directly testable.
+ * shared [ReaderChromeScaffold] (top bar + the Contents|Bookmarks and Notes sheets) over the AZW3 [body]
+ * (the WebView). It has no Display control (the #129 CSS applies live from the store with no control
+ * surface); the bottom chrome is the Contents · Notes toolbar (Azw3BottomChrome). The top bar's Search
+ * slot is omitted (null — #133; no dead controls). [onJumpToAnnotation] is NULL — AZW3 annotation review
+ * is review-only (the card is non-clickable, a capability gate). Wrapped in a `systemBarsPadding()`
+ * Column so the chrome clears the status/nav bars. Extracted (internal) so the host wiring is directly
+ * testable.
+ *
+ * feature #140 WI-6 — the table of contents: [tocEntries] are the book's chapters as
+ * [com.vreader.app.reader.nav.FoliateTocProvider] flattened them, [currentTocIndex] the row to
+ * highlight (`foliateTocIndexFor` over the live `relocate.tocHref`), and [onJumpToc] the row jump
+ * (`true` → the sheet dismisses, `false` → it stays open with no invented error surface — rule 51). All
+ * three are DEFAULTED to the pre-#140 posture (empty / 0 / always-false), so an omitting caller still
+ * hides the Contents control and compiles unchanged. An empty list is the scaffold's documented
+ * hide-the-control signal — a Kindle book with no usable TOC behaves exactly as it did before #140.
  */
 @Composable
 internal fun Azw3ReaderChrome(
@@ -113,6 +122,9 @@ internal fun Azw3ReaderChrome(
     currentLocator: Locator? = null,
     bookmarks: List<BookmarkRowItem> = emptyList(),
     onJumpBookmark: ((BookmarkRecord) -> JumpResult)? = null,
+    tocEntries: List<TocEntry> = emptyList(),
+    currentTocIndex: Int = 0,
+    onJumpToc: (Int) -> Boolean = { false },
 ) {
     Column(Modifier.fillMaxSize().background(theme.background).systemBarsPadding()) {
         ReaderChromeScaffold(
@@ -120,18 +132,22 @@ internal fun Azw3ReaderChrome(
             title = title,
             chromeState = chromeState,
             onBack = onBack,
-            tocEntries = emptyList(),           // no TOC → the scaffold hides the Contents control
-            currentTocIndex = 0,
+            tocEntries = tocEntries,
+            currentTocIndex = currentTocIndex,
             annotations = annotations,
-            onJumpToc = { false },              // unreachable: Contents is hidden with an empty TOC
+            onJumpToc = onJumpToc,
             // AZW3 tap-to-jump is NULL — review-only capability gate (no goTo until #135); cards non-clickable.
             onJumpToAnnotation = null,
             onShareAnnotations = onShareAnnotations,
             // Search top-bar slot stays null (#133 — no dead control). feature #134 WI-5:
             // the More button + Book Details / Share are wired through the scaffold's More menu below.
-            bottomChrome = { _, onOpenNotes ->
-                // AZW3 has no Contents (empty TOC) + no Display control → Notes only.
-                Azw3NotesBottomChrome(theme = theme, onOpenNotes = onOpenNotes)
+            // feature #140 WI-6 — the Contents open-callback is now PASSED IN, not discarded. Before
+            // this WI the slot read `{ _, onOpenNotes -> … }`, so a non-empty [tocEntries] would have
+            // lit up nothing: the scaffold's show/hide rule and the host's use of the callback are two
+            // independent gates and BOTH have to open. The scaffold still hands a NULL callback when
+            // [tocEntries] is empty, so a book with no TOC keeps today's Notes-only toolbar exactly.
+            bottomChrome = { onOpenContents, onOpenNotes ->
+                Azw3BottomChrome(theme = theme, onOpenContents = onOpenContents, onOpenNotes = onOpenNotes)
             },
             body = body,
             bookDetails = bookDetails,
@@ -148,15 +164,24 @@ internal fun Azw3ReaderChrome(
 }
 
 /**
- * The AZW3 host's bottom chrome — the designed reader-toolbar "Notes" button only (feature #132 WI-7-hosts).
- * AZW3 has no reader TOC (Contents hidden) and no Display control surface (#129 applies CSS live from the
- * store), so of the design's Contents · Notes · Display · AI toolbar only the Notes slot applies. Uses the
- * same designed icon-above-label treatment as ReaderBottomChrome's Notes slot (the Highlighter/BorderColor
- * glyph, `chrome-notes` testTag). Rendered ONLY when [onOpenNotes] is non-null (always so for #132).
+ * The AZW3 host's bottom chrome — the designed reader toolbar's Contents · Notes subset (feature #132
+ * WI-7-hosts, extended by feature #140 WI-6). Of the design's Contents · Notes · Display · AI toolbar
+ * this host renders Contents (once the book HAS a TOC — #140) and Notes; it has no Display control
+ * surface (#129 applies the CSS live from the store) and no scrubber (foliate owns pagination), so
+ * those two stay omitted. Both slots come from [ToolbarIconButton], the SAME composable
+ * `ReaderBottomChrome` uses on EPUB/TXT/MD, so the treatment cannot drift between hosts.
+ *
+ * Each slot renders ONLY when its callback is non-null (the no-dead-controls rule): the scaffold passes
+ * a null [onOpenContents] exactly when `tocEntries` is empty, which is how a Kindle book with no usable
+ * TOC keeps the pre-#140 Notes-only toolbar.
  */
 @Composable
-private fun Azw3NotesBottomChrome(theme: ReaderTheme, onOpenNotes: (() -> Unit)?) {
-    if (onOpenNotes == null) return
+private fun Azw3BottomChrome(
+    theme: ReaderTheme,
+    onOpenContents: (() -> Unit)?,
+    onOpenNotes: (() -> Unit)?,
+) {
+    if (onOpenContents == null && onOpenNotes == null) return
     val ink = theme.ink
     val sub = theme.ink.copy(alpha = 0.6f)
     val rule = theme.ink.copy(alpha = 0.10f)
@@ -168,18 +193,19 @@ private fun Azw3NotesBottomChrome(theme: ReaderTheme, onOpenNotes: (() -> Unit)?
             Modifier.fillMaxWidth().padding(top = 14.dp, bottom = 28.dp),
             horizontalArrangement = Arrangement.Center,
         ) {
-            Column(
-                Modifier
-                    .clip(RoundedCornerShape(14.dp))
-                    .clickable(onClick = onOpenNotes)
-                    .padding(horizontal = 12.dp, vertical = 4.dp)
-                    .testTag("chrome-notes")
-                    .semantics { contentDescription = "Notes" },
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(3.dp),
-            ) {
-                Icon(Icons.Outlined.BorderColor, contentDescription = null, tint = ink, modifier = Modifier.size(22.dp))
-                Text("Notes", color = sub, fontSize = 10.sp, fontWeight = FontWeight.Medium)
+            // The design order: Contents before Notes.
+            if (onOpenContents != null) {
+                ToolbarIconButton(
+                    tag = "chrome-contents", label = "Contents",
+                    icon = Icons.AutoMirrored.Filled.FormatListBulleted,
+                    ink = ink, sub = sub, onClick = onOpenContents,
+                )
+            }
+            if (onOpenNotes != null) {
+                ToolbarIconButton(
+                    tag = "chrome-notes", label = "Notes", icon = Icons.Outlined.BorderColor,
+                    ink = ink, sub = sub, onClick = onOpenNotes,
+                )
             }
         }
     }
