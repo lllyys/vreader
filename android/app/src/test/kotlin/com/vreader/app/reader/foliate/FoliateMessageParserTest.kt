@@ -166,4 +166,73 @@ class FoliateMessageParserTest {
         assertNull((FoliateMessageParser.parse("""{"name":"goto-ack","detail":{"id":"g","ok":true,"fraction":"0.5"}}""") as FoliateMessage.GoToAck).fraction)
         assertNull((FoliateMessageParser.parse("""{"name":"goto-ack","detail":{"id":"g","ok":true,"fraction":"NaN"}}""") as FoliateMessage.GoToAck).fraction)
     }
+
+    // --- feature #140 WI-1: `book-ready` stops discarding the `toc` tree ---
+
+    @Test fun bookReady_populatesTocTree() {
+        val m = FoliateMessageParser.parse(
+            """{"name":"book-ready","detail":{"title":"被偷走的勇气","sections":85,"toc":[
+                 {"label":"Part I","href":"p1.xhtml","subitems":[
+                   {"label":"第一章","href":"c1.xhtml#a","subitems":[]}
+                 ]},
+                 {"label":"Part II","href":"p2.xhtml","subitems":[]}
+               ]}}""",
+        ) as FoliateMessage.BookReady
+
+        assertEquals("被偷走的勇气", m.title)
+        assertEquals(85, m.sectionTotal)
+        assertEquals(listOf("Part I", "Part II"), m.toc.map { it.label })
+        assertEquals(listOf("第一章"), m.toc[0].subitems.map { it.label })
+        assertEquals("c1.xhtml#a", m.toc[0].subitems[0].href)
+    }
+
+    @Test fun bookReady_withoutToc_stillParsesTitleAndSections() {
+        // Back-compat: every message that carries no `toc` behaves exactly as before #140.
+        assertEquals(
+            FoliateMessage.BookReady("Moby-Dick", 42),
+            FoliateMessageParser.parse("""{"name":"book-ready","detail":{"title":"Moby-Dick","sections":42}}"""),
+        )
+        val nulled = FoliateMessageParser.parse(
+            """{"name":"book-ready","detail":{"title":"Moby-Dick","sections":42,"toc":null}}""",
+        ) as FoliateMessage.BookReady
+        assertTrue(nulled.toc.isEmpty())
+        val notAnArray = FoliateMessageParser.parse(
+            """{"name":"book-ready","detail":{"title":"Moby-Dick","sections":42,"toc":{"label":"x"}}}""",
+        ) as FoliateMessage.BookReady
+        assertTrue(notAnArray.toc.isEmpty())
+    }
+
+    @Test fun hostileTocPayload_isParsedWithoutThrowing() {
+        // SCOPE: this asserts the PAYLOAD degrades safely — NOT that a pathological book opens.
+        // foliate's own recursive assignIDs/flatten/serializeTOC run inside the SHA-pinned bundle
+        // before `book-ready` is ever posted; a failure there posts `error` instead, and no
+        // Kotlin-side bound can change that (plan §5.4, follow-up F6).
+        val deep = StringBuilder()
+        repeat(200) { deep.append("""[{"label":"L$it","href":"h$it","subitems":""") }
+        deep.append("[]")
+        repeat(200) { deep.append("}]") }
+
+        val m = FoliateMessageParser.parse(
+            """{"name":"book-ready","detail":{"title":"hostile","sections":3,"toc":$deep}}""",
+        ) as FoliateMessage.BookReady
+        assertEquals("hostile", m.title)
+        assertEquals(3, m.sectionTotal)
+        assertEquals(FoliateTocParser.MAX_TOC_DEPTH, tocDepthOf(m.toc))
+
+        // Junk element types inside the array, and a non-array toc, degrade too.
+        val junk = FoliateMessageParser.parse(
+            """{"name":"book-ready","detail":{"sections":1,"toc":[1,"x",null,[],{"label":"ok","href":"o"}]}}""",
+        ) as FoliateMessage.BookReady
+        assertEquals(listOf("ok"), junk.toc.map { it.label })
+    }
+
+    private fun tocDepthOf(root: List<FoliateTocItem>): Int {
+        var level = root
+        var depth = 0
+        while (level.isNotEmpty()) {
+            depth++
+            level = level[0].subitems
+        }
+        return depth
+    }
 }
