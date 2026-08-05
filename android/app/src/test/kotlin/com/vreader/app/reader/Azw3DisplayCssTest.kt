@@ -140,10 +140,24 @@ class Azw3DisplayCssTest {
         assertTrue(
             "expected a guarded p justify rule, got:\n$css",
             css.contains(
-                "p:not([style*=text-align]):not([align]):not([class*=center]):not([class*=right]) " +
+                "p:not([style*='text-align' i]):not([align]):not([class*='center' i]):not([class*='right' i]) " +
                     "{ text-align: justify !important; }",
             ),
         )
+    }
+
+    @Test
+    fun justifyGuards_areCaseInsensitive() {
+        // CSS attribute-substring matching is case-sensitive WITHOUT the ` i` flag, so an unflagged
+        // guard would force-justify a paragraph the book centred as `style="TEXT-ALIGN:center"` or
+        // `class="Center"`. Each guarded attribute must carry the flag.
+        val css = ReaderSettings().foliateDisplayCss()
+        val rule = css.lines().single { it.contains("text-align: justify") }
+        for (guard in listOf("[style*='text-align' i]", "[class*='center' i]", "[class*='right' i]")) {
+            assertTrue("guard $guard must be case-insensitive, got: $rule", rule.contains(guard))
+        }
+        // `align` is a bare presence check — it has no value to case-fold, so it takes no flag.
+        assertTrue("the align attribute guard must remain a presence check, got: $rule", rule.contains(":not([align])"))
     }
 
     @Test

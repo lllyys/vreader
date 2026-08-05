@@ -31,9 +31,6 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 
-/** One merged line box of a measured element: its horizontal extent in the section document. */
-data class LineBox(val left: Double, val right: Double, val top: Double)
-
 class Azw3DomProbe(
     private val scenario: ActivityScenario<Azw3ReaderActivity>,
     private val tag: String,
@@ -68,8 +65,12 @@ class Azw3DomProbe(
                 var d=cs[0].doc;
                 if(!d||!d.body) return JSON.stringify({found:false,reason:'no-document'});
                 var styleText='';
+                var styleList=[];
                 var ss=d.querySelectorAll('style');
-                for(var i=0;i<ss.length;i++){styleText+=(ss[i].textContent||'');}
+                for(var i=0;i<ss.length;i++){
+                  var tx=(ss[i].textContent||'');
+                  styleText+=tx; styleList.push(tx);
+                }
                 // The subject must be WRAPPED prose. A Kindle front-matter page (copyright, title,
                 // colophon) is one <p> whose "lines" are separated by <br>, and EVERY such line is the
                 // last line of its own run — which no engine justifies. Measuring one would report
@@ -111,6 +112,7 @@ class Azw3DomProbe(
                 var bcs=getComputedStyle(d.body),rcs=getComputedStyle(d.documentElement);
                 var o={found:!!p,docIndex:(cs[0].index==null?-1:cs[0].index),mounted:cs.length,
                        styleHasJustify:/text-align:\s*justify/.test(styleText),styleLen:styleText.length,
+                       styleList:styleList,
                        bodyTextAlign:bcs.textAlign,bodyFontSize:bcs.fontSize,bodyLineHeight:bcs.lineHeight,
                        rootFontSize:rcs.fontSize,docWidth:(d.documentElement.clientWidth||0),
                        census:census,censusSampled:sampled,headings:heads,
@@ -294,54 +296,4 @@ class Azw3DomProbe(
     }
 }
 
-/**
- * Merge a probe's raw client rects into LINE BOXES, **in document order**.
- *
- * `Range.getClientRects()` emits one rect per inline fragment, so a line containing an `<em>` yields
- * several. Consecutive rects on the SAME rounded `top` whose left continues the previous right (within
- * 2px) belong to one line. The 2px tolerance deliberately cannot bridge a COLUMN gap — foliate paginates
- * with multi-column layout, and column gaps are tens of px — so lines in different columns stay distinct
- * rather than being fused into one absurdly wide "line".
- *
- * **Document order is preserved on purpose; do NOT sort by (top, left).** In a multi-column layout every
- * column restarts at the same `top`, so a positional sort INTERLEAVES the columns — which silently makes
- * "the last element" some mid-paragraph line instead of the paragraph's final one. That matters because
- * the final line is precisely the line justification must leave alone, and an earlier revision of this
- * helper sorted, then excluded the wrong line from the justifiable set.
- */
-fun lineBoxes(p: JSONObject): List<LineBox> {
-    val raw: JSONArray = p.optJSONArray("rects") ?: return emptyList()
-    val rects = (0 until raw.length()).mapNotNull { i ->
-        raw.optJSONArray(i)?.let { Triple(it.optDouble(0), it.optDouble(1), it.optDouble(2)) }
-    }
-    val out = mutableListOf<LineBox>()
-    for ((left, right, top) in rects) {
-        val prev = out.lastOrNull()
-        if (prev != null && Math.round(prev.top) == Math.round(top) && left <= prev.right + 2.0) {
-            out[out.size - 1] = prev.copy(right = maxOf(prev.right, right))
-        } else {
-            out.add(LineBox(left, right, top))
-        }
-    }
-    return out
-}
-
-/**
- * Assign each line box a COLUMN index by clustering their left edges.
- *
- * Foliate paginates with CSS multi-column, so a single paragraph's lines are spread across two or three
- * columns whose right edges are hundreds of px apart. A raggedness/collapse figure computed across all
- * of them measures the column pitch, not the alignment — the spread stays ~775px whether the text is
- * justified or not. Columns are separated by hundreds of px while a first-line `text-indent` shifts a
- * left edge by only tens, so a 60px tolerance splits columns without splitting an indented first line
- * off its own column.
- */
-fun columnIndices(lines: List<LineBox>, tolerancePx: Double = 60.0): List<Int> {
-    val lefts = lines.map { it.left }.distinct().sorted()
-    val clusters = mutableListOf<MutableList<Double>>()
-    for (l in lefts) {
-        val last = clusters.lastOrNull()
-        if (last != null && l - last.last() <= tolerancePx) last.add(l) else clusters.add(mutableListOf(l))
-    }
-    return lines.map { line -> clusters.indexOfFirst { c -> c.any { it == line.left } } }
-}
+// `LineBox`, `lineBoxes`, `columnIndices` and `liveVreaderCss` live in Azw3ProbeSupport.kt.

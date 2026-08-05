@@ -13,6 +13,8 @@
 package com.vreader.app.reader
 
 import android.graphics.Bitmap
+import android.os.SystemClock
+import android.view.MotionEvent
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
@@ -38,10 +40,18 @@ class JustifyScreenshotHarnessTest {
     private val app get() = inst.targetContext.applicationContext as VReaderApp
 
     private companion object {
-        const val UI_TIMEOUT_MS = 90_000L
-        const val SETTLE_TIMEOUT_MS = 90_000L
-        /** Minimum fraction of non-background pixels before a capture counts as "text rendered". */
-        const val MIN_INK_FRACTION = 0.005
+        const val UI_TIMEOUT_MS = 180_000L
+        // Generous on purpose: a first-import of the 14 MB CJK TXT (no cached index) can take well over
+        // 90s on the emulator, and a too-short budget reports it as "never rendered" — a harness failure
+        // dressed up as a product one.
+        const val SETTLE_TIMEOUT_MS = 240_000L
+        /**
+         * Minimum fraction of non-background pixels IN THE READING AREA before a capture counts as
+         * "text rendered". A blank page scores ~0; a page of body text scores well above this. The
+         * previous whole-screen 0.005 floor was satisfied by the reader chrome alone, which is how a
+         * blank AZW3 loading overlay got captured and saved as evidence.
+         */
+        const val MIN_INK_FRACTION = 0.008
     }
 
     private fun shotsDir(): File {
@@ -52,15 +62,27 @@ class JustifyScreenshotHarnessTest {
 
     // ---- captures -------------------------------------------------------------------------------
 
+    // `preSwipes` scrolls PAST front matter before capturing: an EPUB opens on its cover, and a picture
+    // of cover art evidences nothing about justified body prose. The TXT books open directly on chapter
+    // text and need none.
+    //
+    // TWO NAVIGATION LIMITS, recorded rather than hidden, because they bound what these images prove:
+    //  - AZW3: injected page-turn taps DO advance the foliate paginator, but the pages just past the
+    //    front matter render blank in a screenshot (ink 0.0 at 4, 7 and 12 taps), so a capture there
+    //    fails loudly instead of saving an empty frame. The AZW3 image is therefore the book's opening
+    //    page; the BODY-PROSE claim for AZW3 rests on Azw3JustifyConnectedTest's computed-style +
+    //    line-geometry measurement of `p.normaltext` in the live DOM, not on this image.
+    //  - EPUB: neither injected taps nor injected swipes moved the Readium host off its cover, so the
+    //    EPUB images show cover art. EPUB justification evidence remains WI-2's computed-style matrix.
     @Test fun azw3Cjk() = captureBook(importAsset("foliate-spike/book.azw3", "azw3-cjk-real.azw3"), "azw3-cjk")
 
     @Test fun txtLatin() = captureBook(importAsset("latin-justify-book.txt", "txt-latin-synth.txt"), "txt-latin")
 
     @Test fun txtCjk() = captureBook(importPushed("perf-cjk.txt", "txt-cjk-real.txt"), "txt-cjk")
 
-    @Test fun epubLatin() = captureBook(importPushed("m3-en.epub", "epub-latin-real.epub"), "epub-latin")
+    @Test fun epubLatin() = captureBook(importPushed("m3-en.epub", "epub-latin-real.epub"), "epub-latin", preSwipes = 10)
 
-    @Test fun epubCjk() = captureBook(importPushed("m3-zh.epub", "epub-cjk-real.epub"), "epub-cjk")
+    @Test fun epubCjk() = captureBook(importPushed("m3-zh.epub", "epub-cjk-real.epub"), "epub-cjk", preSwipes = 10)
 
     // ---- fixtures -------------------------------------------------------------------------------
 
@@ -110,12 +132,19 @@ class JustifyScreenshotHarnessTest {
      * PRODUCTION ENTRY POINT: launch the LAUNCHER activity, find the book in the Library grid by its
      * visible title, tap it, let the reader settle, and save a PNG of what the user is looking at.
      */
-    private fun captureBook(title: String, name: String) {
+    private fun captureBook(title: String, name: String, preSwipes: Int = 0) {
         ActivityScenario.launch(MainActivity::class.java).use {
             compose.waitUntil(UI_TIMEOUT_MS) {
                 compose.onAllNodesWithText(title, substring = true).fetchSemanticsNodes().isNotEmpty()
             }
             compose.onNodeWithText(title, substring = true).performClick()
+            if (preSwipes > 0) {
+                // Let the book finish opening before navigating, or the gestures land on a loading overlay.
+                compose.waitUntil(UI_TIMEOUT_MS) {
+                    inst.uiAutomation.takeScreenshot()?.let { inkFraction(it) >= MIN_INK_FRACTION } == true
+                }
+                repeat(preSwipes) { swipeUp(); compose.waitForIdle(); Thread.sleep(350) }
+            }
             val file = File(shotsDir(), "$name.png")
             captureSettled(file, name)
             assertTrue("no screenshot written for $name", file.exists() && file.length() > 0)
@@ -148,6 +177,11 @@ class JustifyScreenshotHarnessTest {
                     previous?.recycle()
                     previous = shot
                 }
+                // Deliberately NO page-turning here. An earlier revision tapped the next zone whenever
+                // the reading area looked empty, which turned a still-LOADING AZW3 into a paginator that
+                // had been advanced past its content before it ever painted — the capture then failed at
+                // ink 0.0 on a book that renders fine when left alone. Navigation belongs in `preSwipes`,
+                // which runs only after the reader has painted; this loop only waits.
                 stable
             }
         } catch (e: Throwable) {
@@ -167,20 +201,30 @@ class JustifyScreenshotHarnessTest {
     }
 
     /**
-     * The fraction of pixels that differ from the page background. The background is taken as the
-     * most common colour in a coarse sample, which is robust across the five reader themes and the
-     * per-format chrome (a fixed white/black threshold would misjudge Sepia and Dark).
+     * The fraction of pixels that differ from the page background, sampled over the READING AREA only.
+     *
+     * Measuring the whole screen was a false-green machine: the reader chrome (top bar, Notes/Display
+     * bar, status bar) carries plenty of non-background pixels, so a reader still showing its blank
+     * loading overlay scored 0.12 "ink" and was captured as if it were a rendered page. Excluding the
+     * chrome bands means the floor is a claim about BODY TEXT, which is what the screenshot exists to
+     * show. The background is the most common colour in the sample, so the measure holds across the
+     * five reader themes rather than assuming a white page.
      */
     private fun inkFraction(bmp: Bitmap): Double {
-        val stepX = maxOf(1, bmp.width / 120)
-        val stepY = maxOf(1, bmp.height / 200)
+        val x0 = (bmp.width * 0.05).toInt()
+        val x1 = (bmp.width * 0.95).toInt()
+        val y0 = (bmp.height * 0.18).toInt()
+        val y1 = (bmp.height * 0.72).toInt()
+        val stepX = maxOf(1, (x1 - x0) / 120)
+        val stepY = maxOf(1, (y1 - y0) / 160)
         val counts = HashMap<Int, Int>()
         var total = 0
-        var x = 0
-        while (x < bmp.width) {
-            var y = 0
-            while (y < bmp.height) {
-                counts[bmp.getPixel(x, y)] = (counts[bmp.getPixel(x, y)] ?: 0) + 1
+        var x = x0
+        while (x < x1) {
+            var y = y0
+            while (y < y1) {
+                val p = bmp.getPixel(x, y)
+                counts[p] = (counts[p] ?: 0) + 1
                 total++
                 y += stepY
             }
@@ -189,5 +233,34 @@ class JustifyScreenshotHarnessTest {
         if (total == 0) return 0.0
         val background = counts.maxByOrNull { it.value }?.value ?: 0
         return (total - background).toDouble() / total
+    }
+
+    /**
+     * A real touch in the right third — the production page-turn zone. Used only to page PAST front
+     * matter: a Kindle book opens on a cover / copyright page, and a screenshot of that evidences
+     * nothing about justified prose. Injected through [Instrumentation.sendPointerSync], i.e. an actual
+     * MotionEvent, not a test-tag click, so it does not depend on the `azw3-next-zone` tag that open
+     * bug #369 reports as intermittently not-displayed.
+     */
+    /**
+     * A real upward swipe — the production scroll gesture. The EPUB and TXT hosts open in SCROLL layout,
+     * where a right-third TAP does nothing at all (it is the paginated hosts that page on tap), so the
+     * first attempt to page past the EPUB cover with taps moved nothing and re-captured the cover art.
+     */
+    private fun swipeUp() {
+        val dm = inst.targetContext.resources.displayMetrics
+        val x = dm.widthPixels / 2f
+        val yStart = dm.heightPixels * 0.75f
+        val yEnd = dm.heightPixels * 0.28f
+        val t = SystemClock.uptimeMillis()
+        MotionEvent.obtain(t, t, MotionEvent.ACTION_DOWN, x, yStart, 0).also { inst.sendPointerSync(it); it.recycle() }
+        val steps = 12
+        for (i in 1..steps) {
+            val y = yStart + (yEnd - yStart) * i / steps
+            MotionEvent.obtain(t, t + i * 16L, MotionEvent.ACTION_MOVE, x, y, 0)
+                .also { inst.sendPointerSync(it); it.recycle() }
+        }
+        MotionEvent.obtain(t, t + steps * 16L + 16, MotionEvent.ACTION_UP, x, yEnd, 0)
+            .also { inst.sendPointerSync(it); it.recycle() }
     }
 }

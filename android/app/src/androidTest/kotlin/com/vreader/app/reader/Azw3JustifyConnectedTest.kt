@@ -98,9 +98,16 @@ class Azw3JustifyConnectedTest {
     }
 
     /**
-     * The production CSS with its ONE justify rule removed — a faithful pre-#156 reconstruction, derived
-     * from the live production output rather than hand-copied, so it cannot drift. The exact-count check
-     * makes a renamed/relocated rule a loud failure rather than a silently vacuous control.
+     * The LIVE production CSS with its ONE justify rule removed — a faithful pre-#156 reconstruction of
+     * whatever is actually injected in this document, so the two arms differ by exactly that rule and
+     * nothing else. The exact-count check makes a renamed/relocated rule a loud failure rather than a
+     * silently vacuous control.
+     *
+     * Gate-4 round 1 (High) replaced the previous source: it rebuilt the blob from
+     * `ReaderSettings().foliateDisplayCss()`, which equals production only when the persisted display
+     * settings are the defaults. Under any other settings the control would also have changed font size,
+     * margin, line-height and family — and those change LINE BREAKING, so the index-wise line comparison
+     * would have been differencing two different layouts while reporting it as a justification delta.
      */
     private fun legacyCss(production: String): String {
         val lines = production.lines()
@@ -139,8 +146,8 @@ class Azw3JustifyConnectedTest {
                     !subject.optString("pClass").contains("right"),
             )
 
-            // CONTROL = the same document with the justify rule removed.
-            val production = ReaderSettings().foliateDisplayCss()
+            // CONTROL = the same document with the justify rule removed, derived from the LIVE blob.
+            val production = liveVreaderCss(subject)
             probe.setStyles(legacyCss(production))
             val control = probe.settled("pre-#156 CSS live") { !it.optBoolean("styleHasJustify") }
             probe.logState("core", "control(pre-#156)", control)
@@ -284,6 +291,13 @@ class Azw3JustifyConnectedTest {
                 checked++
             }
             android.util.Log.i(tag, "SCOPE headingsChecked=$checked headings=$headings body=${subject.optString("bodyTextAlign")}")
+            // Gate-4 round 1 (Medium): iterating an EMPTY heading list would satisfy AC-7's "headings do
+            // not justify" half without reading a single heading's computed style.
+            assertTrue(
+                "no heading was measured in this section, so the heading half of AC-7 would pass " +
+                    "vacuously — the measured section must contain at least one h1..h6",
+                checked >= 1,
+            )
         }
     }
 
@@ -305,7 +319,7 @@ class Azw3JustifyConnectedTest {
             probe.awaitRender()
             probe.settled("production CSS live") { it.optBoolean("styleHasJustify") }
 
-            val production = ReaderSettings().foliateDisplayCss()
+            val production = liveVreaderCss(probe.settled("live blob") { it.optBoolean("styleHasJustify") })
             val install = probeElementsJs(latinProbeText)
 
             val subject = requireNotNull(probe.evalJson(install)) { "probe-element install/measure failed (subject)" }

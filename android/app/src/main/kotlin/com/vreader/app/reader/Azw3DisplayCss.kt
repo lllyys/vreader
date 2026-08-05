@@ -76,7 +76,12 @@ fun ReaderSettings.foliateDisplayCss(): String {
         // faux-headings with an unusual class are NOT covered. A paragraph's last line stays
         // start-aligned by the engine's own `text-align-last: auto` default, so nothing forces a
         // stretched final line.
-        "p:not([style*=text-align]):not([align]):not([class*=center]):not([class*=right]) " +
+        // The ` i` flag makes the attribute-substring matches CASE-INSENSITIVE. CSS attribute value
+        // matching is case-sensitive by default, so an unflagged guard would justify a paragraph the
+        // book had deliberately centred via `style="TEXT-ALIGN:center"` or `class="Center"` — real
+        // shapes in hand-authored and converted Kindle markup. Single quotes (never double) keep the
+        // blob free of the injection breakers `cssHasNoInjectionBreakers_fromSettingsDerivedValues` pins.
+        "p:not([style*='text-align' i]):not([align]):not([class*='center' i]):not([class*='right' i]) " +
             "{ text-align: justify !important; }",
     ).joinToString("\n")
 }
