@@ -672,6 +672,33 @@ NOT a filter on `MainActivity`: every activity is launchMode `standard`, so a
   density or saturation guard, plus a `MAX_TOC_ENTRIES = 50_000` backstop that
   **rejects rather than truncates**. Nothing is persisted — the TOC is derived
   per reader session, so a display-settings reflow cannot invalidate it.
+- `reader.nav.FoliateTocProvider` (feature #140) is the `TocProvider` for the
+  foliate-hosted Kindle formats (AZW3/MOBI/KF8) — the third Contents source
+  beside `ReadiumTocProvider` (EPUB) and `TxtMdTocProvider` (TXT/MD), leaving
+  `EmptyTocProvider` for PDF. *(Host wiring lands in #140 WI-6; until then
+  `Azw3ReaderActivity` still passes an empty `tocEntries`, so the Contents
+  control stays hidden on AZW3.)* It flattens the `{label, href, subitems}`
+  tree the SHA-pinned foliate-js bundle already posts on every `book-ready`
+  (parsed by `FoliateTocParser`, bounded at `MAX_TOC_DEPTH = 12` /
+  `MAX_TOC_ENTRIES = 10_000`) depth-first with iOS #38's semantics: parent
+  before children, one `depth` increment per nesting level, labels trimmed, and
+  a blank label or blank href **skipping the row while still walking its
+  subitems** (iOS bug #262 — an unlabelled container must not lose its
+  chapters; the skipped node still counts as a nesting level, so its children
+  keep the author's indentation). Each row's `canonicalLocator` carries the book
+  identity triple plus the href and **no progression** — a deliberate divergence
+  from iOS's `0.0`, which is dead on iOS (`FoliateNavSeek.navigationTarget` has
+  no progression leg) but would make Android's `FoliateGoToTarget.from` resolve
+  every chapter tap to `Fraction(0.0)` and jump to the start of the book. It is
+  the second of **two independent defenses**, the first being that resolver's
+  `cfi → href → progression` precedence. Hrefs are **opaque and preserved
+  byte-for-byte** (KF8 `kindle:pos:fid:…:off:…`, MOBI6 `filepos:NNNN`,
+  `decodeURI`'d EPUB-relative paths with fragments/queries/non-ASCII), because
+  both the goTo leg and the current-chapter match are byte-exact. `pageLabel` is
+  null (this host has no page model) and `epubReadiumLocator` is null
+  (non-Readium host); the provider owns its **injected**-dispatcher hop and the
+  walk is cancellation-cooperative. Nothing is persisted — the tree is derived
+  from a message already in flight at book-open.
 
 ### In-book search (`com.vreader.app.search`) — feature #133
 
