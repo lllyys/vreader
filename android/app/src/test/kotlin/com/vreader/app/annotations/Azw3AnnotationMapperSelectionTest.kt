@@ -248,4 +248,30 @@ class Azw3AnnotationMapperSelectionTest {
         assertEquals(realShapeCfi, inputs.locator.cfi)
         assertEquals(realShapeCfi, inputs.anchor.cfi)
     }
+
+    /**
+     * "Verbatim" stated so it DISCRIMINATES against trimming specifically. A CFI is an
+     * engine-minted identifier: the mapper stores whatever the bundle produced and never edits it,
+     * because a silently trimmed CFI is stored under a key the engine did not mint — the record
+     * would then be painted and looked up under a string that no `annotation-show` ever reports.
+     *
+     * Without a padded fixture, `selection.cfi.trim()` survives the entire suite (blank input is
+     * still rejected, and every other fixture is already unpadded). This is the test that kills it.
+     */
+    @Test fun aCfiWithSurroundingWhitespaceIsStoredByteExactNotTrimmed() {
+        val padded = "  $realShapeCfi\t"
+        val inputs = Azw3AnnotationMapper.selectionToInputs(selection(cfi = padded), book)!!
+        assertEquals(padded, inputs.locator.cfi)
+        assertEquals(padded, inputs.anchor.cfi)
+        assertEquals(padded, decodeLocator(store(inputs).locatorJSON).cfi)
+    }
+
+    /** Same contract for the quote: the selected text is stored as the engine handed it over, so a
+     *  leading/trailing space the user actually dragged over is preserved, not silently eaten. */
+    @Test fun aQuoteWithSurroundingWhitespaceIsStoredByteExactNotTrimmed() {
+        val padded = " the quick brown fox "
+        val inputs = Azw3AnnotationMapper.selectionToInputs(selection(text = padded), book)!!
+        assertEquals(padded, inputs.selectedText)
+        assertEquals(padded, decodeLocator(store(inputs).locatorJSON).textQuote)
+    }
 }

@@ -98,15 +98,19 @@ object Azw3AnnotationMapper {
      * Comparison is exact string equality: a CFI differing by whitespace or case denotes a different
      * range, and a fuzzy match would paint or delete the wrong one.
      *
-     * KNOWN LIMITATION (pre-existing, cross-format, NOT introduced here). A live row and a row
-     * restored from a backup for the same range share a `profileKey` but not an `anchorKey` — the
-     * restore path drops the anchor, so `anchorKeyFor(null)` yields the `__nil_anchor__` sentinel and
-     * the `(profileKey, anchorKey)` unique index admits both. Every format's restore path behaves
-     * this way (#123 EPUB, #124/#125 TXT/MD), so reconciling it belongs to the shared persistence
-     * seam, not to this mapper. Under such a duplicate both rows resolve to the same CFI — foliate's
-     * `addAnnotation` removes and re-adds under that value, so one overlay is painted — and this
-     * function returns the caller's first matching row, which makes the choice deterministic rather
-     * than arbitrary.
+     * KNOWN LIMITATION (pre-existing, cross-format, NOT introduced here — but sharper on AZW3).
+     * A live row and a row restored from a backup for the same range share a `profileKey` but not an
+     * `anchorKey`: the restore path drops the anchor, so `anchorKeyFor(null)` yields the
+     * `__nil_anchor__` sentinel and the `(profileKey, anchorKey)` unique index admits both. Every
+     * format's restore path behaves this way (#123 EPUB, #124/#125 TXT/MD), so reconciling it belongs
+     * to the shared persistence seam, not to this mapper.
+     *
+     * What IS specific to this reader: foliate keys its overlays by CFI, so a duplicate pair does not
+     * paint twice — `addAnnotation` removes and re-adds under the same value, collapsing them into
+     * ONE overlay whose single tap must pick one of two rows. This function returns the caller's
+     * first match, so the pick is deterministic in the caller's sort order rather than arbitrary;
+     * that bounds the symptom (an edit or remove may land on the twin) without curing the split.
+     * Treat it as a tracked limitation, not as harmless parity.
      */
     fun highlightIdForCfi(cfi: String, records: List<HighlightRecord>): String? {
         if (cfi.isBlank()) return null
