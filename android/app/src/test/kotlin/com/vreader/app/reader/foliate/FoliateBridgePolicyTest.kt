@@ -153,33 +153,68 @@ class FoliateBridgePolicyTest {
         )
     }
 
-    @Test fun rawCeiling_takesTheFirstNameKey_soANestedDecoyOnlyEverTIGHTENS() {
-        // Our shim serialises `{name, detail}` with `name` FIRST (reader.html), so the first `"name"`
-        // in the window IS the envelope name. A payload that buries the envelope name behind a nested
-        // one resolves to the NESTED name's ceiling — i.e. it can only make the gate STRICTER (a drop),
-        // never looser. Documented rather than defended: this is not an adversarial parser.
-        val decoyed = """{"detail":{"name":"create-overlay"},"name":"selection"}"""
-        assertEquals(FoliateBridgePolicy.RAW_CEILING_CREATE_OVERLAY, FoliateBridgePolicy.rawCeilingFor(decoyed))
+    @Test fun rawCeiling_requiresNameToBeTheFIRSTTopLevelKey_soNoDecoyCanReclassify() {
+        // Anchoring to the first KEY (not merely the first `"name"` that appears) is what makes the
+        // sniff decoy-proof. Scanning for any `"name"` would let a payload pick its own classification
+        // in EITHER direction — including LOOSENING a `selection` to the uncapped `book-ready`, which
+        // is precisely the hole the ceiling exists to close.
+
+        // A nested decoy AFTER the real name cannot loosen it: our shim's actual ordering is immune.
+        assertEquals(
+            FoliateBridgePolicy.RAW_CEILING_SELECTION,
+            FoliateBridgePolicy.rawCeilingFor("""{"name":"selection","detail":{"name":"book-ready"}}"""),
+        )
+        // A decoy BEFORE the real name yields null — uncapped, i.e. today's behaviour. Fail-open is
+        // deliberate: the load-bearing defense is the bundle patch + the origin gate, and a
+        // fail-closed sniff could strand the reader on a future shim's reordering.
+        for (decoyed in listOf(
+            """{"detail":{"name":"book-ready"},"name":"selection"}""",
+            """{"detail":{"name":"create-overlay"},"name":"selection"}""",
+            """{"ts":1,"name":"selection","detail":{}}""",
+        )) {
+            assertNull("decoy: $decoyed", FoliateBridgePolicy.rawCeilingFor(decoyed))
+        }
     }
 
-    @Test fun rawCeiling_isNullWhenTheNameIsBeyondTheSniffWindow() {
+    @Test fun rawCeiling_isNullWhenTheNameLiteralRunsPastTheSniffWindow() {
         // The documented degradation (plan §4.3 limit 2): unsniffable ⇒ UNCAPPED ⇒ today's behaviour.
-        // Fail-open is deliberate — the load-bearing defense is the bundle patch + the origin gate,
-        // and a fail-closed sniff could drop a legitimate message from a future shim.
-        val pad = "p".repeat(FoliateBridgePolicy.NAME_SNIFF_WINDOW)
-        assertNull(FoliateBridgePolicy.rawCeilingFor("""{"pad":"$pad","name":"selection","detail":{}}"""))
+        val longName = "s".repeat(FoliateBridgePolicy.NAME_SNIFF_WINDOW)
+        assertNull(FoliateBridgePolicy.rawCeilingFor("""{"name":"$longName","detail":{}}"""))
     }
 
     @Test fun rawCeiling_sniffWindowBoundary_isInclusiveOfTheClosingQuote() {
-        // Build `{"pad":"<n>","name":"selection"...` so the name's CLOSING quote sits exactly at the
-        // last readable index, then push it one char further and watch the ceiling disappear.
-        val prefix = """{"pad":""""
-        val middle = """","name":"selection""""
-        val padLen = FoliateBridgePolicy.NAME_SNIFF_WINDOW - prefix.length - middle.length
-        val atEdge = prefix + "p".repeat(padLen) + middle + ""","detail":{}}"""
+        // Pad with JSON whitespace after `{` so the name's CLOSING quote sits exactly at the last
+        // readable index, then push it one char further and watch the ceiling disappear.
+        val tail = """"name":"selection","detail":{}}"""
+        val quoteAt = tail.indexOf("selection") + "selection".length // closing quote's offset in tail
+        val pad = FoliateBridgePolicy.NAME_SNIFF_WINDOW - 2 - quoteAt
+
+        val atEdge = "{" + " ".repeat(pad) + tail
+        assertEquals(
+            "fixture must place the closing quote on the window's last readable index",
+            FoliateBridgePolicy.NAME_SNIFF_WINDOW - 1,
+            1 + pad + quoteAt,
+        )
         assertEquals(FoliateBridgePolicy.RAW_CEILING_SELECTION, FoliateBridgePolicy.rawCeilingFor(atEdge))
-        val onePast = prefix + "p".repeat(padLen + 1) + middle + ""","detail":{}}"""
+
+        val onePast = "{" + " ".repeat(pad + 1) + tail
         assertNull(FoliateBridgePolicy.rawCeilingFor(onePast))
+    }
+
+    @Test fun rawCeiling_acceptsOnlyJsonWhitespace_notEveryUnicodeSpace() {
+        // JSON's whitespace set is space/tab/LF/CR (RFC 8259). Kotlin's Char.isWhitespace() also
+        // accepts NBSP and friends; using it would classify payloads no JSON parser would accept.
+        val jsonWs = listOf(0x20, 0x09, 0x0A, 0x0D)
+        for (code in jsonWs) {
+            val ws = code.toChar()
+            assertEquals(
+                "ws=$code",
+                FoliateBridgePolicy.RAW_CEILING_SELECTION,
+                FoliateBridgePolicy.rawCeilingFor("""{$ws"name"$ws:$ws"selection","detail":{}}"""),
+            )
+        }
+        val nbsp = 0x00A0.toChar()
+        assertNull(FoliateBridgePolicy.rawCeilingFor("""{$nbsp"name":"selection","detail":{}}"""))
     }
 
     @Test fun rawCeiling_isNullForNamelessOrNonJsonInput() {
@@ -194,6 +229,8 @@ class FoliateBridgePolicyTest {
             """{"name""",                         // truncated before the separator
             """{"name":"selection""",             // unterminated name literal
             """{"nametag":"selection"}""",        // a DIFFERENT key that merely starts with `name`
+            """"name":"selection"""",             // no enclosing object
+            """[{"name":"selection"}]""",         // an array, not an object
         )) {
             assertNull("ceiling for [$raw]", FoliateBridgePolicy.rawCeilingFor(raw))
         }
@@ -283,24 +320,70 @@ class FoliateBridgePolicyTest {
         assertNull(FoliateMessageParser.parse(""))
     }
 
-    // --- the enforcement POINT: the gate must run before the parse -----------------------------
+    // --- the enforcement POINT: an inadmissible payload must never REACH the parser ---------------
 
-    @Test fun foliateBridge_appliesTheAdmissionGateBeforeParsing() {
-        // STRUCTURAL, and deliberately so. `admitsMessage` is behaviourally pinned above, but the one
-        // thing a JVM test cannot observe is WHERE the bridge calls it — the listener body needs a real
-        // WebView. Moving the gate after `parse` (or dropping it) would leave every behavioural test
-        // green while re-opening exactly the hole this WI closes, so the wiring is pinned by reading
-        // the source, the same way FoliateBundleProvenanceTest pins the shipped bundle's bytes.
-        val source = bridgeSource()
-        val gate = source.indexOf("FoliateBridgePolicy.admitsMessage(")
-        val parse = source.indexOf("FoliateMessageParser.parse(")
+    @Test fun inboundMessage_neverInvokesTheParserForAnInadmissiblePayload() {
+        // The ordering claim, asserted as an OBSERVATION. `admitsMessage` returning false is not
+        // enough on its own: the hole this WI closes is `parse` running FIRST and the size check
+        // running on its output, which would leave every value-level assertion green while
+        // parseToJsonElement had already built the tree. So the seam records whether the parser was
+        // reached at all.
+        val seen = mutableListOf<String>()
+        val spy: (String) -> FoliateMessage? = { raw -> seen += raw; FoliateMessageParser.parse(raw) }
+        val admissible = """{"name":"selection","detail":{"collapsed":true}}"""
 
-        assertTrue("FoliateBridge must gate inbound messages with FoliateBridgePolicy.admitsMessage", gate >= 0)
-        assertTrue("FoliateBridge must still parse admitted messages", parse >= 0)
-        assertTrue("the admission gate must run BEFORE parse (gate@$gate, parse@$parse)", gate < parse)
+        // Over its ceiling → dropped, and the parser is NEVER called.
+        val oversized = rawOfLength("selection", FoliateBridgePolicy.RAW_CEILING_SELECTION + 1)
+        assertNull(foliateInboundMessage(oversized, SHELL_ORIGIN, true, spy))
+        assertTrue("an over-ceiling payload must not reach the parser, saw $seen", seen.isEmpty())
+
+        // Untrusted origin / sub-frame → dropped, parser still never called.
+        assertNull(foliateInboundMessage(admissible, "https://evil.example", true, spy))
+        assertNull(foliateInboundMessage(admissible, SHELL_ORIGIN, false, spy))
+        assertNull(foliateInboundMessage(admissible, null, true, spy))
+        assertTrue("an untrusted payload must not reach the parser, saw $seen", seen.isEmpty())
+
+        // Admitted → parsed exactly once, with the payload verbatim, and the parser's result returned.
+        assertEquals(FoliateMessage.SelectionCleared, foliateInboundMessage(admissible, SHELL_ORIGIN, true, spy))
+        assertEquals(listOf(admissible), seen)
+    }
+
+    @Test fun inboundMessage_admitsAnUncappedPayloadOfAnySize() {
+        // The H1 pin at the enforcement point: a `book-ready` far past every capped ceiling reaches
+        // the parser, because dropping it would strand the reader before Loaded.
+        val seen = mutableListOf<String>()
+        val spy: (String) -> FoliateMessage? = { raw -> seen += raw; FoliateMessage.Other("stub") }
+        val huge = rawOfLength("book-ready", 5_000_000)
+
+        assertEquals(FoliateMessage.Other("stub"), foliateInboundMessage(huge, SHELL_ORIGIN, true, spy))
+        assertEquals(listOf(huge), seen)
+    }
+
+    @Test fun inboundMessage_defaultParserIsTheRealOne() {
+        // The injectable parser exists only so the test above can OBSERVE the ordering; production
+        // must run the real parser. Pinned so the default can never drift into a stub.
         assertEquals(
-            "FoliateBridge must have exactly ONE parse call site, all of it behind the gate",
-            1,
+            FoliateMessage.BridgeReady,
+            foliateInboundMessage("""{"name":"bridge-ready","detail":{}}""", SHELL_ORIGIN, true),
+        )
+        assertNull(foliateInboundMessage("not json", SHELL_ORIGIN, true))
+    }
+
+    @Test fun foliateBridge_routesEveryInboundMessageThroughTheSeam() {
+        // Narrowly structural, and the claim is only what it can support: the WebView listener body is
+        // not reachable from a JVM test, so this asserts that the bridge has NO direct parse call site
+        // — every inbound message goes through `foliateInboundMessage`, which the tests above pin
+        // behaviourally. Re-inlining `FoliateMessageParser.parse(...)` into the listener (the way the
+        // gate was bypassed before this WI) fails here. Same technique as
+        // FoliateBundleProvenanceTest reading the shipped bundle.
+        val source = bridgeSource()
+        assertTrue(
+            "FoliateBridge's listener must delegate to foliateInboundMessage",
+            source.contains("foliateInboundMessage("),
+        )
+        assertEquals(
+            "FoliateBridge must have NO direct FoliateMessageParser.parse(...) call site — the seam owns parsing",
+            0,
             Regex(Regex.escape("FoliateMessageParser.parse(")).findAll(source).count(),
         )
     }

@@ -135,15 +135,11 @@ class FoliateBridge(
             WebViewCompat.addWebMessageListener(
                 webView, BRIDGE_NAME, setOf(FoliateAssetServer.SHELL_ORIGIN),
             ) { _, message, sourceOrigin, isMainFrame, _ ->
-                // feature #142 WI-1 — admission runs BEFORE parse, and that ORDER is the point: the
-                // parser's first act is `parseToJsonElement`, so a field-level cap can never bound the
-                // tree it has already built. `admitsMessage` folds the origin/main-frame gate together
-                // with the per-message-name raw ceiling (FoliateBridgePolicy). A rejected message is
-                // dropped silently, exactly like an unparseable one.
-                val raw = message.data ?: ""
-                if (FoliateBridgePolicy.admitsMessage(sourceOrigin?.toString(), isMainFrame, raw)) {
-                    FoliateMessageParser.parse(raw)?.let { _messages.tryEmit(it) }
-                }
+                // feature #142 WI-1 — the whole inbound decision lives in the [foliateInboundMessage]
+                // seam so a JVM test can prove the ORDER (gate before parse), which no test of this
+                // WebView-bound lambda could.
+                foliateInboundMessage(message.data ?: "", sourceOrigin?.toString(), isMainFrame)
+                    ?.let { _messages.tryEmit(it) }
             }
         } else {
             onWebViewUnsupported?.invoke()
@@ -344,6 +340,27 @@ class FoliateGoToDispatcher(
 
     private fun jsString(s: String): String = Json.encodeToString(String.serializer(), s)
 }
+
+/**
+ * feature #142 WI-1 — the SHARED inbound-message seam: everything the web-message listener decides
+ * about a raw payload, in one pure function. Returns the typed message to emit, or null to drop it.
+ *
+ * The ORDER is the contract, not an implementation detail. [FoliateMessageParser.parse]'s first act is
+ * `parseToJsonElement`, which materialises a JsonElement tree several times the size of its source
+ * string — so a size limit applied to the PARSED fields cannot bound what parsing already cost. The
+ * gate ([FoliateBridgePolicy.admitsMessage]: trusted origin + the per-message-name raw ceiling) must
+ * therefore run first, and an inadmissible payload must never reach [parse] at all.
+ *
+ * [parse] is injectable for exactly one reason: so a unit test can assert that "never reaches parse"
+ * as an OBSERVATION rather than by reading the source. Production always uses the default.
+ */
+internal fun foliateInboundMessage(
+    raw: String,
+    sourceOrigin: String?,
+    isMainFrame: Boolean,
+    parse: (String) -> FoliateMessage? = FoliateMessageParser::parse,
+): FoliateMessage? =
+    if (FoliateBridgePolicy.admitsMessage(sourceOrigin, isMainFrame, raw)) parse(raw) else null
 
 /**
  * feature #129 WI-6 — the SHARED foliate `setStyles` JS builder. The CSS is JSON-encoded into a JS

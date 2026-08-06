@@ -68,10 +68,10 @@ object FoliateBridgePolicy {
      * The raw-length ceiling for [raw]'s message name, or `null` meaning UNCAPPED.
      *
      * **This must never parse.** A cap-by-name that required the parse it exists to bound would be
-     * circular. It reads at most [NAME_SNIFF_WINDOW] characters, locates the first `"name"` key and
-     * reads the JSON string literal after it — which is sound because the shell shim serialises
-     * `{name, detail}` with `name` FIRST (`assets/foliate/reader.html`). A truncated or otherwise
-     * unparseable payload is therefore still classified, which is exactly the point.
+     * circular. It reads at most [NAME_SNIFF_WINDOW] characters and requires `"name"` to be the FIRST
+     * key of the top-level object — which is exactly what the shell shim emits
+     * (`assets/foliate/reader.html` serialises `{name, detail}` with `name` first). A truncated or
+     * otherwise unparseable payload is therefore still classified, which is exactly the point.
      *
      * It is a best-effort classifier for our own shim's output, NOT an adversarial parser. Anything
      * it cannot read — no name key, a name beyond the window, an escaped name literal, a name it does
@@ -102,17 +102,27 @@ object FoliateBridgePolicy {
      * The message name read LEXICALLY from the head of [raw], or null when it cannot be read within
      * [NAME_SNIFF_WINDOW] characters. Bails on a backslash rather than decoding escapes: no name this
      * feature caps contains one, and "unrecognised" is the safe answer.
+     *
+     * `"name"` must be the FIRST key of the top-level object — not merely the first one that appears.
+     * Scanning for any `"name"` would let a payload shaped `{"detail":{"name":"book-ready"},
+     * "name":"selection"}` be classified from the NESTED key while the parser reads the top-level one,
+     * i.e. a decoy could pick the classification in EITHER direction, including loosening a capped
+     * message to uncapped. Anchoring to the first key removes that whole class, costs nothing (the
+     * shim always emits `name` first), and degrades any other ordering to null = uncapped = today's
+     * behaviour.
      */
     private fun sniffName(raw: String): String? {
         val window = if (raw.length <= NAME_SNIFF_WINDOW) raw else raw.substring(0, NAME_SNIFF_WINDOW)
-        val keyAt = window.indexOf(NAME_KEY)
-        if (keyAt < 0) return null
+        var i = 0
 
-        var i = keyAt + NAME_KEY.length
-        while (i < window.length && window[i].isWhitespace()) i++
+        i = skipJsonWhitespace(window, i)
+        if (i >= window.length || window[i] != '{') return null
+        i = skipJsonWhitespace(window, i + 1)
+        if (!window.startsWith(NAME_KEY, i)) return null
+
+        i = skipJsonWhitespace(window, i + NAME_KEY.length)
         if (i >= window.length || window[i] != ':') return null
-        i++
-        while (i < window.length && window[i].isWhitespace()) i++
+        i = skipJsonWhitespace(window, i + 1)
         if (i >= window.length || window[i] != '"') return null
         i++
 
@@ -125,6 +135,18 @@ object FoliateBridgePolicy {
             }
         }
         return null // the closing quote lies beyond the sniff window
+    }
+
+    /** JSON's whitespace set (RFC 8259 §2: space, tab, LF, CR) — deliberately NOT Kotlin's
+     *  `Char.isWhitespace()`, which also accepts NBSP and other Unicode spaces JSON does not. */
+    private fun skipJsonWhitespace(s: String, from: Int): Int {
+        var i = from
+        while (i < s.length) {
+            val c = s[i].code
+            if (c != 0x20 && c != 0x09 && c != 0x0A && c != 0x0D) break
+            i++
+        }
+        return i
     }
 
     /** True iff [url] is on the trusted shell origin (exact, or a path under it). The leading-`/`
