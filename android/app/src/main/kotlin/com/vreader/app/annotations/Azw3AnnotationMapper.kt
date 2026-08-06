@@ -36,10 +36,16 @@ object Azw3AnnotationMapper {
      *
      * Field shape mirrors iOS `FoliateSpikeView+Selection.swift`: no `href` (foliate exposes no
      * stable per-section href in a selection event), no `progression` (the event carries none), and
-     * the format taken from the book's own identity so `locator.fingerprintKey == book.fingerprintKey`
-     * always holds. `sectionIndex` is deliberately NOT stored: for MOBI/KF8 the CFI's first step
-     * already encodes the spine index, and a second copy would only drift. The selection `rect` is
-     * view-only (valid for one layout) and is likewise dropped.
+     * the format taken from the book's OWN identity rather than a hardcoded `azw3` — iOS derives it
+     * from the book fingerprint, and hardcoding would mint a locator addressing a different identity
+     * (an orphan annotation) for any non-Kindle book that ever reached here. For a
+     * repository-originated [Book] (whose `fingerprintKey` is derived from the same hash/size/format
+     * triple) this makes `locator.fingerprintKey == book.fingerprintKey`; [Book] is a plain DTO with
+     * independent fields, so it is a consequence of well-formed input, not a type-level guarantee.
+     *
+     * `sectionIndex` is deliberately NOT stored: for MOBI/KF8 the CFI's first step already encodes
+     * the spine index, and a second copy would only drift. The selection `rect` is view-only (valid
+     * for one layout) and is likewise dropped.
      */
     fun selectionToInputs(selection: FoliateMessage.Selection, book: Book): Azw3SelectionInputs? {
         val text = selection.text.takeUnless { it.isBlank() } ?: return null
@@ -91,6 +97,16 @@ object Azw3AnnotationMapper {
      *
      * Comparison is exact string equality: a CFI differing by whitespace or case denotes a different
      * range, and a fuzzy match would paint or delete the wrong one.
+     *
+     * KNOWN LIMITATION (pre-existing, cross-format, NOT introduced here). A live row and a row
+     * restored from a backup for the same range share a `profileKey` but not an `anchorKey` — the
+     * restore path drops the anchor, so `anchorKeyFor(null)` yields the `__nil_anchor__` sentinel and
+     * the `(profileKey, anchorKey)` unique index admits both. Every format's restore path behaves
+     * this way (#123 EPUB, #124/#125 TXT/MD), so reconciling it belongs to the shared persistence
+     * seam, not to this mapper. Under such a duplicate both rows resolve to the same CFI — foliate's
+     * `addAnnotation` removes and re-adds under that value, so one overlay is painted — and this
+     * function returns the caller's first matching row, which makes the choice deterministic rather
+     * than arbitrary.
      */
     fun highlightIdForCfi(cfi: String, records: List<HighlightRecord>): String? {
         if (cfi.isBlank()) return null
