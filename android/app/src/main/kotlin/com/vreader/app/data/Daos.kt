@@ -59,7 +59,15 @@ interface BookDao {
 
     /** UPDATE only the IMPORT-owned columns. Deliberately excludes `author` AND `lastOpenedAt` so a
      *  duplicate SAF import refreshes the file/identity metadata without clobbering a backfilled author
-     *  or the last-opened recency (feature #128 WI-1 Gate-2 Critical). */
+     *  or the last-opened recency (feature #128 WI-1 Gate-2 Critical).
+     *
+     *  It ALSO excludes `coverPath` and `coverExtractorVersion` (feature #152 WI-2), for the same
+     *  reason and one more: a cover may have been chosen by the USER (#153), which is not re-derivable
+     *  from the file, and clobbering the version memo would put a known art-less book back into the
+     *  backfill on every app start. **Anything added to this statement is, by construction, a column a
+     *  re-import is allowed to overwrite** — that is the whole contract, so adding a column here is a
+     *  deliberate act, never a completeness tidy-up. `BookDaoCoverStateTest` asserts the exclusion as
+     *  behaviour (re-import, then read the columns back), not by reading this SQL. */
     @Query(
         "UPDATE books SET title = :title, originalFormat = :fmt, contentSHA256 = :sha, " +
             "fileByteCount = :bytes, localFilePath = :path, sourceUri = :uri, addedAt = :addedAt " +
@@ -111,6 +119,25 @@ interface BookDao {
         lastOpenedAt: Long?,
         manifestAuthor: String?,
     )
+
+    // ---- feature #152 WI-2: cover state ----
+
+    /**
+     * Set the book's cover state as a PAIR — the two columns are one tri-state and are never written
+     * apart (see [BookEntity] for the table).
+     *
+     * - art found → `(path, version)`
+     * - reachable, parsed, genuinely no art → `(null, version)`; the version is the memo that stops
+     *   the backfill re-opening this book on every app start
+     * - eligible again (never attempted, a transient access failure, or a deliberate re-run) →
+     *   `(null, null)`
+     *
+     * A `Failed` extraction writes NOTHING — the caller simply does not call this, leaving the row's
+     * existing state so the book is retried. Column-scoped by design: an unknown `key` updates zero
+     * rows rather than inserting, and no other column is touched.
+     */
+    @Query("UPDATE books SET coverPath = :path, coverExtractorVersion = :version WHERE fingerprintKey = :key")
+    suspend fun setCoverState(key: String, path: String?, version: Int?)
 }
 
 @Dao

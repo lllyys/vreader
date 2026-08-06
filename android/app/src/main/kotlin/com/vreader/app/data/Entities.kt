@@ -18,6 +18,26 @@ import androidx.room.PrimaryKey
  * (feature #128 library search) — nullable, set by an author backfill or a restore,
  * NEVER by the SAF import path (a duplicate import must not null-clobber it: the import
  * path goes through [BookDao.upsertPreservingAuthor], not the whole-row `@Upsert`).
+ *
+ * `coverPath` + `coverExtractorVersion` are the v10 addition (feature #152 cover extraction) and
+ * carry the SAME no-clobber contract as `author`: both are excluded from
+ * [BookDao.updateImportedColumns], so a duplicate import cannot erase a cover pointer.
+ *
+ * The two columns together are a tri-state, and BOTH are needed — `coverPath` alone cannot
+ * distinguish "no cover yet" from "already looked, this book has none", so a one-column design
+ * re-parses every art-less book on every app start. `coverExtractorVersion` is that memo, modelled
+ * on [SearchIndexStateEntity.indexerVersion]:
+ *
+ * | `coverExtractorVersion` | `coverPath` | meaning |
+ * |---|---|---|
+ * | `null` | `null` | never attempted, or a transient access failure — eligible, retry |
+ * | current | `null` | attempted; this book genuinely carries no art — skip |
+ * | current | set | have art |
+ * | < current | either | the parser improved — re-attempt |
+ *
+ * `coverPath` exists for REACTIVITY, not lookup (the path is derivable from the key): the library
+ * grid is driven by [BookDao.observeAll], and extraction finishes after the row insert, so without a
+ * column write there is no signal to repaint.
  */
 @Entity(tableName = "books")
 data class BookEntity(
@@ -31,6 +51,9 @@ data class BookEntity(
     val addedAt: Long,            // epoch millis
     val lastOpenedAt: Long?,      // v2 addition — epoch millis of last open, or null
     val author: String? = null,   // v6 addition (feature #128) — nullable; tail default so no positional site breaks
+    // v10 additions (feature #152) — tail defaults, the `author` pattern; see the tri-state table above.
+    val coverPath: String? = null,          // absolute path to the extracted cover file, or null
+    val coverExtractorVersion: Int? = null, // stamped only on a DEFINITE outcome (art or no-art)
 )
 
 /**

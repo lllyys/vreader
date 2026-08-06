@@ -27,6 +27,11 @@ data class Book(
     val addedAt: Long,
     val lastOpenedAt: Long? = null,
     val author: String? = null,   // v6 (feature #128) — nullable; set by backfill/restore, never SAF import
+    // v10 (feature #152) — the cover-state pair; written ONLY via [LibraryRepository.setCoverState],
+    // never by an import DTO (the importer knows nothing about covers). See [BookEntity] for the
+    // tri-state these two encode.
+    val coverPath: String? = null,
+    val coverExtractorVersion: Int? = null,
 )
 
 /**
@@ -82,6 +87,15 @@ class LibraryRepository(
         manifestAuthor: String?,
     ) = bookDao.applyRestoredMetadata(key, title, addedAt, lastOpenedAt, manifestAuthor)
 
+    /**
+     * Records the outcome of a cover-extraction attempt (feature #152 WI-2) — see
+     * [BookDao.setCoverState] for the tri-state the pair encodes. Deliberately NOT folded into
+     * [upsertBookPreservingAuthor]: cover state is owned by the extraction pipeline, not by an import,
+     * which is exactly why the import's UPDATE excludes these columns.
+     */
+    suspend fun setCoverState(fingerprintKey: String, coverPath: String?, extractorVersion: Int?) =
+        bookDao.setCoverState(fingerprintKey, coverPath, extractorVersion)
+
     suspend fun findBook(fingerprintKey: String): Book? = bookDao.find(fingerprintKey)?.let(::toBook)
 
     suspend fun deleteBook(fingerprintKey: String) = bookDao.delete(fingerprintKey)
@@ -122,6 +136,8 @@ class LibraryRepository(
         addedAt = e.addedAt,
         lastOpenedAt = e.lastOpenedAt,
         author = e.author,
+        coverPath = e.coverPath,
+        coverExtractorVersion = e.coverExtractorVersion,
     )
 
     private fun Book.toEntity(): BookEntity = BookEntity(
@@ -135,6 +151,11 @@ class LibraryRepository(
         addedAt = addedAt,
         lastOpenedAt = lastOpenedAt,
         author = author,
+        // Mapped so the DTO⇄entity round-trip is lossless. This does NOT make an import able to write
+        // cover state: the import path's UPDATE (updateImportedColumns) ignores these columns, and the
+        // only caller that writes a whole row is the deliberate whole-row [upsertBook].
+        coverPath = coverPath,
+        coverExtractorVersion = coverExtractorVersion,
     )
 
     /** Nulls a non-finite progression in the legacy locator before storage. */

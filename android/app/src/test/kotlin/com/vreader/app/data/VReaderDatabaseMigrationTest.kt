@@ -829,4 +829,232 @@ class VReaderDatabaseMigrationTest {
             context.deleteDatabase(isoDbName)
         }
     }
+
+    /**
+     * Feature #152 WI-2 — the FULL migration chain 1→…→10 through [VReaderDatabase.ALL_MIGRATIONS]: a
+     * v1 file opens as v10. Opening the REAL Room DB after the v9→v10 migration is the exact-DDL GUARD
+     * — Room's structural PRAGMA validation runs on open and would THROW if MIGRATION_9_10's
+     * hand-written `ALTER TABLE` DDL diverged from Room's GENERATED 10.json schema (affinity, nullability
+     * or column name). It then asserts the seeded book/position survive and that BOTH new cover columns
+     * read NULL for a pre-existing row — the "never attempted" tri-state corner that makes the backfill
+     * eligible rather than permanently skipped.
+     *
+     * The columns are read through a raw `SELECT` rather than the entity so this test fails on the
+     * MIGRATION, not on an unrelated entity-mapping regression.
+     */
+    @Test
+    fun migrate1To10_throughAllMigrations_addsCoverColumns_nullForExistingRows() {
+        seedVersion1Database()
+
+        val db = Room.databaseBuilder(context, VReaderDatabase::class.java, dbName)
+            .addMigrations(*VReaderDatabase.ALL_MIGRATIONS)
+            .build()
+        try {
+            assertNotNull("book survived 1→10", runBlocking { db.bookDao().find(key) })
+            assertNotNull("position survived 1→10", runBlocking { db.readingPositionDao().find(key) })
+
+            db.openHelper.writableDatabase
+                .query("SELECT coverPath, coverExtractorVersion FROM books WHERE fingerprintKey = ?", arrayOf<Any?>(key))
+                .use { c ->
+                    assertTrue("the migrated book row is present", c.moveToFirst())
+                    assertTrue("coverPath is NULL for a pre-existing row", c.isNull(0))
+                    assertTrue("coverExtractorVersion is NULL for a pre-existing row", c.isNull(1))
+                }
+        } finally {
+            db.close()
+        }
+    }
+
+    /**
+     * Feature #152 WI-2 — MIGRATION_9_10 in ISOLATION against an AUTHENTIC v9 database, and the one
+     * people forget: the migration must be NON-DESTRUCTIVE. Two `ALTER TABLE ADD COLUMN`s should be
+     * incapable of losing data, but a migration written as a table-rebuild (the shape SQLite forces
+     * for a column DROP or a type change) silently would — so every other column of a seeded book is
+     * asserted individually, along with the book's reading position in the child table.
+     *
+     * Also asserts the new columns are WRITABLE and round-trip: the art case (path + version), the
+     * memoised no-art case (NULL path WITH a version — the state that stops a re-parse), and the
+     * reset-to-eligible case (both NULL again).
+     */
+    @Test
+    fun migrate9To10_inIsolation_addsCoverColumns_isNonDestructive_andRoundTrips() {
+        val isoDbName = "iso-9-to-10.db"
+        context.deleteDatabase(isoDbName)
+        try {
+            // Build the v9 `books` + `reading_positions` shape directly (v9 books: …lastOpenedAt + author).
+            val v9Callback = object : SupportSQLiteOpenHelper.Callback(9) {
+                override fun onCreate(db: SupportSQLiteDatabase) {
+                    db.execSQL(
+                        "CREATE TABLE IF NOT EXISTS `books` (`fingerprintKey` TEXT NOT NULL, " +
+                            "`title` TEXT NOT NULL, `originalFormat` TEXT NOT NULL, `contentSHA256` TEXT NOT NULL, " +
+                            "`fileByteCount` INTEGER NOT NULL, `localFilePath` TEXT, `sourceUri` TEXT, " +
+                            "`addedAt` INTEGER NOT NULL, `lastOpenedAt` INTEGER, `author` TEXT, " +
+                            "PRIMARY KEY(`fingerprintKey`))",
+                    )
+                    db.execSQL(
+                        "CREATE TABLE IF NOT EXISTS `reading_positions` (`fingerprintKey` TEXT NOT NULL, " +
+                            "`vreaderLocatorJSON` TEXT NOT NULL, `canonicalHash` TEXT NOT NULL, " +
+                            "`updatedAt` INTEGER NOT NULL, PRIMARY KEY(`fingerprintKey`), " +
+                            "FOREIGN KEY(`fingerprintKey`) REFERENCES `books`(`fingerprintKey`) " +
+                            "ON UPDATE NO ACTION ON DELETE CASCADE )",
+                    )
+                }
+                override fun onUpgrade(db: SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+            }
+            FrameworkSQLiteOpenHelperFactory().create(
+                SupportSQLiteOpenHelper.Configuration.builder(context).name(isoDbName).callback(v9Callback).build(),
+            ).writableDatabase.use { db ->
+                // A fully-populated row — every column non-default, so a rebuild-style migration that
+                // dropped or re-defaulted any of them is caught.
+                db.execSQL(
+                    "INSERT INTO books (fingerprintKey, title, originalFormat, contentSHA256, fileByteCount, " +
+                        "localFilePath, sourceUri, addedAt, lastOpenedAt, author) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                    arrayOf<Any?>(
+                        "bk-full", "白鲸", "azw3", "c".repeat(64), 6_288_371L,
+                        "/data/user/0/com.vreader.app/files/books/bk-full.azw3", "content://saf/doc/42",
+                        1_700_000_000_000L, 1_700_000_999_000L, "Herman Melville",
+                    ),
+                )
+                // A minimally-populated row — the nullable columns must stay NULL, not become "".
+                db.execSQL(
+                    "INSERT INTO books (fingerprintKey, title, originalFormat, contentSHA256, fileByteCount, " +
+                        "localFilePath, sourceUri, addedAt, lastOpenedAt, author) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                    arrayOf<Any?>("bk-bare", "Bare", "txt", "d".repeat(64), 10L, null, null, 5L, null, null),
+                )
+                db.execSQL(
+                    "INSERT INTO reading_positions (fingerprintKey, vreaderLocatorJSON, canonicalHash, updatedAt) " +
+                        "VALUES (?,?,?,?)",
+                    arrayOf<Any?>("bk-full", """{"engine":"readium"}""", "cafebabe", 1_700_000_500_000L),
+                )
+            }
+
+            // Apply ONLY MIGRATION_9_10 through a raw helper whose onUpgrade runs the real migration.
+            val migrateCallback = object : SupportSQLiteOpenHelper.Callback(10) {
+                override fun onCreate(db: SupportSQLiteDatabase) = Unit  // never — the file already exists at v9
+                override fun onUpgrade(db: SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) {
+                    assertEquals(9, oldVersion)
+                    assertEquals(10, newVersion)
+                    VReaderDatabase.MIGRATION_9_10.migrate(db)
+                }
+            }
+            FrameworkSQLiteOpenHelperFactory().create(
+                SupportSQLiteOpenHelper.Configuration.builder(context).name(isoDbName).callback(migrateCallback).build(),
+            ).writableDatabase.use { db ->
+                // NON-DESTRUCTIVE: every pre-existing column of the populated row is byte-identical.
+                db.query(
+                    "SELECT title, originalFormat, contentSHA256, fileByteCount, localFilePath, sourceUri, " +
+                        "addedAt, lastOpenedAt, author, coverPath, coverExtractorVersion " +
+                        "FROM books WHERE fingerprintKey = 'bk-full'",
+                ).use { c ->
+                    assertTrue(c.moveToFirst())
+                    assertEquals("title survived", "白鲸", c.getString(0))
+                    assertEquals("originalFormat survived", "azw3", c.getString(1))
+                    assertEquals("contentSHA256 survived", "c".repeat(64), c.getString(2))
+                    assertEquals("fileByteCount survived", 6_288_371L, c.getLong(3))
+                    assertEquals(
+                        "localFilePath survived",
+                        "/data/user/0/com.vreader.app/files/books/bk-full.azw3",
+                        c.getString(4),
+                    )
+                    assertEquals("sourceUri survived", "content://saf/doc/42", c.getString(5))
+                    assertEquals("addedAt survived", 1_700_000_000_000L, c.getLong(6))
+                    assertEquals("lastOpenedAt survived", 1_700_000_999_000L, c.getLong(7))
+                    assertEquals("author survived", "Herman Melville", c.getString(8))
+                    assertTrue("coverPath starts NULL", c.isNull(9))
+                    assertTrue("coverExtractorVersion starts NULL", c.isNull(10))
+                }
+                // The sparse row's nullable columns are still NULL (not defaulted to a sentinel).
+                db.query(
+                    "SELECT localFilePath, sourceUri, lastOpenedAt, author, coverPath, coverExtractorVersion " +
+                        "FROM books WHERE fingerprintKey = 'bk-bare'",
+                ).use { c ->
+                    assertTrue(c.moveToFirst())
+                    for (i in 0..5) assertTrue("column $i stayed NULL on the sparse row", c.isNull(i))
+                }
+                // The CHILD table survived too — a table-rebuild migration that dropped and recreated
+                // `books` would have cascaded these away.
+                db.query("SELECT canonicalHash, updatedAt FROM reading_positions WHERE fingerprintKey = 'bk-full'")
+                    .use { c ->
+                        assertTrue("the reading position survived the books migration", c.moveToFirst())
+                        assertEquals("cafebabe", c.getString(0))
+                        assertEquals(1_700_000_500_000L, c.getLong(1))
+                    }
+
+                // WRITABLE — the art case.
+                db.execSQL(
+                    "UPDATE books SET coverPath = ?, coverExtractorVersion = ? WHERE fingerprintKey = 'bk-full'",
+                    arrayOf<Any?>("/data/user/0/com.vreader.app/files/covers/白鲸.jpg", 1),
+                )
+                db.query("SELECT coverPath, coverExtractorVersion FROM books WHERE fingerprintKey = 'bk-full'").use { c ->
+                    assertTrue(c.moveToFirst())
+                    assertEquals("/data/user/0/com.vreader.app/files/covers/白鲸.jpg", c.getString(0))
+                    assertEquals("INTEGER affinity round-trips the version", 1, c.getInt(1))
+                }
+                // The MEMOISED NO-ART state: NULL path WITH a version — the row that must be
+                // distinguishable from "never attempted", or the backfill re-parses it forever.
+                db.execSQL(
+                    "UPDATE books SET coverPath = NULL, coverExtractorVersion = ? WHERE fingerprintKey = 'bk-bare'",
+                    arrayOf<Any?>(1),
+                )
+                db.query("SELECT coverPath, coverExtractorVersion FROM books WHERE fingerprintKey = 'bk-bare'").use { c ->
+                    assertTrue(c.moveToFirst())
+                    assertTrue("no-art keeps a NULL path", c.isNull(0))
+                    assertEquals("…while still carrying the version memo", 1, c.getInt(1))
+                }
+                // Reset to eligible — both NULL again.
+                db.execSQL("UPDATE books SET coverPath = NULL, coverExtractorVersion = NULL WHERE fingerprintKey = 'bk-full'")
+                db.query("SELECT coverPath, coverExtractorVersion FROM books WHERE fingerprintKey = 'bk-full'").use { c ->
+                    assertTrue(c.moveToFirst())
+                    assertTrue(c.isNull(0))
+                    assertTrue("the memo can be cleared to make a book eligible again", c.isNull(1))
+                }
+            }
+        } finally {
+            context.deleteDatabase(isoDbName)
+        }
+    }
+
+    /**
+     * Feature #152 WI-2 — the zero-row edge: a fresh-ish install whose library is empty still migrates
+     * 9→10 cleanly (an `ALTER TABLE` on an empty table is trivial, but a migration that tried to
+     * backfill values row-by-row could divide-by-zero or leave the columns absent).
+     */
+    @Test
+    fun migrate9To10_onEmptyBooksTable_succeeds_andColumnsExist() {
+        val isoDbName = "iso-9-to-10-empty.db"
+        context.deleteDatabase(isoDbName)
+        try {
+            val v9Callback = object : SupportSQLiteOpenHelper.Callback(9) {
+                override fun onCreate(db: SupportSQLiteDatabase) {
+                    db.execSQL(
+                        "CREATE TABLE IF NOT EXISTS `books` (`fingerprintKey` TEXT NOT NULL, " +
+                            "`title` TEXT NOT NULL, `originalFormat` TEXT NOT NULL, `contentSHA256` TEXT NOT NULL, " +
+                            "`fileByteCount` INTEGER NOT NULL, `localFilePath` TEXT, `sourceUri` TEXT, " +
+                            "`addedAt` INTEGER NOT NULL, `lastOpenedAt` INTEGER, `author` TEXT, " +
+                            "PRIMARY KEY(`fingerprintKey`))",
+                    )
+                }
+                override fun onUpgrade(db: SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+            }
+            FrameworkSQLiteOpenHelperFactory().create(
+                SupportSQLiteOpenHelper.Configuration.builder(context).name(isoDbName).callback(v9Callback).build(),
+            ).writableDatabase.use { /* create only — no rows */ }
+
+            val migrateCallback = object : SupportSQLiteOpenHelper.Callback(10) {
+                override fun onCreate(db: SupportSQLiteDatabase) = Unit
+                override fun onUpgrade(db: SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) {
+                    VReaderDatabase.MIGRATION_9_10.migrate(db)
+                }
+            }
+            FrameworkSQLiteOpenHelperFactory().create(
+                SupportSQLiteOpenHelper.Configuration.builder(context).name(isoDbName).callback(migrateCallback).build(),
+            ).writableDatabase.use { db ->
+                db.query("SELECT coverPath, coverExtractorVersion FROM books").use { c ->
+                    assertEquals("still empty, and both columns exist", 0, c.count)
+                }
+            }
+        } finally {
+            context.deleteDatabase(isoDbName)
+        }
+    }
 }
