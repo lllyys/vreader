@@ -5,8 +5,10 @@
 // Mirrors the iOS FoliateMessageParser contract. Feature #126 WI-2.
 package com.vreader.app.reader.foliate
 
-/** A parsed event from the foliate-js bundle. Only the messages the MVP reader consumes are typed;
- *  everything else (selection/tap/tts/search/…) maps to [Other] and is ignored by the reader. */
+/** A parsed event from the foliate-js bundle. Only the messages this reader consumes are typed;
+ *  everything else (tap/tts/search/section-load/external-link/…) maps to [Other] and is ignored.
+ *  Feature #142 WI-1 promoted the three annotation events — `selection`, `annotation-show` and
+ *  `create-overlay` — out of [Other] into the typed set. */
 sealed interface FoliateMessage {
 
     /** The bundle loaded and `window.readerAPI` is available — safe to call `open`/`init`. */
@@ -62,6 +64,64 @@ sealed interface FoliateMessage {
         val fraction: Double?,
     ) : FoliateMessage
 
-    /** A recognized-but-unconsumed event name (selection, tap, tts-*, search-*, …). */
+    /**
+     * feature #142 WI-1 — a finished text selection in the rendered book (the bundle's
+     * `post("selection", {collapsed:false, text, cfi, index, rect})`, fired after a 300 ms
+     * `selectionchange` debounce).
+     *
+     * [cfi] is foliate's CFI for the range; for MOBI/KF8 it is
+     * `CFI.joinIndir(CFI.fake.fromIndex(index), CFI.fromRange(range))`, so its first step encodes the
+     * spine index and it is the string handed straight back to `readerAPI.addAnnotation`.
+     *
+     * [text] and [cfi] are non-blank and within [FoliateMessageParser.MAX_SELECTION_CHARS] /
+     * [FoliateMessageParser.MAX_CFI_CHARS] by construction — the parser drops the whole message
+     * otherwise, never truncating (a truncated CFI resolves to the WRONG range; a truncated quote
+     * corrupts the dedupe key and the backup row).
+     *
+     * [rect] is ADVISORY ONLY and is in the SECTION document's coordinate space, not the host's — the
+     * bundle posts `range.getBoundingClientRect()` raw, without the `mapTapToHostViewport` correction
+     * the tap path applies. The popover anchor is computed from the live layout instead, so nothing
+     * may be built on this field; it is carried for diagnostics and as a last-ditch fallback.
+     */
+    data class Selection(
+        val text: String,
+        val cfi: String,
+        val sectionIndex: Int,
+        val rect: SelectionRect?,
+    ) : FoliateMessage
+
+    /** feature #142 WI-1 — the selection collapsed (the user tapped away). The bundle's
+     *  `post("selection", {collapsed:true})`. */
+    data object SelectionCleared : FoliateMessage
+
+    /** feature #142 WI-1 — the user tapped an existing overlay (`post("annotation-show", …)`).
+     *  [value] is the CFI the annotation was added under, which resolves back to a stored highlight. */
+    data class AnnotationShow(val value: String, val sectionIndex: Int) : FoliateMessage
+
+    /**
+     * feature #142 WI-1 — a section mounted its overlayer (`post("create-overlay", …)`).
+     *
+     * Stored annotations for that section must be (re)applied here: `view.addAnnotation` silently
+     * no-ops when the target section's overlayer does not exist yet, so a single apply at book-ready
+     * paints only the sections mounted at that moment.
+     */
+    data class OverlayCreated(val sectionIndex: Int) : FoliateMessage
+
+    /** A recognized-but-unconsumed event name (tap, tts-*, search-*, section-load, …). */
     data class Other(val name: String) : FoliateMessage
 }
+
+/**
+ * feature #142 WI-1 — the bundle's serialized selection rectangle (`{x, y, width, height}`), in the
+ * SECTION document's coordinate space. Deliberately NOT a [FoliateMessage]: it is a field of one.
+ *
+ * All four members are finite by construction (the parser rejects quoted, missing and non-finite
+ * ones, yielding a null rect rather than a partial one). Zero-area and negative values ARE kept —
+ * both are real layout outcomes, not corruption.
+ */
+data class SelectionRect(
+    val x: Double,
+    val y: Double,
+    val width: Double,
+    val height: Double,
+)

@@ -146,6 +146,14 @@ class Azw3Document(
             // The goTo ack is consumed by the FoliateGoToDispatcher's own collector (feature #135 WI-2);
             // the document ignores it here.
             is FoliateMessage.GoToAck -> Unit
+            // feature #142 — the annotation events are TYPED by WI-1 and CONSUMED by WI-4 (which adds
+            // onSelection / onAnnotationShow and the per-section decoration re-apply). Listed
+            // explicitly rather than folded into an `else` so the exhaustive `when` keeps failing the
+            // build on the next new message, instead of silently swallowing it.
+            is FoliateMessage.Selection -> Unit
+            FoliateMessage.SelectionCleared -> Unit
+            is FoliateMessage.AnnotationShow -> Unit
+            is FoliateMessage.OverlayCreated -> Unit
             is FoliateMessage.Other -> Unit
         }
     }

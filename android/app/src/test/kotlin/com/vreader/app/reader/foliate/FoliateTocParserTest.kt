@@ -1,11 +1,17 @@
 package com.vreader.app.reader.foliate
 
+import com.vreader.app.reader.foliate.FoliateAssetServer.SHELL_ORIGIN
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+
+/** Label / href length for the feature #142 WI-1 adversarial cap fixture (plan §4.3's arithmetic). */
+private const val LABEL_LEN = 200
+private const val HREF_LEN = 200
 
 /**
  * Feature #140 WI-1 — the bounded, throw-free `book-ready.toc` tree parser.
@@ -269,7 +275,67 @@ class FoliateTocParserTest {
         assertEquals(n, items.size)
     }
 
+    // --- feature #142 WI-1: the adversarial non-regression pin for the withdrawn GLOBAL raw cap ---
+
+    @Test fun maxEntryTocWithLongLabelsAndHrefs_isAdmittedParsedAndPreservedByteForByte() {
+        // THE H1 regression pin (plan §4.3). #142 first designed a GLOBAL 4 MiB cap on the raw bridge
+        // payload. A MAX_TOC_ENTRIES TOC with 200-char labels AND hrefs is ~4.37M chars — ABOVE that
+        // cap — so a legitimate `book-ready` would have been dropped and the reader would never reach
+        // Loaded. The cap is per-message-NAME instead, and `book-ready` is uncapped.
+        //
+        // The long strings are the point. The same test with empty labels is ~370K chars, sails under
+        // any global cap, and would have passed while the defect was present.
+        val n = FoliateTocParser.MAX_TOC_ENTRIES
+        val toc = (0 until n).joinToString(",", "[", "]") {
+            """{"label":"${longLabel(it)}","href":"${longHref(it)}","subitems":[]}"""
+        }
+        val raw = """{"name":"book-ready","detail":{"title":"被偷走的勇气","sections":$n,"toc":$toc}}"""
+
+        // The fixture really is adversarial: above the WITHDRAWN 4 MiB global cap.
+        assertTrue("fixture is ${raw.length} chars — must exceed the withdrawn 4 MiB cap", raw.length > 4_194_304)
+
+        // 1. The admission gate lets it through — `book-ready` carries unbounded book-derived strings
+        //    by design, so it has no ceiling.
+        assertNull("book-ready must stay uncapped", FoliateBridgePolicy.rawCeilingFor(raw))
+        assertTrue(FoliateBridgePolicy.admitsMessage(SHELL_ORIGIN, true, raw))
+
+        // 2. It parses, whole.
+        val message = FoliateMessageParser.parse(raw) as FoliateMessage.BookReady
+        assertEquals(n, message.toc.size)
+
+        // 3. Every label and href survives BYTE-FOR-BYTE. `relocate.tocHref` matching is exact string
+        //    equality (#140), so any trimming, truncation or normalization here silently breaks
+        //    current-chapter highlighting instead of failing loudly.
+        for (i in 0 until n) {
+            assertEquals("label[$i]", longLabel(i), message.toc[i].label)
+            assertEquals("href[$i]", longHref(i), message.toc[i].href)
+        }
+    }
+
+    @Test fun relocateWithAMaxLengthTocHref_roundTripsByteExact() {
+        // The companion pin: the href a `relocate` carries is matched against the parsed TOC by exact
+        // equality, and `relocate` is likewise uncapped.
+        val href = longHref(4_242).let { it + "0".repeat(4_000 - it.length) }
+        assertEquals(4_000, href.length)
+        val raw = """{"name":"relocate","detail":{"fraction":0.5,"tocHref":"$href"}}"""
+        assertNull("relocate must stay uncapped", FoliateBridgePolicy.rawCeilingFor(raw))
+        assertTrue(FoliateBridgePolicy.admitsMessage(SHELL_ORIGIN, true, raw))
+        assertEquals(href, (FoliateMessageParser.parse(raw) as FoliateMessage.Relocate).tocHref)
+    }
+
     // --- fixtures ----------------------------------------------------------------------------
+
+    /** A 200-char TOC label: CJK + digits + a space, so byte-exactness is a real claim. */
+    private fun longLabel(i: Int): String {
+        val head = "第${i}章 "
+        return head + "L".repeat(LABEL_LEN - head.length)
+    }
+
+    /** A 200-char KF8-shaped href. */
+    private fun longHref(i: Int): String {
+        val head = "kindle:pos:fid:$i:off:"
+        return head + "0".repeat(HREF_LEN - head.length)
+    }
 
     /** `[{L0,[{L1,[ … ]}]}]` nested `depth` levels deep. */
     private fun deepTocJson(depth: Int): String {
