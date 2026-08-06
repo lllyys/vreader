@@ -88,13 +88,23 @@ class LibraryRepository(
     ) = bookDao.applyRestoredMetadata(key, title, addedAt, lastOpenedAt, manifestAuthor)
 
     /**
-     * Records the outcome of a cover-extraction attempt (feature #152 WI-2) — see
-     * [BookDao.setCoverState] for the tri-state the pair encodes. Deliberately NOT folded into
-     * [upsertBookPreservingAuthor]: cover state is owned by the extraction pipeline, not by an import,
-     * which is exactly why the import's UPDATE excludes these columns.
+     * Records a DEFINITE cover-extraction outcome (feature #152 WI-2): art was found at [coverPath].
+     *
+     * These three calls are deliberately separate rather than one nullable pair — see [BookDao] for
+     * why — and are deliberately NOT folded into [upsertBookPreservingAuthor]: cover state is owned by
+     * the extraction pipeline, not by an import, which is exactly why the import's UPDATE excludes
+     * these columns. An extraction that FAILED to access the file calls none of them.
      */
-    suspend fun setCoverState(fingerprintKey: String, coverPath: String?, extractorVersion: Int?) =
-        bookDao.setCoverState(fingerprintKey, coverPath, extractorVersion)
+    suspend fun setCoverArt(fingerprintKey: String, coverPath: String, extractorVersion: Int) =
+        bookDao.setCoverArt(fingerprintKey, coverPath, extractorVersion)
+
+    /** Records the other definite outcome: this book carries no art. Stamps the version so the
+     *  backfill stops re-parsing it. */
+    suspend fun setCoverAbsent(fingerprintKey: String, extractorVersion: Int) =
+        bookDao.setCoverAbsent(fingerprintKey, extractorVersion)
+
+    /** Makes the book eligible for extraction again (both columns NULL). */
+    suspend fun clearCoverState(fingerprintKey: String) = bookDao.clearCoverState(fingerprintKey)
 
     suspend fun findBook(fingerprintKey: String): Book? = bookDao.find(fingerprintKey)?.let(::toBook)
 

@@ -2,8 +2,13 @@ package com.vreader.app.data
 
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -20,9 +25,10 @@ import vreader.contracts.Identity
  *
  * Two things are under test, and the second is the load-bearing one:
  *
- * 1. `setCoverState` writes the `(coverPath, coverExtractorVersion)` pair, including the two
- *    tri-state corners that a single-column design cannot express — "no art, already looked"
- *    (NULL path WITH a version) and "eligible again" (both NULL).
+ * 1. The three cover-state transitions (`setCoverArt` / `setCoverAbsent` / `clearCoverState`) write
+ *    the `(coverPath, coverExtractorVersion)` pair, including the two tri-state corners that a
+ *    single-column design cannot express — "no art, already looked" (NULL path WITH a version) and
+ *    "eligible again" (both NULL).
  * 2. **The no-clobber guard.** Android's import path UPDATEs an existing row
  *    ([BookDao.upsertPreservingAuthor] → [BookDao.updateImportedColumns]) rather than skipping it, so
  *    a re-import of a book the user already owns would erase a cover pointer unless the cover columns
@@ -75,7 +81,7 @@ class BookDaoCoverStateTest {
     @After
     fun tearDown() = db.close()
 
-    // ---- setCoverState: the tri-state ----
+    // ---- the tri-state transitions ----
 
     @Test
     fun freshlyImportedBook_hasNoCoverState() = runTest {
@@ -87,10 +93,10 @@ class BookDaoCoverStateTest {
     }
 
     @Test
-    fun setCoverState_writesBothColumns_forTheArtCase() = runTest {
+    fun setCoverArt_writesBothColumns() = runTest {
         dao.upsertPreservingAuthor(entity())
 
-        dao.setCoverState(key, coverPath, 1)
+        dao.setCoverArt(key, coverPath, 1)
 
         val stored = dao.find(key)!!
         assertEquals(coverPath, stored.coverPath)
@@ -98,10 +104,10 @@ class BookDaoCoverStateTest {
     }
 
     @Test
-    fun setCoverState_memoisesTheNoArtCase_asNullPathWithAVersion() = runTest {
+    fun setCoverAbsent_memoisesTheNoArtCase_asNullPathWithAVersion() = runTest {
         dao.upsertPreservingAuthor(entity())
 
-        dao.setCoverState(key, null, 1)
+        dao.setCoverAbsent(key, 1)
 
         val stored = dao.find(key)!!
         assertNull("a book with no art keeps a NULL pointer", stored.coverPath)
@@ -113,11 +119,25 @@ class BookDaoCoverStateTest {
     }
 
     @Test
-    fun setCoverState_canClearTheMemo_makingTheBookEligibleAgain() = runTest {
+    fun setCoverAbsent_afterArt_clearsTheStalePointer() = runTest {
         dao.upsertPreservingAuthor(entity())
-        dao.setCoverState(key, coverPath, 1)
+        dao.setCoverArt(key, coverPath, 1)
 
-        dao.setCoverState(key, null, null)
+        // A later pass at a newer version decides this book has no usable art after all — the old
+        // pointer must not survive alongside the new verdict.
+        dao.setCoverAbsent(key, 2)
+
+        val stored = dao.find(key)!!
+        assertNull("the stale pointer is cleared, not left dangling", stored.coverPath)
+        assertEquals(2, stored.coverExtractorVersion)
+    }
+
+    @Test
+    fun clearCoverState_makesTheBookEligibleAgain() = runTest {
+        dao.upsertPreservingAuthor(entity())
+        dao.setCoverArt(key, coverPath, 1)
+
+        dao.clearCoverState(key)
 
         val stored = dao.find(key)!!
         assertNull(stored.coverPath)
@@ -125,11 +145,11 @@ class BookDaoCoverStateTest {
     }
 
     @Test
-    fun setCoverState_overwritesAPreviousPointer_onAVersionBump() = runTest {
+    fun setCoverArt_overwritesAPreviousPointer_onAVersionBump() = runTest {
         dao.upsertPreservingAuthor(entity())
-        dao.setCoverState(key, coverPath, 1)
+        dao.setCoverArt(key, coverPath, 1)
 
-        dao.setCoverState(key, "$coverPath.v2", 2)
+        dao.setCoverArt(key, "$coverPath.v2", 2)
 
         val stored = dao.find(key)!!
         assertEquals("$coverPath.v2", stored.coverPath)
@@ -137,18 +157,49 @@ class BookDaoCoverStateTest {
     }
 
     @Test
-    fun setCoverState_onAnUnknownKey_isANoOp_andCreatesNoRow() = runTest {
-        dao.setCoverState("epub:${"f".repeat(64)}:99", coverPath, 1)
+    fun setCoverArt_atTheSameVersion_isAllowed_soAPointerCanBeReconciled() = runTest {
+        dao.upsertPreservingAuthor(entity())
+        dao.setCoverAbsent(key, 1)
+
+        // #153's user pick and the coordinator's "cover file exists but the pointer is NULL"
+        // reconcile both write at the CURRENT version. A monotonic "only if newer" guard at this
+        // layer would silently drop both, so same-version writes must be accepted.
+        dao.setCoverArt(key, coverPath, 1)
+
+        val stored = dao.find(key)!!
+        assertEquals(coverPath, stored.coverPath)
+        assertEquals(1, stored.coverExtractorVersion)
+    }
+
+    @Test
+    fun everyTransition_onAnUnknownKey_isANoOp_andCreatesNoRow() = runTest {
+        val absent = "epub:${"f".repeat(64)}:99"
+
+        dao.setCoverArt(absent, coverPath, 1)
+        dao.setCoverAbsent(absent, 1)
+        dao.clearCoverState(absent)
 
         assertEquals("a column-scoped UPDATE never inserts", 0, dao.getAll().size)
     }
 
     @Test
-    fun setCoverState_roundTripsAUnicodePathAndTheIntBoundary() = runTest {
+    fun coverState_writtenAfterTheBookWasDeleted_touchesNothing() = runTest {
+        dao.upsertPreservingAuthor(entity())
+        dao.delete(key)
+
+        // An extraction that was already in flight when the user deleted the book resolves here.
+        dao.setCoverArt(key, coverPath, 1)
+
+        assertNull("the deleted book is not resurrected by a late cover write", dao.find(key))
+        assertEquals(0, dao.getAll().size)
+    }
+
+    @Test
+    fun setCoverArt_roundTripsAUnicodePathAndTheIntBoundary() = runTest {
         dao.upsertPreservingAuthor(entity())
         val cjkPath = "/files/covers/白鲸-Ⅶ-😀.jpg"
 
-        dao.setCoverState(key, cjkPath, Int.MAX_VALUE)
+        dao.setCoverArt(key, cjkPath, Int.MAX_VALUE)
 
         val stored = dao.find(key)!!
         assertEquals(cjkPath, stored.coverPath)
@@ -158,11 +209,82 @@ class BookDaoCoverStateTest {
     @Test
     fun coverState_isVisibleOnTheObservedLibraryFlow() = runTest {
         dao.upsertPreservingAuthor(entity())
-        dao.setCoverState(key, coverPath, 1)
+        dao.setCoverArt(key, coverPath, 1)
 
         // The grid repaints off this Flow — the whole reason coverPath is a column at all.
         val observed = dao.observeAll().first().single()
         assertEquals(coverPath, observed.coverPath)
+    }
+
+    /**
+     * The reactivity claim, tested as reactivity: subscribe FIRST, then write. Extraction finishes
+     * after the row insert and the backfill long after first paint, so the grid only repaints if this
+     * UPDATE pushes a fresh emission — that is the entire reason `coverPath` is a column rather than
+     * a value derived from the key.
+     *
+     * `runBlocking`, not `runTest`: Room drives its invalidation Flow on its own real executor, which
+     * a virtual-time scheduler does not advance. The first emission is awaited before the write, so
+     * there is no subscribe-vs-write race and no sleep.
+     */
+    @Test
+    fun theObservedFlow_emitsAgainWhenCoverStateChanges() = runBlocking {
+        dao.upsertPreservingAuthor(entity())
+
+        val emissions = Channel<String?>(Channel.UNLIMITED)
+        val job = launch(Dispatchers.IO) {
+            dao.observeAll().collect { emissions.send(it.single().coverPath) }
+        }
+        try {
+            assertNull(
+                "the first emission is the cover-less row",
+                withTimeout(10_000) { emissions.receive() },
+            )
+
+            dao.setCoverArt(key, coverPath, 1)
+
+            assertEquals(
+                "the UPDATE pushed a fresh emission carrying the pointer",
+                coverPath,
+                withTimeout(10_000) { emissions.receive() },
+            )
+        } finally {
+            job.cancel()
+        }
+    }
+
+    /**
+     * The whole-row `@Upsert` is the one seam that CAN erase cover state — it overwrites `author` and
+     * `lastOpenedAt` the same way, which is why the import path does not use it. It has no production
+     * caller; this test pins the behaviour so it is documented rather than latent, and so a future
+     * change that quietly wires it into an import path fails here.
+     */
+    @Test
+    fun wholeRowUpsert_isDestructive_andOverwritesCoverState() = runTest {
+        dao.upsertPreservingAuthor(entity())
+        dao.setCoverArt(key, coverPath, 1)
+
+        dao.upsert(entity(title = "Whole-row rewrite"))   // a CONSTRUCTED entity: cover fields default to null
+
+        val stored = dao.find(key)!!
+        assertNull("documented: a whole-row upsert erases the cover pointer", stored.coverPath)
+        assertNull("documented: …and the version memo", stored.coverExtractorVersion)
+        assertEquals("Whole-row rewrite", stored.title)
+    }
+
+    @Test
+    fun wholeRowUpsert_preservesCoverState_whenTheEntityWasRoundTripped() = runTest {
+        dao.upsertPreservingAuthor(entity())
+        dao.setCoverArt(key, coverPath, 1)
+
+        // Reading the row first and writing it back must NOT lose the columns — that is what makes
+        // the entity/DTO mapping lossless rather than a silent data shredder.
+        val readBack = dao.find(key)!!
+        dao.upsert(readBack.copy(title = "Round-tripped"))
+
+        val stored = dao.find(key)!!
+        assertEquals(coverPath, stored.coverPath)
+        assertEquals(1, stored.coverExtractorVersion)
+        assertEquals("Round-tripped", stored.title)
     }
 
     // ---- the no-clobber guard (D-1, DB layer) ----
@@ -170,7 +292,7 @@ class BookDaoCoverStateTest {
     @Test
     fun reimport_throughUpsertPreservingAuthor_leavesCoverStateUntouched() = runTest {
         dao.upsertPreservingAuthor(entity(title = "Moby-Dick"))
-        dao.setCoverState(key, coverPath, 1)
+        dao.setCoverArt(key, coverPath, 1)
 
         // The same book imported again — a new SAF pick of the same file. Room takes the UPDATE
         // branch (the PK already exists) and refreshes the import-owned columns.
@@ -191,7 +313,7 @@ class BookDaoCoverStateTest {
     @Test
     fun reimport_leavesAMemoisedNoArtBookUntouched_too() = runTest {
         dao.upsertPreservingAuthor(entity())
-        dao.setCoverState(key, null, 1)   // known art-less
+        dao.setCoverAbsent(key, 1)   // known art-less
 
         dao.upsertPreservingAuthor(entity(title = "Renamed", localFilePath = "/files/books/again.epub"))
 
@@ -208,7 +330,7 @@ class BookDaoCoverStateTest {
     @Test
     fun applyRestoredMetadata_leavesCoverStateUntouched() = runTest {
         dao.upsertPreservingAuthor(entity())
-        dao.setCoverState(key, coverPath, 1)
+        dao.setCoverArt(key, coverPath, 1)
 
         dao.applyRestoredMetadata(
             key = key,
@@ -231,7 +353,7 @@ class BookDaoCoverStateTest {
     @Test
     fun markOpened_andAuthorBackfill_leaveCoverStateUntouched() = runTest {
         dao.upsertPreservingAuthor(entity())
-        dao.setCoverState(key, coverPath, 1)
+        dao.setCoverArt(key, coverPath, 1)
 
         dao.markOpened(key, 4_242L)
         dao.backfillAuthorIfNull(key, "Herman Melville")
@@ -258,7 +380,7 @@ class BookDaoCoverStateTest {
             ),
         )
 
-        repo.setCoverState(key, coverPath, 1)
+        repo.setCoverArt(key, coverPath, 1)
 
         val loaded = repo.findBook(key)
         assertNotNull(loaded)
@@ -277,7 +399,7 @@ class BookDaoCoverStateTest {
             addedAt = 1_000L,
         )
         repo.upsertBookPreservingAuthor(book)
-        repo.setCoverState(key, coverPath, 1)
+        repo.setCoverArt(key, coverPath, 1)
 
         // A DTO built by the importer never carries cover state (it does not know about covers) —
         // so mapping a null-cover DTO to an entity must not write those columns on the update branch.

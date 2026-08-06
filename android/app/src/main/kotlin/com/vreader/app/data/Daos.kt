@@ -25,6 +25,13 @@ interface BookDao {
     // backfilled `author` (feature #128 WI-1 Gate-2 Critical). This whole-row upsert is
     // kept for callers (e.g. the restore path pre-#128) that intentionally write every
     // column, and is exercised by the reUpsert-preserves-position regression.
+    //
+    // WHOLE-ROW MEANS WHOLE-ROW: it overwrites `author`, `lastOpenedAt`, AND the #152 cover
+    // columns with whatever the passed entity carries — so a caller that CONSTRUCTS a
+    // BookEntity (rather than round-tripping one it read) silently erases all of them.
+    // It has NO production caller today (every import goes through upsertPreservingAuthor);
+    // it survives as a test/fixture seam, and `BookDaoCoverStateTest` pins the destructive
+    // behaviour so it is documented rather than latent.
     @Upsert
     suspend fun upsert(book: BookEntity)
 
@@ -122,22 +129,29 @@ interface BookDao {
 
     // ---- feature #152 WI-2: cover state ----
 
-    /**
-     * Set the book's cover state as a PAIR — the two columns are one tri-state and are never written
-     * apart (see [BookEntity] for the table).
-     *
-     * - art found → `(path, version)`
-     * - reachable, parsed, genuinely no art → `(null, version)`; the version is the memo that stops
-     *   the backfill re-opening this book on every app start
-     * - eligible again (never attempted, a transient access failure, or a deliberate re-run) →
-     *   `(null, null)`
-     *
-     * A `Failed` extraction writes NOTHING — the caller simply does not call this, leaving the row's
-     * existing state so the book is retried. Column-scoped by design: an unknown `key` updates zero
-     * rows rather than inserting, and no other column is touched.
-     */
+    // The cover columns are ONE tri-state and are never written apart, so there is no
+    // `setCoverState(path: String?, version: Int?)` primitive: a nullable pair can express
+    // `(path != null, version == null)`, which is not a state the tri-state defines, and it makes the
+    // reset indistinguishable from a definite outcome at the call site (Gate-4 round-1 Medium). The
+    // three legal transitions get three names instead, so the illegal fourth is unrepresentable.
+    //
+    // A `Failed` extraction calls NONE of them — leaving the row's existing state is what makes the
+    // book retryable. All three are column-scoped: an unknown or already-deleted `key` updates zero
+    // rows rather than inserting, and no other column is touched.
+
+    /** Art was found: point at the file and stamp the version. */
     @Query("UPDATE books SET coverPath = :path, coverExtractorVersion = :version WHERE fingerprintKey = :key")
-    suspend fun setCoverState(key: String, path: String?, version: Int?)
+    suspend fun setCoverArt(key: String, path: String, version: Int)
+
+    /** Reachable, parsed, genuinely no art: clear the pointer but STAMP the version anyway. The stamp
+     *  is the whole point — it is what stops the backfill re-opening this book on every app start. */
+    @Query("UPDATE books SET coverPath = NULL, coverExtractorVersion = :version WHERE fingerprintKey = :key")
+    suspend fun setCoverAbsent(key: String, version: Int)
+
+    /** Reset to eligible (both NULL) — a deliberate re-run lever, deliberately NOT reachable by
+     *  passing nulls to one of the recording calls above. */
+    @Query("UPDATE books SET coverPath = NULL, coverExtractorVersion = NULL WHERE fingerprintKey = :key")
+    suspend fun clearCoverState(key: String)
 }
 
 @Dao
