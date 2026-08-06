@@ -152,8 +152,13 @@ class BookImporter(
         }
     }
 
-    private fun fileNameForKey(key: String): String =
-        key.replace(Regex("[^A-Za-z0-9._-]"), "_")
+    /**
+     * Delegates to [StorageNaming] — the ONE sanitisation shared with the cover store (feature
+     * #152 WI-1). Kept as a method rather than inlined so `BookImporter.fileNameForKey` remains
+     * the name other files refer to; the mapping itself is frozen, because it already names every
+     * artifact on disk and `localFilePath` points at those names.
+     */
+    private fun fileNameForKey(key: String): String = StorageNaming.fileNameForKey(key)
 
     private fun titleFromDisplayName(name: String): String =
         name.substringBeforeLast('.', name).ifBlank { name }
