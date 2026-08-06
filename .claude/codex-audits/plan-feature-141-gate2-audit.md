@@ -3,8 +3,8 @@ gate: 2
 kind: plan-audit
 feature: 141
 plan: dev-docs/plans/20260806-feature-141-android-filterable-toc.md
-rounds: 2
-final_verdict: pending-round-2
+rounds: 3
+final_verdict: follow-up-recommended
 ---
 
 # Gate-2 plan audit — feature #141 (Android filterable TOC)
@@ -77,10 +77,60 @@ lazy fold on **every sheet open** — reinstating the cost-A regression one line
 Now takes `Lazy<List<FoldedTitle>>` and returns from the blank-query branch before touching
 `.value`, with `blankQuery_neverForcesTheFold` asserting `isInitialized() == false`.
 
-## Round 2 — in progress
+## Round 2 — `block-recommended`
 
-Prompt: verify each round-1 finding resolved; evaluate the ICU switch (does `android.icu` exist at
-this minSdk, does Robolectric provide it, does per-code-point full folding preserve the index map
-when a fold expands); confirm the `Lazy` change has no other force site; confirm every
-`TocContentsRow` call site is updated and that moving the `"Untitled"` fallback breaks no consumer.
-Result appended on completion.
+Findings 1–6 and 8–10 **RESOLVED** at real file:line; 7 partially. Three new:
+
+| # | Sev | Finding | Disposition in v3 |
+|---|---|---|---|
+| NEW-1 | High | The v2 fix's own hazard, from the other side: moving the `"Untitled"` fallback into the single string producer meant `FoldedTitle.of` was fed the *presentational* string, so **typing "untitled" would match every blank-titled row** — and the plan's own named test would have failed under its written algorithm. | Author **reverted half of its own v2 fix**, stating that moving the fallback into the producer was the wrong half. `displayTitle` → `matchTitle` (normalized title, or `""` for a blank row); the fallback moves to render time but **inside** `TocTitleFilter.rowText`, not back to the row's self-derivation (which caused round-1 finding 1). |
+| NEW-2 | Med | The "Search full text" CTA was asserted only at the callback boundary — every assertion could pass while the user lands on an **empty** search field, because both hosts render the sheet off VM state (`query = screen.query`), not off callback arguments. | Hosts now seed-then-open via `onQueryChange`; new test drives the real host composition and asserts the field **displays** the trimmed query. |
+| NEW-3 | Med | `wasFiltering` assigned **after** a suspend call, so a fast type-then-clear that cancels the effect loses the scroll restore — the state `TocContentsSheet.kt:161` deliberately retains by identity. | Intent recorded before the first suspension point; deterministic mid-scroll cancellation test with `mainClock.autoAdvance = false`. |
+
+## Round 3 — `follow-up-recommended` (the cap)
+
+NEW-1, NEW-2 and NEW-3 all **RESOLVED**. Two confirmations worth recording because they validate
+author reasoning rather than merely accepting it:
+
+- **Seeding is side-effect-free.** `onQueryChange` writes `_query`/`_state.query` **synchronously**
+  before the debounce (`InBookSearchViewModel.kt:214`, `:219`), so the field shows the text at once
+  and no search runs for an unconfirmed query; recents are committed only via `commitSearch()`
+  (`:225`, `:230`) on the result-jump paths (`ReaderActivity.kt:902`, `:908`).
+- **The `wasFiltering` holder is correctly scoped** — per `tocIdentity`, matching the sheet's own
+  identity (`TocContentsSheet.kt:161`, `:165`), effect-local, never read during composition, and
+  correctly not persisted across configuration change.
+
+Two Mediums remained, both implementation-shape rather than production-path:
+
+| # | Sev | Finding | Disposition in v4 |
+|---|---|---|---|
+| r3-1 | Med | The `TocRowText` invariant is **under-enforced**: the type could be built/copied arbitrarily, and `rowText(row, folded, foldedQuery)` took the fold as an independent argument — so a caller could pair row 5's title with row 900's fold. The round-1 mismatch hazard **relocated**, not removed. | `FoldedTitle` made **`private`** to a new `TocFoldedToc` corpus — removed from the API surface entirely, so no seam *accepts* a fold; `rowText(index, foldedQuery)` resolves `folds[index]` itself. `TocRowText` is not a `data class` and has a `private` constructor (no synthesised `copy`, no caller-built instances). The residual `index` seam is documented: a wrong index yields a **consistent** pair, i.e. a visible wrong-row bug, not the silent mis-tint / bounds-crash class. |
+| r3-2 | Med | The blank-query branch still returned every row "each with its `matchTitle`", which would re-materialise all 1 859 normalized titles on sheet open — the cost-A regression §6 claims was removed. | `TocFilterRow` deleted. Result type is now `TocFilterResult.Unfiltered` (a **singleton** carrying no rows) or `Matched(indices: IntArray)`. The unfiltered branch iterates `itemsIndexed(entries)` with a per-item `remember { plainRowText(entry) }` — identical in shape to today's `TocContentsSheet.kt:182/:188`. A fold-away query returns `Matched(empty)` **without forcing the lazy**. |
+
+### Closed without a fourth round — recorded so the decision is auditable
+
+Rule 47 caps Gate 2 at three audit rounds and says unresolved findings escalate. These two did **not**
+escalate, by orchestrator decision: the verdict had already moved to `follow-up-recommended`, both
+were tightening edits rather than redesigns, and both are **checkable by reading**. The orchestrator
+verified v4 directly rather than running a fourth audit — confirmed in the plan: `FoldedTitle` is
+`private class … private constructor` owned by `TocFoldedToc`; `TocRowText` is `class …
+private constructor(val title, val matchRanges)` with no `data` modifier; the result type is
+`data object Unfiltered` / `class Matched(val indices: IntArray)`; the unfiltered branch is
+`itemsIndexed(entries) { … remember(entry) { plainRowText(entry) } }`; and every surviving
+`TocFilterRow` mention is historical narrative, not live spec.
+
+### The pattern this feature kept producing — recorded as a standing instruction
+
+Cost A hid in the blank-query path **three times**, each time one edit after the previous removal:
+v1's eager `displayTitles` map → v2's `filtered(foldedCorpus.value)` forcing the lazy (author-caught)
+→ v3's per-row `matchTitle`. Each fix removed an *expression* while leaving a *shape* that still
+demanded per-row data. §6 now carries this as a binding implementation note: **a test that catches a
+violation is weaker than a shape that cannot express one.**
+
+## Gate 2: PASSED
+
+`follow-up-recommended`, zero open Critical/High, two Mediums closed in v4 and verified by the
+orchestrator. Author push-backs sustained: the Hangul/emoji/combining-mark claim (disproven by
+measurement, see above) and the `SearchTextNormalizer` drop-in recommendation (rejected — it is
+length-changing, recomposes to NFC, CJK-segments, and NFKC-folds full-width, which iOS's TOC filter
+does not).
