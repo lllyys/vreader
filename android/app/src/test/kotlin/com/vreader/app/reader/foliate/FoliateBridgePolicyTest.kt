@@ -176,6 +176,28 @@ class FoliateBridgePolicyTest {
         }
     }
 
+    @Test fun duplicateTopLevelNameKeys_areAnACCEPTEDResidual_boundedByTheFieldCaps() {
+        // ACCEPTED RESIDUAL (Gate-4 round 2, Low), pinned rather than left unknown. With DUPLICATE
+        // top-level `name` keys the classifier and the parser can disagree: the sniff is lexical and
+        // reads the FIRST key, while kotlinx builds a map, so the parser sees the LAST. A payload can
+        // therefore present an uncapped name to the gate and a capped one to the parser.
+        //
+        // Not fixed, deliberately. (a) Our shim cannot emit it — it serialises one `name` from a JS
+        // object literal. (b) Forging it requires posting from the shell origin, which per the Gate-2
+        // reasoning already means controlling the shell page and having evaluateJavascript-equivalent
+        // power, at which point the ceiling is moot. (c) The damage is bounded anyway: the ceiling only
+        // ever bounded PARSE-TIME amplification, and every value that survives is still subject to the
+        // field caps — asserted below, which is the part that actually protects storage and backups.
+        val huge = "x".repeat(FoliateMessageParser.MAX_SELECTION_CHARS + 1)
+        val raw = """{"name":"book-ready","name":"selection","detail":{"collapsed":false,"text":"$huge","cfi":"/6/4"}}"""
+
+        // The gate classifies from the FIRST key → uncapped → admitted.
+        assertNull(FoliateBridgePolicy.rawCeilingFor(raw))
+        assertTrue(FoliateBridgePolicy.admitsMessage(SHELL_ORIGIN, true, raw))
+        // ...and the field cap still drops it, so nothing over-long is ever emitted downstream.
+        assertNull(FoliateMessageParser.parse(raw))
+    }
+
     @Test fun rawCeiling_isNullWhenTheNameLiteralRunsPastTheSniffWindow() {
         // The documented degradation (plan §4.3 limit 2): unsniffable ⇒ UNCAPPED ⇒ today's behaviour.
         val longName = "s".repeat(FoliateBridgePolicy.NAME_SNIFF_WINDOW)
