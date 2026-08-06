@@ -94,14 +94,18 @@ class LibraryRepository(
      * why — and are deliberately NOT folded into [upsertBookPreservingAuthor]: cover state is owned by
      * the extraction pipeline, not by an import, which is exactly why the import's UPDATE excludes
      * these columns. An extraction that FAILED to access the file calls none of them.
+     *
+     * Returns true when the write was applied, false when the DAO's staleness guard rejected it
+     * (an older extraction finishing after a newer one) — see [BookDao.setCoverArt].
      */
-    suspend fun setCoverArt(fingerprintKey: String, coverPath: String, extractorVersion: Int) =
-        bookDao.setCoverArt(fingerprintKey, coverPath, extractorVersion)
+    suspend fun setCoverArt(fingerprintKey: String, coverPath: String, extractorVersion: Int): Boolean =
+        bookDao.setCoverArt(fingerprintKey, coverPath, extractorVersion) > 0
 
     /** Records the other definite outcome: this book carries no art. Stamps the version so the
-     *  backfill stops re-parsing it. */
-    suspend fun setCoverAbsent(fingerprintKey: String, extractorVersion: Int) =
-        bookDao.setCoverAbsent(fingerprintKey, extractorVersion)
+     *  backfill stops re-parsing it. Returns false when rejected as stale, or when it would have
+     *  wiped an already-established cover pointer at the same version. */
+    suspend fun setCoverAbsent(fingerprintKey: String, extractorVersion: Int): Boolean =
+        bookDao.setCoverAbsent(fingerprintKey, extractorVersion) > 0
 
     /** Makes the book eligible for extraction again (both columns NULL). */
     suspend fun clearCoverState(fingerprintKey: String) = bookDao.clearCoverState(fingerprintKey)

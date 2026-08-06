@@ -252,23 +252,98 @@ class BookDaoCoverStateTest {
         }
     }
 
-    /**
-     * The whole-row `@Upsert` is the one seam that CAN erase cover state — it overwrites `author` and
-     * `lastOpenedAt` the same way, which is why the import path does not use it. It has no production
-     * caller; this test pins the behaviour so it is documented rather than latent, and so a future
-     * change that quietly wires it into an import path fails here.
-     */
+    // ---- the staleness guard ----
+
     @Test
-    fun wholeRowUpsert_isDestructive_andOverwritesCoverState() = runTest {
+    fun setCoverArt_fromAnOlderVersion_isRejected_andLeavesNewerStateIntact() = runTest {
+        dao.upsertPreservingAuthor(entity())
+        dao.setCoverArt(key, "$coverPath.v2", 2)
+
+        // An extraction that started before the v2 pass finally resolves. It must not downgrade.
+        val written = dao.setCoverArt(key, "$coverPath.v1", 1)
+
+        assertEquals("a stale write reports that it changed nothing", 0, written)
+        val stored = dao.find(key)!!
+        assertEquals("$coverPath.v2", stored.coverPath)
+        assertEquals(2, stored.coverExtractorVersion)
+    }
+
+    @Test
+    fun setCoverAbsent_fromAnOlderVersion_isRejected() = runTest {
+        dao.upsertPreservingAuthor(entity())
+        dao.setCoverArt(key, coverPath, 2)
+
+        val written = dao.setCoverAbsent(key, 1)
+
+        assertEquals(0, written)
+        assertEquals("a stale no-art verdict cannot erase newer art", coverPath, dao.find(key)!!.coverPath)
+    }
+
+    @Test
+    fun setCoverAbsent_atTheSameVersion_cannotWipeAnEstablishedPointer() = runTest {
         dao.upsertPreservingAuthor(entity())
         dao.setCoverArt(key, coverPath, 1)
 
-        dao.upsert(entity(title = "Whole-row rewrite"))   // a CONSTRUCTED entity: cover fields default to null
+        // The dangerous interleaving: a no-art verdict at the CURRENT version landing after a cover
+        // was established (an extraction result racing a #153 user pick). It must lose.
+        val written = dao.setCoverAbsent(key, 1)
+
+        assertEquals(0, written)
+        val stored = dao.find(key)!!
+        assertEquals("the established pointer survives", coverPath, stored.coverPath)
+        assertEquals(1, stored.coverExtractorVersion)
+    }
+
+    @Test
+    fun setCoverAbsent_atTheSameVersion_isAppliedWhenNoArtIsRecordedYet() = runTest {
+        dao.upsertPreservingAuthor(entity())
+
+        assertEquals("the first no-art verdict lands", 1, dao.setCoverAbsent(key, 1))
+        // …and repeating it is harmless (still no art at the same version).
+        assertEquals("re-stamping an already-art-less book is allowed", 1, dao.setCoverAbsent(key, 1))
+        assertNull(dao.find(key)!!.coverPath)
+        assertEquals(1, dao.find(key)!!.coverExtractorVersion)
+    }
+
+    @Test
+    fun clearCoverState_isUnguarded_soTheReRunLeverAlwaysWorks() = runTest {
+        dao.upsertPreservingAuthor(entity())
+        dao.setCoverArt(key, coverPath, Int.MAX_VALUE)
+
+        dao.clearCoverState(key)
+
+        assertNull("the explicit reset is never rejected as stale", dao.find(key)!!.coverExtractorVersion)
+    }
+
+    /**
+     * The "write every column" seam is the one that COULD have erased cover state — it still
+     * overwrites `author` and `lastOpenedAt` (that is its documented purpose, unchanged), but after
+     * Gate-4 round 2 its update branch is column-scoped and excludes the cover pair. So even a
+     * CONSTRUCTED entity, whose cover fields default to null, cannot shred a user's cover.
+     */
+    @Test
+    fun wholeRowUpsert_noLongerErasesCoverState_evenFromAConstructedEntity() = runTest {
+        dao.upsertPreservingAuthor(entity(author = "Herman Melville"))
+        dao.setCoverArt(key, coverPath, 1)
+
+        dao.upsert(entity(title = "Whole-row rewrite"))   // cover fields AND author default to null
 
         val stored = dao.find(key)!!
-        assertNull("documented: a whole-row upsert erases the cover pointer", stored.coverPath)
-        assertNull("documented: …and the version memo", stored.coverExtractorVersion)
+        assertEquals("the cover pointer survives a whole-row write", coverPath, stored.coverPath)
+        assertEquals("…as does the version memo", 1, stored.coverExtractorVersion)
+        // Anti-vacuity: the write really happened, and this seam's documented clobbering is intact.
         assertEquals("Whole-row rewrite", stored.title)
+        assertNull("this seam still overwrites author — that is its purpose", stored.author)
+    }
+
+    @Test
+    fun wholeRowUpsert_ofANewBook_stillInserts() = runTest {
+        dao.upsert(entity(title = "Brand new"))
+
+        val stored = dao.find(key)!!
+        assertEquals("Brand new", stored.title)
+        assertNull(stored.coverPath)
+        assertNull(stored.coverExtractorVersion)
     }
 
     @Test

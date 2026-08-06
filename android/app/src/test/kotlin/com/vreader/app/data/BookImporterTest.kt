@@ -473,7 +473,11 @@ private class ThrowingBookDao : BookDao {
     override suspend fun getAll(): List<BookEntity> = emptyList()
     // #152 WI-2: the importer never touches cover state, so this fake throwing here would prove
     // nothing — it stays a no-op, and the import-failure assertions keep testing the write path.
-    override suspend fun setCoverArt(key: String, path: String, version: Int) = Unit
-    override suspend fun setCoverAbsent(key: String, version: Int) = Unit
+    override suspend fun setCoverArt(key: String, path: String, version: Int): Int = 0
+    override suspend fun setCoverAbsent(key: String, version: Int): Int = 0
     override suspend fun clearCoverState(key: String) = Unit
+    override suspend fun updateAllColumnsExceptCoverState(
+        key: String, title: String, fmt: String, sha: String, bytes: Long, path: String?, uri: String?,
+        addedAt: Long, lastOpenedAt: Long?, author: String?,
+    ): Unit = throw RuntimeException("db down")
 }
