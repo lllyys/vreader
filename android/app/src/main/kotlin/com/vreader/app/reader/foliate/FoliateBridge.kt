@@ -2,8 +2,10 @@
 // WebViewAssetLoader (virtual https origin, no file://), a WebViewClient that serves same-origin
 // assets/book + BLOCKS every remote resource request and off-origin navigation, render-process-death
 // passthrough (the host Activity owns recovery — WI-6), and WebViewCompat.addWebMessageListener
-// allow-listed to the shell origin (NEVER addJavascriptInterface) feeding FoliateMessageParser. The
-// security decisions live in FoliateBridgePolicy (pure, JVM-tested). MAIN-THREAD ONLY. Feature #126 WI-3.
+// allow-listed to the shell origin (NEVER addJavascriptInterface) feeding FoliateMessageParser
+// THROUGH FoliateBridgePolicy.admitsMessage (feature #142 WI-1 — origin gate + per-message-name raw
+// ceiling, applied BEFORE the parse it exists to bound). The security decisions live in
+// FoliateBridgePolicy (pure, JVM-tested). MAIN-THREAD ONLY. Feature #126 WI-3.
 package com.vreader.app.reader.foliate
 
 import android.annotation.SuppressLint
@@ -133,8 +135,14 @@ class FoliateBridge(
             WebViewCompat.addWebMessageListener(
                 webView, BRIDGE_NAME, setOf(FoliateAssetServer.SHELL_ORIGIN),
             ) { _, message, sourceOrigin, isMainFrame, _ ->
-                if (FoliateBridgePolicy.isTrustedMessage(sourceOrigin?.toString(), isMainFrame)) {
-                    FoliateMessageParser.parse(message.data ?: "")?.let { _messages.tryEmit(it) }
+                // feature #142 WI-1 — admission runs BEFORE parse, and that ORDER is the point: the
+                // parser's first act is `parseToJsonElement`, so a field-level cap can never bound the
+                // tree it has already built. `admitsMessage` folds the origin/main-frame gate together
+                // with the per-message-name raw ceiling (FoliateBridgePolicy). A rejected message is
+                // dropped silently, exactly like an unparseable one.
+                val raw = message.data ?: ""
+                if (FoliateBridgePolicy.admitsMessage(sourceOrigin?.toString(), isMainFrame, raw)) {
+                    FoliateMessageParser.parse(raw)?.let { _messages.tryEmit(it) }
                 }
             }
         } else {

@@ -52,6 +52,28 @@ class FoliateBundleProvenanceTest {
         assertTrue("bundle missing window.readerAPI", text.contains("readerAPI"))
     }
 
+    /**
+     * Feature #142 WI-1 — pin the bridge message names and `readerAPI` members the AZW3 annotation
+     * adapter binds to. The SHA pin above already fails on ANY drift, but it says only "the bundle
+     * changed"; this says WHICH contract broke. A re-vendored bundle that renamed `annotation-show`
+     * or dropped `deleteAnnotation` would otherwise be a green build with silently dead selection.
+     */
+    @Test
+    fun shippedBundle_stillEmitsAndAcceptsTheAnnotationContract() {
+        val text = bundleFile().readText()
+        // Posted page → native (FoliateMessageParser types all three).
+        for (name in listOf("\"selection\"", "\"annotation-show\"", "\"create-overlay\"")) {
+            assertTrue("bundle no longer posts $name — the #142 selection path is dead", text.contains(name))
+        }
+        // Called native → page (feature #142 WI-3 builds the JS for these).
+        for (member in listOf("addAnnotation", "deleteAnnotation", "deselect")) {
+            assertTrue("bundle no longer exposes readerAPI.$member", text.contains(member))
+        }
+        // The renderer leg that paints a stored highlight.
+        assertTrue("bundle no longer handles draw-annotation", text.contains("draw-annotation"))
+        assertTrue("bundle no longer exposes Overlayer.highlight", text.contains("highlight"))
+    }
+
     @Test
     fun shippedBundle_matchesPinnedPatchedSha() {
         val bytes = bundleFile().readBytes()
