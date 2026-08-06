@@ -1,9 +1,38 @@
 ---
 branch: feat/165-wi-7-saf-launchers
 threadId: 019fd452-c0e5-7de2-b1a5-b336d529ee75
-rounds: 3
-final_verdict: block-recommended
+rounds: 4
+final_verdict: follow-up-recommended
 ---
+
+## Round 4 — orchestrator-run confirming round (2026-08-06): **VERDICT: clean**
+
+Round 3 hit the rule-47 cap at `block-recommended` with one Medium open. Its fix landed in
+`60eba8bd` **after** the verdict, and the lane returned `blocked` rather than certify its own fix.
+
+**The Medium was a genuine Activity leak**: `ReaderActivity` passed
+`onApplied = ::refreshAnnotationsSnapshot` — an Activity-bound method reference that the **app-scope**
+apply job retained for the whole duration of the merge.
+
+**Round 4 confirms the fix:**
+
+- The durable app-scope job captures **only** `controller::apply`, `preview`, and a
+  `CompletableDeferred`. `onApplied` is reached **only** from the composition-scoped waiter.
+- **All four hosts use `applicationContext.contentResolver`** — no Activity-bound resolver reaches an
+  app-scope job anywhere in the WI.
+- **No regression**: the merge still survives composition teardown (the durable half is the point),
+  `preview.importable == applied` remains covered, and WI-6's
+  `assertDoesNotExist('details-export-annotations')` still passes.
+
+**On the open Low** (the five `AnnotationImportSession` JVM tests exercise the session *object*, not
+its *use* inside `rememberAnnotationImportEntry`, so deleting the composable's sheet guards would
+leave them green): round 4 judged the lane's assessment **correct**, and shipping with it open
+**acceptable for the import half**, given four-host connected reachability plus real round-trip
+coverage. Closing it needs a fake-controller composable test with latched A/B previews and a latched
+apply settle — carried as a follow-up.
+
+`final_verdict` updated to `follow-up-recommended` on a clean independent confirmation, not an
+override.
 
 # Gate-4 implementation audit — feature #165 WI-7 (SAF import launcher + Gate-5b import acceptance)
 
