@@ -12,11 +12,14 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.webkit.WebViewAssetLoader
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -98,6 +101,25 @@ class FoliateBridgeAnnotationCallsTest {
         // is backslash-prefixed, so the hostile payload never becomes syntax.
         val unescaped = js.withIndex().count { (i, c) -> c == '"' && (i == 0 || js[i - 1] != '\\') }
         assertEquals("hostile CFI broke out of its literal:\n$js", 4, unescaped)
+    }
+
+    @Test
+    fun destroy_tearsDownTheGoToDispatcher_soAnAwaitedJumpIsReleasedAtOnce() {
+        // Gate-4 round 2 (L1): the dispatcher's own teardown() is well tested, but nothing proved
+        // destroy() CALLS it — deleting that one line survived the suite and silently reinstated the
+        // round-1 H1 leak (an infinite ack collector retaining the bridge and its WebView). The
+        // observable consequence at this boundary is that an awaiting jump is released immediately
+        // instead of hanging until its budget, so that is what this asserts. No time is advanced: a
+        // ten-minute budget cannot be what completes it.
+        val job = scope.async {
+            bridge.goTo(FoliateGoToTarget.Cfi("epubcfi(/6/4!/4/2)"), timeoutMs = 10 * 60_000L)
+        }
+        assertFalse("the jump must still be awaiting its ack", job.isCompleted)
+
+        bridge.destroy()
+
+        assertTrue("destroy() must release the awaiting goTo, not leave it to time out", job.isCompleted)
+        assertEquals(Azw3GoToResult.Superseded, job.getCompleted())
     }
 
     @Test
