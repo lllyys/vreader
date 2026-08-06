@@ -3,8 +3,8 @@ gate: 2
 kind: plan-audit
 feature: 142
 plan: dev-docs/plans/20260806-feature-142-android-azw3-annotations.md
-rounds: 2
-final_verdict: pending-round-3
+rounds: 3
+final_verdict: follow-up-recommended
 ---
 
 # Gate-2 plan audit — feature #142 (Android AZW3 selection + highlights/notes)
@@ -56,4 +56,56 @@ RED test stay.
   where focus is the range *start*; and it accepts any non-empty rect list, where the existing probe
   filters by width (`Azw3DomProbe.kt:91`). Vertical writing mode is claimed but untested.
 
-Round 3 (the rule-47 cap) is in progress on both.
+## Round 3 — `follow-up-recommended` (the cap)
+
+**H1 RESOLVED, and the crux was checked explicitly.** The round-3 prompt named the failure that would
+have made the per-message design unsound: *if the message name is knowable only after parsing, a
+cap-by-name is circular and is Critical, not Medium.* It is not circular — `rawCeilingFor(raw)` never
+parses; it reads only the `"name"` string within a 256-char window, and the shim serialises
+`{ name, detail }` with **`name` first** (`reader.html:37`), with the proxy forwarding arbitrary
+handler names through that same `send` path (`:42`). Field caps exist as claimed
+(`MAX_SELECTION_CHARS = 8_000`, `MAX_CFI_CHARS = 4_000`) and the ceiling arithmetic leaves headroom.
+
+**The author's reasoning is what made this land correctly**, and is recorded because a future round
+may be tempted to "just raise the number": **no finite global ceiling exists.** TOC label length is
+unbounded anywhere in the codebase or the contract, so any global cap is a guess about what counts as
+legitimate — and guessing low drops a legitimate `book-ready` and strands the reader before `Loaded`,
+which is worse than the threat. Hence per-message-name, with the dividing line that a message may be
+capped only if this feature already bounds every variable-length field it carries. `book-ready` and
+`relocate` stay uncapped, preserving the byte-exact TOC/`tocHref` contract (`FoliateTocParser.kt:97`);
+the auditor agreed that is pre-existing exposure, not risk #142 relocates.
+
+**M1 PARTIALLY RESOLVED** — both real defects fixed and verified: the bundle idiom exists exactly at
+`foliate-bundle.js:4280`; `Selection.direction` with the collapsed-range fallback is correct;
+`rects[0]` backward vs `rects[last]` forward is correct; the rect filter follows
+`Azw3DomProbe.kt:91`'s width precedent and sensibly adds height.
+
+| # | Sev | Finding | Disposition |
+|---|---|---|---|
+| r3-1 | Low | **Stale coverage claim.** §4.5.1 correctly puts vertical writing modes out of scope (anchoring at `edge.bottom` is itself a horizontal-writing assumption), but the R3 revision-history entry still says §4.5.1 "covers … RTL/vertical writing modes". Gate 4 and Gate 5 read the revision history, so a stale claim there is how a feature ends up asserting more than it proved — the same shape as #141's "copied verbatim from iOS" line, which passed review twice before a measurement caught it. | Corrected: RTL **argued but untested** (no fixture), vertical **out of scope**, degrading to misplaced-but-clamped rather than lost. Closed without a fourth round; orchestrator verified the edit by reading it. |
+
+### Also confirmed independently in round 3
+
+The per-message table covers all three inbound names this feature introduces and states unknown names
+are uncapped, with the test catalogue pinning unknown/`book-ready`/`relocate`/`goto-ack` to null
+ceilings. Features **#175** and **#176** exist and are cited correctly where the plan explains its
+scope boundaries. The plan's description of the `ReaderActivity.kt:682` anti-pattern is accurate —
+`popoverVm` is an Activity property (`:205`) read inside `appScope.launch` (`:682`) — it matches bug
+**#373**, and the WI-5 design explicitly forbids reproducing it. Acceptance criteria match the
+narrowed scope (highlight-attached notes only).
+
+## Gate 2: PASSED
+
+`follow-up-recommended`, zero open Critical/High/Medium. Rounds 1 and 2 both returned
+`block-recommended`; the plan is materially different from its first draft.
+
+**Rejected / adjudicated, recorded so later rounds do not re-litigate:** the tapped-highlight design
+"conflict" (real, but pre-existing and app-wide — tracked as **#175**, and complying inside #142 would
+have made AZW3 the only format on the designed surface); standalone-note creation (**#176** — no
+Android format ships it, so #142 correctly dropped it rather than inventing a control); and round 1's
+own citation of a package root that does not exist in this repo.
+
+**Confirmed, load-bearing:** the anchor/restore trap — the backup wire carries no anchor, so restore
+inserts `anchor = null` on both platforms, and reading the CFI only from the anchor would make every
+restored AZW3 highlight permanently invisible. The `record.anchor?.cfi ?: record.locator.cfi`
+fallback and its RED test are the feature's single most consequential line.
