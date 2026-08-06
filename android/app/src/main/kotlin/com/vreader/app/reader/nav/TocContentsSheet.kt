@@ -237,8 +237,12 @@ private fun Char.isSpaceOrBreak(): Boolean = isWhitespace() || isLineBreak()
  *   iOS port, whose TXT rules consume up to four leading spaces/U+3000/tabs into the matched line
  *   before it becomes a title. So an ordinary EPUB/MD title with stray leading or trailing whitespace
  *   does change: it loses that whitespace. Nothing else about it does.
+ *
+ * `internal` rather than `private` (feature #141 WI-1) so [TocTitleFilter.matchTitle] can be its
+ * single other caller: the filter's ranges index the NORMALIZED title, so the predicate and the
+ * renderer must consume the very same normalization — not two copies of it. Behavior is unchanged.
  */
-private fun String.collapseLineBreaks(): String {
+internal fun String.collapseLineBreaks(): String {
     if (none { it.isLineBreak() }) return trim { it.isSpaceOrBreak() }
     val out = StringBuilder(length)
     var i = 0
