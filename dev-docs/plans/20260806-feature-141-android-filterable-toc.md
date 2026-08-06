@@ -129,10 +129,19 @@ NFKC.** §5.1 swaps per-code-point `String.lowercase()` for per-code-point ICU
 index map — which the empirical audit measured as correct across ~90 hostile inputs — is untouched.
 Costs and residuals, stated plainly:
 
-- **Residual 1 — ligatures (`ﬁ`) still do not fold.** Closing it requires NFKC, which is
-  length-changing *across* code points and would destroy the index map. Not worth a proven-sound
-  mechanism. §8.1's `ligature_doesNotMatch` **keeps its assertion and gets a corrected rationale**:
-  it is a documented divergence from iOS, not the "iOS parity" v1 claimed.
+- **~~Residual 1 — ligatures (`ﬁ`) still do not fold.~~ WITHDRAWN — ERRATUM (WI-1, 2026-08-06).**
+  This prediction was **wrong**, and the fix that produced it is what made it wrong. Unicode **full**
+  case folding maps U+FB01 → `"fi"` (CaseFolding.txt `F` mapping), so the moment §5.1 swapped
+  `String.lowercase()` for ICU `foldCase(…, FOLD_CASE_DEFAULT)` to close ß and final sigma, **it
+  closed the ligature too — without NFKC and without touching the index map.** Android therefore
+  **AGREES with iOS** here. Orchestrator-verified independently: `"ﬁ".casefold() == "fi"` under the
+  same Unicode full-case-folding table ICU uses, while `NFD("ﬁ")` leaves it unchanged (so this is
+  the fold, not the normalizer). The shipped test is `ligature_foldsLikeIcuFullCaseFolding`.
+  **How it survived**: the residual was written in the same round that chose full folding, carried
+  over from the *previous* algorithm's measured table, and no round re-derived it — the empirical
+  audit measured the pre-ICU algorithm, and every later round read the residual as settled. Found by
+  the WI-1 implementer running it. The auditor confirmed that following the plan's **normative
+  algorithm** over its **predicted table** was the correct call.
 - **Residual 2 — Arabic `أ`/`ا` over-matches** (Android matches, iOS does not), because NFD+strip-Mn
   removes the hamza (U+0654, category Mn) while ICU collation at Foundation's strength keeps it. For
   a *title narrower* over-matching is the benign direction — the user sees a superset of candidate
@@ -843,7 +852,7 @@ Every edge case below is a named test. **JVM** = `android/app/src/test/kotlin/..
 | `multipleOccurrences_allRangesNonOverlapping` | "aa" in "aaaa" ⇒ exactly 2 ranges, at `0..1` and `2..3`; "the" in "The Theatre" ⇒ 2 |
 | `surrogatePairBeforeMatch_rangesAreCharIndices` | an astral emoji before the match — `AnnotatedString` spans are Char indices |
 | `fullWidthLatin_doesNotMatch` | ＣＡＦＥ + "cafe" ⇒ no match. **The one exclusion that genuinely agrees with iOS** |
-| `ligature_doesNotMatch_divergesFromIos` | ﬁ + "fi" ⇒ no match. **Assertion unchanged from v1; rationale corrected (finding 2)** — iOS *does* match here, so this is an accepted divergence, not parity. Renamed so the test name cannot re-teach the wrong reason |
+| `ligature_foldsLikeIcuFullCaseFolding` | ﬁ + "fi" ⇒ **match**. **ERRATUM (WI-1): the earlier `ligature_doesNotMatch_divergesFromIos` row was wrong.** Unicode full case folding maps U+FB01 → `"fi"`, so the ICU switch that closed ß and final sigma closed this too — Android **agrees** with iOS, no NFKC and no index-map change. See §3 Residual 1 (withdrawn). Twice-renamed, and the reason is the lesson: v1's name taught a false rationale, v2's name taught a false *result* |
 | `arabicHamza_overMatchesVsIos` | `الأول` + `الاول` ⇒ match, where iOS does not. Pins the accepted over-match so any future change to the strip rule is deliberate |
 | `nullOrBlankTitle_neverMatchesNonEmptyQuery_butCountsInTotal` | `TocEntry.title: String?` — a blank row folds to `""` and matches nothing, but still counts in the "of M" denominator |
 | `queryUntitled_matchesZeroRows_inTocWithBlankTitles` | **r2 NEW-1** — a TOC containing blank-titled entries, query `untitled` ⇒ **zero** rows. **Written to fail against the v2 spec**, under which `displayTitle` returned the label, folded to `untitled`, and matched every blank row |
