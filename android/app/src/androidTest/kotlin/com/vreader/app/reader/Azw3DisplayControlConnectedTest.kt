@@ -1,9 +1,6 @@
 package com.vreader.app.reader
 
 import android.util.Log
-import android.view.View
-import android.view.ViewGroup
-import android.webkit.WebView
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
@@ -13,8 +10,6 @@ import androidx.compose.ui.test.performClick
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
-import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry
-import androidx.test.runner.lifecycle.Stage
 import com.vreader.app.MainActivity
 import com.vreader.app.VReaderApp
 import com.vreader.app.data.Book
@@ -22,7 +17,6 @@ import com.vreader.app.reader.settings.ReaderFontFamily
 import com.vreader.app.reader.settings.ReaderSettings
 import com.vreader.app.reader.settings.ReaderTheme
 import kotlinx.coroutines.runBlocking
-import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
@@ -34,9 +28,6 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.junit.runners.MethodSorters
 import java.io.File
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicReference
 
 /**
  * **bug #368** — the AZW3/MOBI/KF8 reader had no Display (Aa) control, so feature #129's reader display
@@ -103,7 +94,6 @@ class Azw3DisplayControlConnectedTest {
         /** A 6 MB import + a WebView + the foliate bundle + first paint on a loaded emulator is slow. */
         const val UI_TIMEOUT_MS = 120_000L
         const val CSS_TIMEOUT_MS = 60_000L
-        const val POLL_MS = 250L
     }
 
     /** The real on-disk DataStore is shared across test classes AND across the app under test — pin the
@@ -111,7 +101,7 @@ class Azw3DisplayControlConnectedTest {
     @Before fun pinDefaults() = resetDisplaySettings()
 
     @After fun tearDown() {
-        finishAnyReader()
+        finishAnyAzw3Reader()
         resetDisplaySettings()
     }
 
@@ -170,7 +160,7 @@ class Azw3DisplayControlConnectedTest {
 
             // Before the tap the body carries the DEFAULT display CSS — the baseline the change is
             // measured against, read from the live section document rather than assumed.
-            awaitLiveCss(reader, "the default display CSS", expectedBefore)
+            awaitLiveVreaderCss(reader, "the default display CSS", expectedBefore, CSS_TIMEOUT_MS)
 
             // Tap it the way a user does — the same designed sheet EPUB and TXT/MD open.
             compose.onNodeWithTag("chrome-display", useUnmergedTree = true).performClick()
@@ -184,7 +174,7 @@ class Azw3DisplayControlConnectedTest {
 
             // …and it reaches the AZW3 body: the live stylesheet in the mounted section document IS the
             // production CSS for the tapped theme. This is the claim the bug row's fix has to earn.
-            awaitLiveCss(reader, "the tapped theme's display CSS", expectedAfter)
+            awaitLiveVreaderCss(reader, "the tapped theme's display CSS", expectedAfter, CSS_TIMEOUT_MS)
         }
         Log.i(TAG, "bug #368 acceptance PASSED on the real book through the production path")
     }
@@ -218,14 +208,14 @@ class Azw3DisplayControlConnectedTest {
      *  it, and run [block] with the reader that tap opened (identity re-checked on the production
      *  intent extra, after draining any reader an earlier method left on the stack). */
     private fun openThroughLibrary(book: Book, block: (Azw3ReaderActivity) -> Unit) {
-        assertTrue("a reader from an earlier test is still on the stack", finishAnyReader())
+        assertTrue("a reader from an earlier test is still on the stack", finishAnyAzw3Reader())
         ActivityScenario.launch(MainActivity::class.java).use {
             compose.waitUntil(UI_TIMEOUT_MS) {
                 compose.onAllNodesWithText(BOOK_TITLE, substring = true).fetchSemanticsNodes().isNotEmpty()
             }
             compose.onNodeWithText(BOOK_TITLE, substring = true).performClick()
-            compose.waitUntil(UI_TIMEOUT_MS) { resumedReader() != null }
-            val reader = requireNotNull(resumedReader())
+            compose.waitUntil(UI_TIMEOUT_MS) { resumedAzw3Reader() != null }
+            val reader = requireNotNull(resumedAzw3Reader())
             try {
                 assertEquals(
                     "the Library tap must have opened THIS book (production intent extra)",
@@ -234,7 +224,7 @@ class Azw3DisplayControlConnectedTest {
                 )
                 block(reader)
             } finally {
-                finishAnyReader()
+                finishAnyAzw3Reader()
             }
         }
     }
@@ -251,111 +241,11 @@ class Azw3DisplayControlConnectedTest {
         Log.i(TAG, "BOOK READY (Loaded + a persisted relocate) for ${book.fingerprintKey}")
     }
 
-    private fun resumedReader(): Azw3ReaderActivity? = readOnMain {
-        ActivityLifecycleMonitorRegistry.getInstance()
-            .getActivitiesInStage(Stage.RESUMED)
-            .filterIsInstance<Azw3ReaderActivity>()
-            .firstOrNull()
-    }
-
-    private fun liveReaders(): List<Azw3ReaderActivity> = readOnMain {
-        val monitor = ActivityLifecycleMonitorRegistry.getInstance()
-        listOf(
-            Stage.PRE_ON_CREATE, Stage.CREATED, Stage.STARTED,
-            Stage.RESUMED, Stage.PAUSED, Stage.STOPPED, Stage.RESTARTED,
-        ).flatMap { monitor.getActivitiesInStage(it) }.filterIsInstance<Azw3ReaderActivity>().distinct()
-    }
-
-    private fun finishAnyReader(): Boolean {
-        val readers = liveReaders()
-        if (readers.isEmpty()) return true
-        inst.runOnMainSync { readers.forEach { it.finish() } }
-        val deadline = System.currentTimeMillis() + 20_000
-        while (liveReaders().isNotEmpty() && System.currentTimeMillis() < deadline) Thread.sleep(POLL_MS)
-        return liveReaders().isEmpty()
-    }
-
     private fun <T> readOnMain(block: () -> T): T {
         var value: Any? = null
         inst.runOnMainSync { value = block() }
         @Suppress("UNCHECKED_CAST")
         return value as T
-    }
-
-    // ---- the live stylesheet in the mounted section document ---------------------------------------
-
-    /** Poll until the vreader blob live in the section document equals [expected]; a state that never
-     *  arrives is an explicit failure carrying the last reading, never a quietly stale sample. */
-    private fun awaitLiveCss(reader: Azw3ReaderActivity, what: String, expected: String) {
-        val deadline = System.currentTimeMillis() + CSS_TIMEOUT_MS
-        var last: String? = null
-        while (System.currentTimeMillis() < deadline) {
-            last = liveVreaderCssOrNull(reader)
-            if (last == expected) {
-                Log.i(TAG, "LIVE CSS is $what (${expected.length} chars)")
-                return
-            }
-            Thread.sleep(POLL_MS)
-        }
-        throw AssertionError(
-            "the AZW3 body's live stylesheet never became $what within ${CSS_TIMEOUT_MS}ms. " +
-                "expected=${expected.take(160)}… actual=${last?.take(160) ?: "<no vreader blob in the document>"}…",
-        )
-    }
-
-    /**
-     * The vreader display-CSS blob as it is ACTUALLY live in the mounted section document, selected by
-     * the production ownership sentinel rather than by a rule's text (a publisher stylesheet could carry
-     * the same shape). Null while the section is not mounted, or if the blob is not there yet.
-     */
-    private fun liveVreaderCssOrNull(reader: Azw3ReaderActivity): String? {
-        val raw = evalJs(reader, STYLES_JS) ?: return null
-        if (raw == "null") return null
-        // `evaluateJavascript` hands back the JS value JSON-ENCODED, and the JS itself returns a
-        // JSON string — so the payload arrives double-encoded and has to be unwrapped twice (the
-        // Azw3DomProbe.evalJson precedent).
-        val outer = runCatching { org.json.JSONTokener(raw).nextValue() }.getOrNull() ?: return null
-        val decoded = when (outer) {
-            is String -> runCatching { JSONObject(outer) }.getOrNull()
-            is JSONObject -> outer
-            else -> null
-        } ?: return null
-        val styles = decoded.optJSONArray("styles") ?: return null
-        val candidates = (0 until styles.length()).map { styles.optString(it) }
-            .filter { it.contains(VREADER_CSS_SENTINEL) }
-        return candidates.singleOrNull()
-    }
-
-    /**
-     * Evaluate [js] in the production foliate WebView ON THE MAIN THREAD and block for the result. A
-     * per-call holder: on timeout the value a late callback writes must NOT be read, or a slow
-     * evaluation would surface as a stale reading in a later poll.
-     */
-    private fun evalJs(reader: Azw3ReaderActivity, js: String): String? {
-        val holder = AtomicReference<String?>(null)
-        val done = CountDownLatch(1)
-        inst.runOnMainSync {
-            val webView = firstWebView(reader.window.decorView)
-            if (webView == null) {
-                Log.w(TAG, "evalJs: NO WebView in the reader's view tree")
-                done.countDown()
-                return@runOnMainSync
-            }
-            webView.evaluateJavascript(js) { value -> holder.set(value); done.countDown() }
-        }
-        if (!done.await(20, TimeUnit.SECONDS)) {
-            Log.w(TAG, "evalJs timed out after 20s — discarding this sample")
-            return null
-        }
-        return holder.get()
-    }
-
-    private fun firstWebView(view: View): WebView? {
-        if (view is WebView) return view
-        if (view is ViewGroup) {
-            for (i in 0 until view.childCount) firstWebView(view.getChildAt(i))?.let { return it }
-        }
-        return null
     }
 
     // ---- compose helpers ---------------------------------------------------------------------------
@@ -366,25 +256,3 @@ class Azw3DisplayControlConnectedTest {
     private fun textExists(text: String) =
         compose.onAllNodesWithText(text, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
 }
-
-/**
- * Foliate renders each book section into a `blob:` SUBFRAME, so the section document is reached the
- * same way foliate's own `setStyles` reaches it: `document.getElementById('view').renderer.getContents()[0].doc`.
- * Returns every `<style>` element's text; the caller picks OUR blob out by the production sentinel.
- */
-private const val STYLES_JS = """
-    (function(){
-      try{
-        var v=document.getElementById('view');
-        var r=v&&v.renderer;
-        var cs=(r&&r.getContents)?r.getContents():null;
-        if(!cs||!cs.length) return JSON.stringify({styles:[],reason:'no-mounted-view'});
-        var d=cs[0].doc;
-        if(!d) return JSON.stringify({styles:[],reason:'no-document'});
-        var out=[];
-        var ss=d.querySelectorAll('style');
-        for(var i=0;i<ss.length;i++) out.push(ss[i].textContent||'');
-        return JSON.stringify({styles:out});
-      }catch(e){return JSON.stringify({styles:[],error:String(e)});}
-    })()
-"""

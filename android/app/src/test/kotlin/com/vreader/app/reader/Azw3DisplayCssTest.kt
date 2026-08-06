@@ -290,12 +290,20 @@ class Azw3DisplayCssTest {
     }
 
     /**
-     * The one Display control AZW3 does NOT honour, pinned so the asymmetry is a recorded decision
-     * rather than an accident: `layout` (Paged/Scroll) is absent from the CSS blob because foliate-js
-     * owns AZW3 pagination outright — it is always paged, whatever the global setting says. The sheet is
-     * a single designed surface reused verbatim across hosts (rule 51: no per-host UI variant is
-     * invented here), so the toggle is still shown and still writes the global preference that the
-     * EPUB/TXT/MD hosts read; it simply changes nothing in THIS body.
+     * The one Display control AZW3 does NOT honour, pinned so the asymmetry is a recorded fact rather
+     * than an accident: `layout` (Paged/Scroll) is absent from the CSS blob because foliate-js owns AZW3
+     * pagination outright — it is always paged, whatever the global setting says. The toggle still
+     * writes the global preference the EPUB/TXT/MD hosts read, so it is inert-on-this-host rather than a
+     * no-op, but from inside a Kindle book it changes nothing.
+     *
+     * **This is an OPEN blocker, not an accepted trade-off.** It is the Gate-4 finding that holds bug
+     * #368 at `block-recommended` — see `.claude/codex-audits/fix-issue-368-azw3-display-control-audit.md`.
+     * Neither remedy belongs to this fix: honouring scrolled flow is a feature (it moves pagination,
+     * locator mapping, the tap zones and #138's windowing), and hiding or dimming the toggle for one
+     * host is an uncommitted UI variant — `dev-docs/designs/vreader-fidelity-v1/project/vreader-panels.jsx`
+     * designs the Layout control with selected/unselected states ONLY, no unavailable state. A
+     * `needs-design` issue must be filed and cited on the #368 row before this branch merges (rule 51;
+     * the bug #344 precedent, which was `BLOCKED: needs-design (#1646)` until its disabled state landed).
      */
     @Test
     fun layoutToggle_doesNotAffectTheAzw3Css_foliateOwnsPagination() {

@@ -144,12 +144,23 @@ class Azw3ReaderActivity : ComponentActivity() {
                     val chromeState = rememberSaveable(bookKey, stateSaver = ReaderChromeStateSaver) {
                         mutableStateOf(ReaderChromeState())
                     }
-                    val displaySettings by container.readerSettingsStore.settings
-                        .collectAsStateWithLifecycle(initialValue = com.vreader.app.reader.settings.ReaderSettings())
+                    // NULL until the DataStore's first emission (the TXT host's posture, and the reason
+                    // it exists — Gate-4 Medium: a surface rendered from fabricated defaults lies to a
+                    // user who has stored non-default settings).
+                    val settingsOrNull by container.readerSettingsStore.settings
+                        .collectAsStateWithLifecycle(initialValue = null)
+                    // The chrome + body keep their pre-#368 pre-emission posture (defaults for one
+                    // frame): that flash predates this fix — the chrome already collected with a
+                    // defaults seed — and withholding the whole AZW3 reader on it would change how every
+                    // Kindle book opens, which is not this bug. The SHEET is the surface that must never
+                    // lie, and it is gated on a real emission below.
+                    val displaySettings = settingsOrNull ?: com.vreader.app.reader.settings.ReaderSettings()
                     // bug #368 — the Display sheet's open state. Kept here (not inside the chrome) for
                     // the same reason the EPUB/TXT hosts keep theirs: the sheet is a ModalBottomSheet in
-                    // its own window, so the HOST owns it and the chrome only reports the tap.
-                    var showDisplaySheet by rememberSaveable(bookKey) { mutableStateOf(false) }
+                    // its own window, so the HOST owns it and the chrome only reports the tap. Plain
+                    // `remember` (not rememberSaveable), matching TXT: an open modal is session UI
+                    // state, so a rotation or process death must not restore a sheet over the reader.
+                    var showDisplaySheet by remember(bookKey) { mutableStateOf(false) }
                     // feature #165 WI-7 — the extra key that makes a merged annotations import show up in the
                     // one-shot snapshot without reopening the reader.
                     var annotationsRefresh by remember(bookKey) { mutableIntStateOf(0) }
@@ -347,10 +358,16 @@ class Azw3ReaderActivity : ComponentActivity() {
                     // the setter — so the store's per-field latest-wins reflects the user's true edit
                     // order, not the multi-threaded dispatcher's coroutine-start order. Verbatim the
                     // EPUB/TXT wiring; nothing about it is AZW3-specific.
-                    if (showDisplaySheet) {
+                    // Gate-4 round 1 (Medium): rendered ONLY from a REAL emission, never the defaults
+                    // seed. Otherwise a user with stored non-default settings who taps Display inside
+                    // that window sees Paper/18sp — and, worse, a slider dragged against that lying
+                    // display persists a value derived from it. A tap before the first emission simply
+                    // raises the flag; the sheet appears as soon as the real settings land.
+                    val sheetSettings = settingsOrNull
+                    if (showDisplaySheet && sheetSettings != null) {
                         val store = container.readerSettingsStore
                         com.vreader.app.reader.settings.ReaderSettingsSheet(
-                            settings = displaySettings,
+                            settings = sheetSettings,
                             onTheme = { v -> val s = store.nextSeq(); container.appScope.launch { store.setTheme(v, s) } },
                             onLayout = { v -> val s = store.nextSeq(); container.appScope.launch { store.setLayout(v, s) } },
                             onFontFamily = { v -> val s = store.nextSeq(); container.appScope.launch { store.setFontFamily(v, s) } },
