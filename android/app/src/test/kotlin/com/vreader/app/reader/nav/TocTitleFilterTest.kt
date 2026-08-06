@@ -8,6 +8,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -23,13 +24,22 @@ import java.util.Locale
  * `android.icu.lang.UCharacter.foldCase`, a framework class the stub `android.jar` answers with
  * "not mocked". Exact precedent: `SearchTextNormalizerTest.kt`.
  *
- * Two disciplines this suite is written to:
+ * Three disciplines this suite is written to:
  *  - **Bounds, not counts.** Range assertions state the exact inclusive `(first, last)` pair against
  *    a hand-computed expectation. A test that only counts ranges is what let the original
  *    wrong-string defect through (plan §5.2.1).
- *  - **Every assertion is reachable from the production seam.** Ranges are read through
- *    `TocFoldedToc.rowText`, matches through `TocTitleFilter.filter` — never through a test-only
- *    back door — so a shape change cannot pass by leaving the seam behind.
+ *  - **Every assertion goes through a production seam.** Ranges are read via `TocFoldedToc.rowText`,
+ *    matches via `TocTitleFilter.filter`, and even a [TocFilterResult.Matched] used to probe
+ *    `isActiveFilteredOut` is BUILT by the filter — never forged — so a shape change cannot pass by
+ *    leaving the seam behind.
+ *  - **No invisible character appears inline.** Combining marks, U+3000, NBSP and the astral code
+ *    points are NAMED constants whose KDoc states the code point, and every decomposed fixture is
+ *    built by concatenating one (`"Cafe$ACUTE"`, never a literal `"Café"` whose composition a reader
+ *    cannot see). #139's Gate-2 rounds 3 and 4 both caught invisible characters being silently
+ *    normalized inside a source file — which here would quietly turn a decomposed fixture into a
+ *    precomposed one and pass for the wrong reason. `codePointsAreTheIntendedOnes` pins the
+ *    constants themselves, so a normalization accident fails one obvious test instead of silently
+ *    weakening a dozen.
  */
 @RunWith(RobolectricTestRunner::class)
 class TocTitleFilterTest {
@@ -60,15 +70,32 @@ class TocTitleFilterTest {
     }
 
     private fun matchedIndices(result: TocFilterResult): IntArray = when (result) {
-        is TocFilterResult.Matched -> result.indices
+        is TocFilterResult.Matched -> IntArray(result.size) { result[it] }
         TocFilterResult.Unfiltered -> throw AssertionError("expected Matched, got Unfiltered")
+    }
+
+    /**
+     * A PRODUCTION-BUILT [TocFilterResult.Matched] whose survivors are exactly [survivors] out of
+     * [total] rows. `Matched` is sealed with a file-private implementation, so a test CANNOT forge
+     * one — which is the point of the invariant, and means these assertions run against the same
+     * object the sheet will hold.
+     */
+    private fun matchedResult(total: Int, vararg survivors: Int): TocFilterResult {
+        val keep = survivors.toSet()
+        val entries = List(total) { entry(if (it in keep) "Needle $it" else "Chapter $it") }
+        val result = filterOf(entries, "needle")
+        assertArrayEquals(
+            "the fixture must produce exactly the requested survivors",
+            survivors, matchedIndices(result),
+        )
+        return result
     }
 
     private fun matches(title: String?, query: String): Boolean {
         val result = filterOf(listOf(entry(title)), query)
         return when (result) {
             TocFilterResult.Unfiltered -> true
-            is TocFilterResult.Matched -> result.indices.isNotEmpty()
+            is TocFilterResult.Matched -> result.size > 0
         }
     }
 
@@ -82,13 +109,44 @@ class TocTitleFilterTest {
     private companion object {
         /** U+0301 COMBINING ACUTE ACCENT — a dead key / pasted mark; folds away to "". */
         const val ACUTE = "́"
+
+        /** U+0327 COMBINING CEDILLA — the second mark in the stacked-marks fixtures. */
+        const val CEDILLA = "̧"
+
+        /** U+3000 IDEOGRAPHIC SPACE — the normal separator in Chinese typesetting. */
         const val IDEOGRAPHIC_SPACE = "　"
+
+        /** U+00A0 NO-BREAK SPACE — `isSpaceChar`, so Kotlin's `trim()` strips it and Java's does not. */
         const val NBSP = " "
+
+        /** U+1F600 GRINNING FACE — an astral code point, i.e. a UTF-16 surrogate PAIR. */
+        const val EMOJI = "😀"
+
+        /** U+20000 — CJK Extension B, astral, and real book content rather than a novelty. */
+        const val CJK_EXT_B = "𠀀"
     }
 
     @After
     fun restoreLocale() {
         Locale.setDefault(Locale.US)
+    }
+
+    @Test fun codePointsAreTheIntendedOnes() {
+        // The tripwire for the discipline above: every fixture constant is checked against its
+        // documented code point, so an editor or tool that silently normalizes this file fails HERE,
+        // loudly and once, instead of quietly turning a dozen hostile fixtures into benign ones.
+        assertArrayEquals(intArrayOf(0x0301), ACUTE.codePoints().toArray())
+        assertArrayEquals(intArrayOf(0x0327), CEDILLA.codePoints().toArray())
+        assertArrayEquals(intArrayOf(0x3000), IDEOGRAPHIC_SPACE.codePoints().toArray())
+        assertArrayEquals(intArrayOf(0x00A0), NBSP.codePoints().toArray())
+        assertArrayEquals(intArrayOf(0x1F600), EMOJI.codePoints().toArray())
+        assertArrayEquals(intArrayOf(0x20000), CJK_EXT_B.codePoints().toArray())
+        // Both astral constants must be surrogate PAIRS in UTF-16 — the reason the index map exists.
+        assertEquals(2, EMOJI.length)
+        assertEquals(2, CJK_EXT_B.length)
+        // And the precomposed/decomposed pair the diacritic tests rely on really are different.
+        assertEquals(1, "é".length)
+        assertEquals(2, "e$ACUTE".length)
     }
 
     // ---- the not-filtering path (plan §6's standing note: cost keeps re-entering here) -----------
@@ -103,18 +161,20 @@ class TocTitleFilterTest {
     @Test fun blankQuery_returnsUnfilteredSingleton_notAList() {
         // Fails against any shape that returns a per-row list from the blank branch (plan r3 edit 2).
         val entries = List(1_859) { entry("第${it}章") }
-        val result = filterOf(entries, "   ")
         assertSame(
             "the not-filtering path must return the singleton, materialising NO per-row object",
             TocFilterResult.Unfiltered,
-            result,
+            filterOf(entries, "   "),
         )
     }
 
     @Test fun whitespaceOnlyQuery_treatedAsEmpty() {
         val entries = listOf(entry("Chapter One"))
         listOf(" ", "\t", "\n", IDEOGRAPHIC_SPACE, NBSP, " $IDEOGRAPHIC_SPACE$NBSP ").forEach { q ->
-            assertSame("query ${q.map { it.code }} must not filter", TocFilterResult.Unfiltered, filterOf(entries, q))
+            assertSame(
+                "query ${q.map { it.code }} must not filter",
+                TocFilterResult.Unfiltered, filterOf(entries, q),
+            )
         }
     }
 
@@ -175,8 +235,8 @@ class TocTitleFilterTest {
     }
 
     @Test fun caseFold_greekFinalAndMedialSigma() {
-        // The user-facing gap lowercase() cannot close: Σ → σ but ς stays ς, so a chapter ending in
-        // a final sigma is unreachable by the word's uppercase spelling.
+        // The user-facing gap lowercase() cannot close: Σ → σ but final ς stays ς, so a chapter
+        // ending in a final sigma is unreachable by the word's uppercase spelling.
         assertTrue(matches("Οδός Ονείρων", "ΟΔΟΣ"))
         assertTrue(matches("Οδός Ονείρων", "οδος"))
         assertTrue(matches("ΟΔΟΣ Ονείρων", "οδός"))
@@ -196,7 +256,10 @@ class TocTitleFilterTest {
         for (cp in 0x21..0x7E) {
             val ch = cp.toChar().toString()
             val viaIcu = UCharacter.foldCase(ch, UCharacter.FOLD_CASE_DEFAULT)
-            assertEquals("ASCII fast path diverges at U+%04X".format(cp), viaIcu, TocTitleFilter.foldQuery(ch))
+            assertEquals(
+                "ASCII fast path diverges at U+%04X".format(cp),
+                viaIcu, TocTitleFilter.foldQuery(ch),
+            )
         }
     }
 
@@ -211,24 +274,24 @@ class TocTitleFilterTest {
     // ---- diacritics + the index map ---------------------------------------------------------------
 
     @Test fun diacriticInsensitive_precomposed() {
+        // é is U+00E9 — ONE display char, so the range ends at index 3.
         assertTrue(matches("Café Royale", "cafe"))
-        // "Café" — é is ONE display char, so the range ends at index 3.
         assertEquals(listOf(0..3), rangesOf("Café Royale", "cafe"))
     }
 
     @Test fun diacriticInsensitive_decomposed() {
-        // "Cafe" + U+0301 — é is TWO display chars. The design bundle's JS mock gets exactly this
-        // case wrong (it slices the ORIGINAL string with FOLDED indices).
-        assertTrue(matches("Café Royale", "cafe"))
-        assertEquals(listOf(0..4), rangesOf("Café Royale", "cafe"))
+        // e + U+0301 — TWO display chars. The design bundle's JS mock gets exactly this case wrong
+        // (it slices the ORIGINAL string with FOLDED indices).
+        assertTrue(matches("Cafe$ACUTE Royale", "cafe"))
+        assertEquals(listOf(0..4), rangesOf("Cafe$ACUTE Royale", "cafe"))
     }
 
     @Test fun matchRanges_endExtendsOverTrailingCombiningMark() {
         // A match ending immediately before a stripped mark must tint the mark with its base char,
         // otherwise the accent floats outside the highlight.
-        assertEquals(listOf(0..4), rangesOf("café bar", "cafe"))
+        assertEquals(listOf(0..4), rangesOf("cafe$ACUTE bar", "cafe"))
         // The same rule with the mark INSIDE the match rather than at its edge.
-        assertEquals(listOf(0..8), rangesOf("café bar", "cafe bar"))
+        assertEquals(listOf(0..8), rangesOf("cafe$ACUTE bar", "cafe bar"))
     }
 
     @Test fun matchRanges_exactBounds() {
@@ -255,7 +318,42 @@ class TocTitleFilterTest {
 
     @Test fun surrogatePairBeforeMatch_rangesAreCharIndices() {
         // AnnotatedString spans are Char indices, so an astral emoji must shift the range by TWO.
-        assertEquals(listOf(3..9), rangesOf("😀 Chapter", "chapter"))
+        assertEquals(listOf(3..9), rangesOf("$EMOJI Chapter", "chapter"))
+    }
+
+    @Test fun surrogatePairs_before_inside_after_andAsTheQuery() {
+        // AFTER the match: the emoji must not disturb an earlier range.
+        assertEquals(listOf(0..6), rangesOf("Chapter $EMOJI", "chapter"))
+        // INSIDE the matched slice: the range must span all four Chars of "A<emoji>B".
+        assertEquals(listOf(0..3), rangesOf("A${EMOJI}B", "a${EMOJI}b"))
+        // The query IS the astral code point — two folded Chars, two display Chars.
+        assertEquals(listOf(1..2), rangesOf("A${EMOJI}B", EMOJI))
+        // CJK Extension B before the match, and as the query. NOTE the braces: CJK characters are
+        // valid Kotlin identifier characters, so a bare `$CJK_EXT_B第一章` parses as one enormous
+        // identifier name rather than a template followed by text.
+        assertEquals(listOf(2..3), rangesOf("${CJK_EXT_B}第一章", "第一"))
+        assertEquals(listOf(0..1), rangesOf("${CJK_EXT_B}第一章", CJK_EXT_B))
+    }
+
+    @Test fun stackedCombiningMarks_allExtendTheSameBaseCharacter() {
+        // "a" + COMBINING ACUTE + COMBINING CEDILLA: BOTH marks must fold into the base char's
+        // display span, so the tint covers the whole grapheme rather than stopping after the first.
+        assertEquals(listOf(0..2), rangesOf("a$ACUTE$CEDILLA", "a"))
+        assertEquals(listOf(0..3), rangesOf("a$ACUTE${CEDILLA}b", "ab"))
+    }
+
+    @Test fun orphanCombiningMarkBeforeAMatch_doesNotShiftTheRange() {
+        // A leading mark has no preceding folded char to extend, so it is simply not covered — and
+        // critically, the FOLLOWING base character's index must still be its own.
+        assertEquals(listOf(1..1), rangesOf("${ACUTE}a", "a"))
+        assertEquals(listOf(1..7), rangesOf("${ACUTE}Chapter", "chapter"))
+    }
+
+    @Test fun lengthChangingFoldAdjacentToAStackedMark() {
+        // ß folds to TWO chars and a following mark extends the LAST of them, so a query straddling
+        // the boundary still maps back onto the whole ß + mark (you cannot tint half a ß).
+        assertEquals(listOf(0..1), rangesOf("ß${ACUTE}x", "ss"))
+        assertEquals(listOf(0..2), rangesOf("ß${ACUTE}x", "sx"))
     }
 
     @Test fun multipleOccurrences_allRangesNonOverlapping() {
@@ -293,19 +391,22 @@ class TocTitleFilterTest {
     }
 
     @Test fun ligature_foldsLikeIcuFullCaseFolding() {
-        // MEASURED, not assumed (see the class KDoc's erratum note in the WI's handoff): Unicode
-        // FULL case folding maps U+FB01 to "fi", so ICU closes this and Android agrees with iOS.
-        // The plan's §3 table predicted "no match"; the implementation follows the plan's ALGORITHM
-        // (ICU full folding) and this test pins what that algorithm actually does.
+        // MEASURED, not assumed. Unicode FULL case folding maps U+FB01 (ﬁ) to "fi" — CaseFolding.txt
+        // carries a full mapping for the Latin ligatures — so ICU closes this and Android AGREES
+        // with iOS. Plan §3's table predicted "no match" and called it an accepted divergence; that
+        // row is an erratum. The implementation follows the plan's normative ALGORITHM (ICU full
+        // folding) rather than its predicted table, and this test pins what the algorithm does.
         assertEquals("fi", TocTitleFilter.foldQuery("ﬁ"))
         assertTrue(matches("The ﬁrst Chapter", "fi"))
+        // One display char expands to TWO folded chars, so the range is a single Char wide.
         assertEquals(listOf(4..4), rangesOf("The ﬁrst Chapter", "fi"))
     }
 
     @Test fun arabicHamza_overMatchesVsIos() {
         // NFD + strip-Mn removes the hamza (U+0654, category Mn) that iOS's collation keeps, so
         // Android matches where iOS does not. Over-matching is the benign direction for a title
-        // narrower; pinned so any change to the strip rule is deliberate.
+        // narrower — the user sees a superset, never loses a row. Pinned so a change to the strip
+        // rule is deliberate.
         assertTrue(matches("الأول", "الاول"))
     }
 
@@ -369,36 +470,114 @@ class TocTitleFilterTest {
         assertEquals("", TocTitleFilter.matchTitle(entry("  \n ")))
     }
 
-    @Test fun rowText_cannotBeConstructedOrCopiedByCallers() {
-        // A compile-level invariant, asserted at the API shape so a future edit that adds `data`
-        // (synthesising `copy`) or relaxes the constructor trips here. TocRowText's ONLY producers
-        // are TocTitleFilter.plainRowText (no range source) and TocFoldedToc.rowText (resolves its
-        // own fold from an index) — there is no seam that accepts an arbitrary title+ranges pair.
+    @Test fun tocRowText_cannotBeSubclassedOrForgedAnywhere() {
+        // The strongest guarantee Kotlin offers, and it is the one this type needs: TocRowText is a
+        // SEALED CLASS whose only constructor is PRIVATE, so a subclass — which would have to invoke
+        // that constructor — cannot be written even from another file in this same package. Its one
+        // implementation is private to the class.
+        //
+        // Gate-4 history, both rounds, because this seam has now moved twice:
+        //  r1: a private constructor plus an `internal` companion factory taking (title, ranges) —
+        //      ANY module code could pair one row's title with another row's ranges.
+        //  r2: a `sealed interface` + file-private impl — better, but a sealed INTERFACE may still be
+        //      implemented by another file in the same package + module, so a forged pair remained
+        //      writable.
+        // Now: no constructor is reachable, no subtype is writable, and NEITHER factory takes a title
+        // and a range list as independent arguments (plain(entry) has no range parameter at all;
+        // forRow(corpus, index, query) derives both halves from one index).
         val klass = TocRowText::class.java
-        // Kotlin emits ONE real constructor (private) plus an ACC_SYNTHETIC bridge whose last
-        // parameter is `DefaultConstructorMarker` — a type Kotlin source cannot supply, so it is not
-        // a construction seam. Every OTHER constructor must be non-public.
-        val callable = klass.declaredConstructors.filterNot { it.isSynthetic }
-        assertTrue("TocRowText must have no public constructor", callable.none { Modifier.isPublic(it.modifiers) })
-        assertTrue("TocRowText must declare exactly one real constructor", callable.size == 1)
+        assertFalse("TocRowText must be a sealed CLASS, not an interface", klass.isInterface)
+        assertTrue("TocRowText must be abstract", Modifier.isAbstract(klass.modifiers))
         assertTrue(
-            "the only public constructor may be Kotlin's synthetic private-constructor bridge",
-            klass.declaredConstructors
-                .filter { Modifier.isPublic(it.modifiers) }
-                .all { it.isSynthetic && it.parameterTypes.last().name.endsWith("DefaultConstructorMarker") },
+            "every TocRowText constructor must be private — this is what forbids a subclass",
+            klass.declaredConstructors.filterNot { it.isSynthetic }
+                .all { Modifier.isPrivate(it.modifiers) },
         )
         assertTrue(
-            "TocRowText must not be a data class (no synthesised copy)",
+            "TocRowText must not be a data class (no synthesised copy/componentN)",
             klass.declaredMethods.none { it.name == "copy" || it.name.startsWith("component") },
         )
+        // The implementation is a private nested class, so a caller cannot even name it.
+        val impl = TocTitleFilter.plainRowText(entry("Chapter One")).javaClass
+        assertTrue("the implementation must be a subclass, not TocRowText itself", impl != klass)
+        assertEquals("the implementation must be nested inside TocRowText", klass, impl.enclosingClass)
+        assertTrue("the implementation must be private", Modifier.isPrivate(impl.modifiers))
+    }
+
+    @Test fun rowText_rangesAreAnImmutableSnapshotNotTheFoldsOwnList() {
+        // Gate-4 round 3, the escape that needed neither a constructor nor a subclass: `matchRanges`
+        // was the ArrayList the fold had just built, so `(row.matchRanges as MutableList).clear();
+        // addAll(otherRowsRanges)` re-pointed one row's tint at another row's ranges through a
+        // nominally read-only List. Both halves of the fix are pinned here — the wrapper (mutation
+        // throws) and the copy (no aliasing to the fold).
+        val corpus = TocFoldedToc.of(listOf(entry("Chapter One"), entry("A Chapter, Later")))
+        val row = corpus.rowText(0, TocTitleFilter.foldQuery("chapter"))
+        assertEquals(listOf(0..6), row.matchRanges)
+
+        val stolen = corpus.matchRangesAt(1, TocTitleFilter.foldQuery("chapter"))
+        assertEquals("the fixture must give the two rows DIFFERENT ranges", listOf(2..8), stolen)
+
+        @Suppress("UNCHECKED_CAST")
+        val asMutable = row.matchRanges as MutableList<IntRange>
+        try {
+            asMutable.clear()
+            fail("row.matchRanges must reject mutation, not silently accept a foreign pairing")
+        } catch (expected: UnsupportedOperationException) {
+            // exactly what an unmodifiable snapshot does
+        }
+        try {
+            asMutable.addAll(stolen)
+            fail("row.matchRanges must reject mutation, not silently accept a foreign pairing")
+        } catch (expected: UnsupportedOperationException) {
+            // exactly what an unmodifiable snapshot does
+        }
+        assertEquals("the row's ranges must be unchanged after both attempts", listOf(0..6), row.matchRanges)
+    }
+
+    @Test fun tocRowText_hasNoProducerThatAcceptsARawTitleAndRangePair() {
+        // The shape assertions above pin "cannot subclass"; this pins "cannot pair". A future edit
+        // that re-adds an of(title, ranges) factory to the companion — the round-1 defect — trips
+        // here even though the class shape would still look correct.
+        val producers = TocRowText.Companion::class.java.declaredMethods.filterNot { it.isSynthetic }
+        assertEquals("TocRowText must expose exactly two producers", 2, producers.size)
+        assertTrue(
+            "no producer may accept a raw (title, ranges) pair — both halves must be derived from " +
+                "one entry or one corpus index",
+            producers.none { m ->
+                m.parameterTypes.firstOrNull() == String::class.java &&
+                    m.parameterTypes.any { List::class.java.isAssignableFrom(it) }
+            },
+        )
+    }
+
+    @Test fun matched_cannotBeSubclassedAndOwnsItsIndices() {
+        // Hardened to match TocRowText at Gate-4 round 3. The earlier sealed-INTERFACE form could be
+        // implemented by another file in this package with inconsistent size/get — which crashes a
+        // consumer iterating `0 until size`, not merely misplaces the pinned row, so the asymmetry
+        // this test used to claim was not defensible.
+        val klass = TocFilterResult.Matched::class.java
+        assertFalse("Matched must be a sealed CLASS, not an interface", klass.isInterface)
+        assertTrue("Matched must be abstract", Modifier.isAbstract(klass.modifiers))
+        assertTrue(
+            "every Matched constructor must be private — this is what forbids a subclass",
+            klass.declaredConstructors.filterNot { it.isSynthetic }
+                .all { Modifier.isPrivate(it.modifiers) },
+        )
+        assertTrue(
+            "Matched must expose no array-typed member (that would leak the ascending invariant)",
+            klass.methods.none { it.returnType.isArray },
+        )
+        val impl = matchedResult(total = 3, 1).javaClass
+        assertTrue("the implementation must be a subclass, not Matched itself", impl != klass)
+        assertEquals("the implementation must be nested inside Matched", klass, impl.enclosingClass)
+        assertTrue("the implementation must be private", Modifier.isPrivate(impl.modifiers))
     }
 
     // ---- original indices + the pinned-current predicate ------------------------------------------
 
     @Test fun filter_preservesOriginalIndices() {
         val entries = List(2_000) { if (it == 1_500) entry("Needle Chapter") else entry("第${it}章") }
-        val indices = matchedIndices(filterOf(entries, "needle"))
-        assertArrayEquals(intArrayOf(1_500), indices)
+        assertArrayEquals(intArrayOf(1_500), matchedIndices(filterOf(entries, "needle")))
 
         // Strictly ascending is the precondition isActiveFilteredOut's binary search relies on.
         val many = matchedIndices(filterOf(entries, "第"))
@@ -413,17 +592,17 @@ class TocTitleFilterTest {
     }
 
     @Test fun isActiveFilteredOut_activeSurvives_isFalse() {
-        val result = TocFilterResult.Matched(intArrayOf(0, 3, 7))
+        val result = matchedResult(total = 10, 0, 3, 7)
         assertFalse(TocTitleFilter.isActiveFilteredOut(result, 3))
         assertFalse(TocTitleFilter.isActiveFilteredOut(result, 0))
         assertFalse(TocTitleFilter.isActiveFilteredOut(result, 7))
     }
 
     @Test fun isActiveFilteredOut_activeFilteredOut_isTrue() {
-        val result = TocFilterResult.Matched(intArrayOf(0, 3, 7))
+        val result = matchedResult(total = 10, 0, 3, 7)
         assertTrue(TocTitleFilter.isActiveFilteredOut(result, 4))
         assertTrue(TocTitleFilter.isActiveFilteredOut(result, 9))
-        assertTrue(TocTitleFilter.isActiveFilteredOut(TocFilterResult.Matched(IntArray(0)), 0))
+        assertTrue(TocTitleFilter.isActiveFilteredOut(matchedResult(total = 10), 0))
         // No active chapter (-1) is not "filtered out" — there is nothing to pin.
         assertFalse(TocTitleFilter.isActiveFilteredOut(result, -1))
     }
@@ -432,20 +611,20 @@ class TocTitleFilterTest {
 
     @Test fun countLabel_hiddenWhenTrimmedQueryIsBlank() {
         assertNull(TocFilterCountLabel.text(TocFilterResult.Unfiltered, 16, ""))
-        assertNull(TocFilterCountLabel.text(TocFilterResult.Matched(intArrayOf(1)), 16, ""))
+        assertNull(TocFilterCountLabel.text(matchedResult(total = 16, 4), 16, ""))
     }
 
     @Test fun countLabel_singularForOneMatch() {
-        assertEquals("1 of 16 chapter", TocFilterCountLabel.text(TocFilterResult.Matched(intArrayOf(4)), 16, "q"))
+        assertEquals("1 of 16 chapter", TocFilterCountLabel.text(matchedResult(total = 16, 4), 16, "q"))
     }
 
     @Test fun countLabel_pluralForMany() {
-        val result = TocFilterResult.Matched(intArrayOf(0, 1, 2, 3, 4))
+        val result = matchedResult(total = 16, 0, 1, 2, 3, 4)
         assertEquals("5 of 16 chapters", TocFilterCountLabel.text(result, 16, "q"))
     }
 
     @Test fun countLabel_noMatch() {
-        assertEquals("No chapters match", TocFilterCountLabel.text(TocFilterResult.Matched(IntArray(0)), 16, "q"))
+        assertEquals("No chapters match", TocFilterCountLabel.text(matchedResult(total = 16), 16, "q"))
     }
 
     // ---- corpus edges -------------------------------------------------------------------------------

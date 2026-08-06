@@ -35,26 +35,58 @@ package com.vreader.app.reader.nav
 import android.icu.lang.UCharacter
 import java.text.Normalizer
 import java.util.Arrays
+import java.util.Collections
 
 /**
  * What one Contents row renders: a title string and the inclusive ranges that index THAT string.
  *
- * NOT a `data class` and NOT publicly constructible — no synthesised `copy`, no caller-built
- * instances. Only [TocTitleFilter.plainRowText] (no range source at all) and [TocFoldedToc.rowText]
- * (resolves its OWN fold from an index) produce one, so a title and a set of ranges cannot be paired
- * by anyone but the code that guarantees they describe the same string.
+ * **Nothing anywhere can pair an arbitrary title with arbitrary ranges.** A `sealed class` whose only
+ * constructor is `private` cannot be subclassed even from another file in this package — a subclass
+ * would have to invoke that constructor — and its single implementation is private to the class. The
+ * two factories below are therefore the only expressions that can build one, and NEITHER accepts a
+ * title and a range list as independent arguments: [plain] has no range parameter at all, and
+ * [forRow] derives both halves from ONE corpus index.
+ *
+ * (A sealed *interface* is weaker and was rejected at Gate-4 round 2: a future file in the same
+ * package + module could have implemented it and forged a mismatched pair.)
  */
-class TocRowText private constructor(
+sealed class TocRowText private constructor(
     val title: String,
-    val matchRanges: List<IntRange>,
+    matchRanges: List<IntRange>,
 ) {
-    internal companion object {
-        /** The only producer with NO range parameter — ranges are empty by type, not by value. */
-        fun untinted(title: String): TocRowText = TocRowText(title, emptyList())
+    /**
+     * The matched runs, as an UNMODIFIABLE SNAPSHOT.
+     *
+     * Both halves matter (Gate-4 round 3). The copy breaks aliasing to the fold's own list; the
+     * unmodifiable wrapper defeats `(row.matchRanges as MutableList).clear(); addAll(otherRow)`,
+     * which would otherwise re-point one row's tint at another row's ranges through a nominally
+     * read-only `List` — no constructor and no subclass required. The empty case reuses the shared
+     * immutable `emptyList()`, so the unfiltered path still allocates nothing.
+     */
+    val matchRanges: List<IntRange> =
+        if (matchRanges.isEmpty()) emptyList()
+        else Collections.unmodifiableList(ArrayList(matchRanges))
 
-        /** The only producer that can attach ranges; both arguments come from one row's own fold. */
-        fun tinted(title: String, matchRanges: List<IntRange>): TocRowText =
-            TocRowText(title, matchRanges)
+    /** The one and only implementation. Private to [TocRowText], so no other subtype can exist. */
+    private class Row(title: String, matchRanges: List<IntRange>) : TocRowText(title, matchRanges)
+
+    internal companion object {
+        /** An UNFILTERED row: no range parameter exists, so the ranges are empty BY TYPE. */
+        fun plain(entry: TocEntry): TocRowText {
+            val title = TocTitleFilter.matchTitle(entry)
+            return Row(if (title.isEmpty()) TocTitleFilter.UNTITLED_LABEL else title, emptyList())
+        }
+
+        /**
+         * A FILTERED row. One [index] into [corpus] drives the title AND the ranges, so the two
+         * cannot describe different strings. A blank match title takes the presentational label with
+         * empty ranges WITHOUT consulting the fold, so the label can never carry a tint.
+         */
+        fun forRow(corpus: TocFoldedToc, index: Int, foldedQuery: String): TocRowText {
+            val title = corpus.matchTitleAt(index)
+            if (title.isEmpty()) return Row(TocTitleFilter.UNTITLED_LABEL, emptyList())
+            return Row(title, corpus.matchRangesAt(index, foldedQuery))
+        }
     }
 }
 
@@ -66,8 +98,46 @@ sealed interface TocFilterResult {
     /** Not filtering: NO per-row data — nothing normalized, nothing folded, nothing allocated. */
     data object Unfiltered : TocFilterResult
 
-    /** Filtering: the surviving ORIGINAL indices, strictly ascending. One small array per keystroke. */
-    class Matched(val indices: IntArray) : TocFilterResult
+    /**
+     * Filtering: the survivors, addressed by position and carrying their ORIGINAL entry indices.
+     *
+     * Hardened exactly like [TocRowText] (Gate-4 round 3): a `sealed class` whose only constructor is
+     * `private`, so no other file can supply an implementation with inconsistent `size`/`get` — which
+     * would crash a consumer iterating `0 until size`, not merely misplace the pinned row. The
+     * backing array is never exposed either: [contains] is a binary search, sound ONLY while the
+     * indices are strictly ascending, and a handed-out `IntArray` would make that a convention a
+     * caller could break after the fact.
+     */
+    sealed class Matched private constructor() : TocFilterResult {
+        /** How many rows survived. */
+        abstract val size: Int
+
+        /** The ORIGINAL entry index of the [position]-th survivor — what the row's ordinal, its
+         *  highlight and its `onJump` all read. */
+        abstract operator fun get(position: Int): Int
+
+        /** Whether the entry at [originalIndex] survived. O(log [size]). */
+        abstract fun contains(originalIndex: Int): Boolean
+
+        /** The one and only implementation; private, so no other subtype can exist. */
+        private class Indices(private val indices: IntArray) : Matched() {
+            override val size: Int get() = indices.size
+            override fun get(position: Int): Int = indices[position]
+            override fun contains(originalIndex: Int): Boolean =
+                Arrays.binarySearch(indices, originalIndex) >= 0
+        }
+
+        internal companion object {
+            /** "Filtering, nothing matched" — shared, so a fold-away keystroke allocates nothing. */
+            val EMPTY: Matched = Indices(IntArray(0))
+
+            /**
+             * The only producer. [ascending] must be strictly ascending and must not be retained by
+             * the caller; [TocFoldedToc.filter] guarantees both, building a fresh array it drops.
+             */
+            fun of(ascending: IntArray): Matched = Indices(ascending)
+        }
+    }
 }
 
 /**
@@ -102,11 +172,19 @@ class TocFoldedToc private constructor(
      * supplies an index, never a fold. An entry with a blank match title returns the presentational
      * label with empty ranges WITHOUT reading the fold at all, so the label can never carry a tint.
      */
-    fun rowText(index: Int, foldedQuery: String): TocRowText {
-        val title = matchTitles[index]
-        if (title.isEmpty()) return TocRowText.untinted(TocTitleFilter.UNTITLED_LABEL)
-        return TocRowText.tinted(title, folds[index].matchRanges(foldedQuery))
-    }
+    fun rowText(index: Int, foldedQuery: String): TocRowText =
+        TocRowText.forRow(this, index, foldedQuery)
+
+    /**
+     * This row's match string. `internal` so [TocRowText.forRow] can read it — and SAFE despite that,
+     * because it hands back a bare `String`: nothing outside [TocRowText] can assemble a title and a
+     * range list into a row, so there is no mispairing to enable.
+     */
+    internal fun matchTitleAt(index: Int): String = matchTitles[index]
+
+    /** This row's match ranges, resolved from its OWN fold. Same reasoning as [matchTitleAt]. */
+    internal fun matchRangesAt(index: Int, foldedQuery: String): List<IntRange> =
+        folds[index].matchRanges(foldedQuery)
 
     /**
      * A match title's folded form plus the maps carrying a folded range back to that title. PRIVATE
@@ -233,10 +311,7 @@ object TocTitleFilter {
      * empty BY TYPE — this function has no range source, so it cannot mispair. Called per VISIBLE
      * row, exactly like the sheet's existing per-row `remember`.
      */
-    fun plainRowText(entry: TocEntry): TocRowText {
-        val title = matchTitle(entry)
-        return TocRowText.untinted(if (title.isEmpty()) UNTITLED_LABEL else title)
-    }
+    fun plainRowText(entry: TocEntry): TocRowText = TocRowText.plain(entry)
 
     /**
      * The filter pass. Both early returns leave `foldedToc` UNFORCED — that is why it is a `Lazy`
@@ -250,20 +325,20 @@ object TocTitleFilter {
         foldedToc: Lazy<TocFoldedToc>,
     ): TocFilterResult {
         if (trimmedQuery.isEmpty()) return TocFilterResult.Unfiltered
-        if (foldedQuery.isEmpty()) return TocFilterResult.Matched(IntArray(0))
-        return TocFilterResult.Matched(foldedToc.value.filter(foldedQuery))
+        if (foldedQuery.isEmpty()) return TocFilterResult.Matched.EMPTY
+        return TocFilterResult.Matched.of(foldedToc.value.filter(foldedQuery))
     }
 
     /**
      * True when a filtering query has filtered the active chapter OUT — the signal to pin the
      * design's "Reading" row. False when not filtering, when there is no active chapter
-     * ([activeIndex] < 0), or when it still matches. [TocFilterResult.Matched.indices] is ascending,
-     * so this is a binary search: it runs on every composition over a list reaching ~1 859 rows.
+     * ([activeIndex] < 0), or when it still matches. Delegates to
+     * [TocFilterResult.Matched.contains], a binary search over the implementation-owned ascending
+     * indices: this runs on every composition, over a list reaching ~1 859 rows.
      */
     fun isActiveFilteredOut(result: TocFilterResult, activeIndex: Int): Boolean = when (result) {
         TocFilterResult.Unfiltered -> false
-        is TocFilterResult.Matched ->
-            activeIndex >= 0 && Arrays.binarySearch(result.indices, activeIndex) < 0
+        is TocFilterResult.Matched -> activeIndex >= 0 && !result.contains(activeIndex)
     }
 }
 
@@ -278,7 +353,7 @@ object TocFilterCountLabel {
         if (trimmedQuery.isEmpty()) return null
         val visible = when (result) {
             TocFilterResult.Unfiltered -> return null
-            is TocFilterResult.Matched -> result.indices.size
+            is TocFilterResult.Matched -> result.size
         }
         if (visible == 0) return "No chapters match"
         return "$visible of $totalCount ${if (visible == 1) "chapter" else "chapters"}"

@@ -197,14 +197,21 @@ class TocFilterCostTest {
      * **Cost B — the one >100 ms-class risk in the feature.** Fold all 1 859 real titles, [FOLD_PASSES]
      * times, each into a BRAND-NEW corpus (the production shape: one fold per book, never reused).
      *
-     * Both statistics are asserted. The COLD first pass is what a user actually pays at the first
-     * keystroke of a session; the MINIMUM is the statistic most generous to the implementation, which
-     * is what makes a failure decisive rather than a claim about emulator load. A budget that only
-     * held for the warm case would be measuring a state the user never reaches.
+     * Two DISTINCT statistics are asserted, and the distinction is the point (Gate-4 round-1 finding:
+     * an earlier revision asserted `min(all passes)`, which is implied by the cold assertion and
+     * therefore gated nothing):
+     *  - **cold** = pass 1, with no prior invocation of this code path in the process. This is what a
+     *    user actually pays at the first keystroke of a session, so it is the real gate.
+     *  - **warmBest** = the minimum over passes 2..n, i.e. after ART has had the path hot. It is the
+     *    statistic most generous to the implementation, so a failure there is decisive rather than a
+     *    claim about emulator load — and it is independent evidence, not a restatement of the cold
+     *    number.
      *
-     * The corpus is also checked for CORRECTNESS in the same method: a fold that got fast by folding
-     * fewer titles, or by folding them wrongly, is not a pass — and a latency budget alone would not
-     * notice.
+     * Later passes allocate a fresh corpus but do NOT re-pay first-compile cost; calling them "cold"
+     * would be imprecise, which is why only pass 1 carries that name.
+     *
+     * The corpus is also checked for CORRECTNESS here: a fold that got fast by folding fewer titles,
+     * or by folding them wrongly, is not a pass — and a latency budget alone would not notice.
      */
     @Test
     fun costB_corpusFoldMeetsBudgetOnTheRealBook() {
@@ -219,11 +226,13 @@ class TocFilterCostTest {
             val corpus = TocFoldedToc.of(entries)
             timings[pass] = SystemClock.elapsedRealtime() - t0
             last = corpus
-            report("COST-B pass=${pass + 1}/$FOLD_PASSES ms=${timings[pass]} budget_ms=$CORPUS_FOLD_BUDGET_MS")
+            val label = if (pass == 0) "cold" else "warm"
+            report("COST-B pass=${pass + 1}/$FOLD_PASSES kind=$label ms=${timings[pass]} " +
+                "budget_ms=$CORPUS_FOLD_BUDGET_MS")
         }
         val cold = timings.first()
-        val best = timings.min()
-        report("COST-B-SUMMARY cold_ms=$cold best_ms=$best all_ms=${timings.joinToString(",")} " +
+        val warmBest = timings.drop(1).min()
+        report("COST-B-SUMMARY cold_ms=$cold warm_best_ms=$warmBest all_ms=${timings.joinToString(",")} " +
             "entries=${entries.size} budget_ms=$CORPUS_FOLD_BUDGET_MS")
 
         val corpus = requireNotNull(last)
@@ -245,8 +254,9 @@ class TocFilterCostTest {
             cold <= CORPUS_FOLD_BUDGET_MS,
         )
         assertTrue(
-            "the best of $FOLD_PASSES corpus folds took ${best}ms against a ${CORPUS_FOLD_BUDGET_MS}ms budget",
-            best <= CORPUS_FOLD_BUDGET_MS,
+            "the best WARM corpus fold (passes 2..$FOLD_PASSES, ART hot) took ${warmBest}ms against a " +
+                "${CORPUS_FOLD_BUDGET_MS}ms budget — independent of the cold reading above",
+            warmBest <= CORPUS_FOLD_BUDGET_MS,
         )
     }
 
@@ -277,7 +287,7 @@ class TocFilterCostTest {
             val t0 = SystemClock.elapsedRealtimeNanos()
             val result = TocTitleFilter.filter(query, TocTitleFilter.foldQuery(query), ready)
             val ms = (SystemClock.elapsedRealtimeNanos() - t0) / 1_000_000.0
-            val hits = (result as TocFilterResult.Matched).indices.size
+            val hits = (result as TocFilterResult.Matched).size
             report("COST-C query=$query hits=$hits ms=%.3f budget_ms=$FRAME_BUDGET_MS".format(ms))
             if (ms > worstMs) {
                 worstMs = ms
@@ -288,10 +298,12 @@ class TocFilterCostTest {
 
         // A pass that got fast by matching nothing is not a pass.
         val broad = TocTitleFilter.filter("第", TocTitleFilter.foldQuery("第"), ready)
-        assertTrue("第 must match the overwhelming majority of this book's chapters",
-            (broad as TocFilterResult.Matched).indices.size > EXPECTED_ENTRIES / 2)
+        assertTrue(
+            "第 must match the overwhelming majority of this book's chapters",
+            (broad as TocFilterResult.Matched).size > EXPECTED_ENTRIES / 2,
+        )
         val none = TocTitleFilter.filter("zzzz", TocTitleFilter.foldQuery("zzzz"), ready)
-        assertArrayEquals(IntArray(0), (none as TocFilterResult.Matched).indices)
+        assertEquals(0, (none as TocFilterResult.Matched).size)
 
         assertTrue(
             "the worst keystroke ('$worstQuery') cost ${"%.3f".format(worstMs)}ms against a " +
