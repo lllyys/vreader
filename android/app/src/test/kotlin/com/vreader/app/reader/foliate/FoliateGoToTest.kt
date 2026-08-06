@@ -631,6 +631,49 @@ class FoliateGoToTest {
         return file.readText()
     }
 
+    // ---- feature #142 WI-3 Gate-4 R1 (H1): teardown stops the ack collector ---------------------
+
+    @Test
+    fun teardown_stopsTheAckCollector_soTheDispatcherStopsObservingTheFlow() = runTest {
+        // The collector is an INFINITE `collect` on a scope nobody cancels. Left running it keeps the
+        // dispatcher — and through `sendJs`, the bridge and its WebView — reachable for the life of the
+        // process. FoliateBridge.destroy() must be able to stop it.
+        val h = Harness(backgroundScope)
+        val job = async { h.dispatcher.goTo(FoliateGoToTarget.Cfi("/6/4!/4/2"), timeoutMs = 60_000) }
+        runCurrent()
+        val id = h.requestIdOf(h.sent.single())
+
+        h.dispatcher.teardown()
+        runCurrent()
+        // The awaiting caller is released rather than left hanging until its 60 s budget.
+        assertEquals(Azw3GoToResult.Superseded, job.await())
+        assertEquals(0, h.dispatcher.pendingCount())
+
+        // An ack arriving afterwards is not observed at all — the collector is gone.
+        h.messages.emit(FoliateMessage.GoToAck(id, ok = true, cfi = "/6/4!/4/2", fraction = 0.5))
+        runCurrent()
+        assertEquals(0, h.dispatcher.pendingCount())
+    }
+
+    @Test
+    fun teardown_isIdempotent_andASubsequentGoToNeverAcks() = runTest {
+        val h = Harness(backgroundScope)
+        h.dispatcher.teardown()
+        h.dispatcher.teardown()
+        runCurrent()
+        // A goTo issued after teardown still injects (the WebView may legitimately outlive nothing
+        // here — the bridge destroys itself right after), but with the collector gone it can only time
+        // out. Pinning it documents that teardown is terminal, not a pause.
+        val job = async { h.dispatcher.goTo(FoliateGoToTarget.Cfi("/6/4!/4/2"), timeoutMs = 500) }
+        runCurrent()
+        val id = h.requestIdOf(h.sent.single())
+        h.messages.emit(FoliateMessage.GoToAck(id, ok = true, cfi = null, fraction = null))
+        advanceTimeBy(501)
+        runCurrent()
+        assertEquals(Azw3GoToResult.Timeout, job.await())
+        assertEquals(0, h.dispatcher.pendingCount())
+    }
+
     private fun locator(cfi: String?, progression: Double?, href: String? = null): Locator = Locator(
         contentSHA256 = "a".repeat(64),
         fileByteCount = 1024,

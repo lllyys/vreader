@@ -262,9 +262,13 @@ class FoliateEvalDispatcherTest {
     }
 
     @Test
-    fun theDispatcherHoldsNoReferenceToASettledCallback() = runTest {
-        // Bookkeeping proxy for "no leak": once settled, the entry is gone, so nothing keeps the
-        // caller's lambda (and whatever it captured — the popover VM, the host) alive.
+    fun aSettledProbe_leavesTheRegistry_soTheCallerLambdaIsUnreachable() = runTest {
+        // The registry entry is the ONLY strong reference to the caller's lambda: the callback the
+        // WebView parks captures a Long id and the dispatcher, never the entry (see the class's
+        // RETENTION note). So "removed from the registry" IS "the lambda — and the popover VM it
+        // captured — is unreachable", even though the WebView keeps its own callback until the page
+        // answers. This test pins the registry half; the capture half is structural, and the two
+        // late-answer tests below prove the parked callback can no longer reach onResult.
         val h = Harness(backgroundScope)
         h.eval()
         runCurrent()
@@ -272,6 +276,46 @@ class FoliateEvalDispatcherTest {
         h.callbacks.single().invoke("\"x\"")
         runCurrent()
         assertEquals(0, h.dispatcher.pendingCount())
+    }
+
+    @Test
+    fun aStaleCallback_cannotSettleALaterProbe() = runTest {
+        // Ids must not be recycled: were they, the WebView callback parked by a timed-out probe would
+        // land on whatever probe now occupies its slot and deliver a stale anchor to a live selection.
+        val h = Harness(backgroundScope)
+        h.eval(js = "first", timeoutMs = TIMEOUT)
+        runCurrent()
+        advanceTimeBy(TIMEOUT + 1)
+        runCurrent()
+        assertEquals(listOf<String?>(null), h.received)
+
+        h.eval(js = "second", timeoutMs = TIMEOUT)
+        runCurrent()
+        // The FIRST probe's parked callback finally fires — it must not settle the second probe.
+        h.callbacks[0].invoke("\"stale\"")
+        runCurrent()
+        assertEquals(listOf<String?>(null), h.received)
+        assertEquals("the second probe must still be in flight", 1, h.dispatcher.pendingCount())
+        h.callbacks[1].invoke("\"fresh\"")
+        runCurrent()
+        assertEquals(listOf<String?>(null, "\"fresh\""), h.received)
+    }
+
+    @Test
+    fun aStaleCallback_cannotSettleAProbeIssuedAfterTeardown() = runTest {
+        // Same hazard across a teardown boundary (the reader recreated after render-process death:
+        // teardown, then a fresh dispatcher-less-of-history). This dispatcher refuses post-teardown
+        // probes outright, so the assertion is that nothing at all reaches the caller.
+        val h = Harness(backgroundScope)
+        h.eval(js = "first")
+        runCurrent()
+        h.dispatcher.teardown()
+        h.eval(js = "second")
+        runCurrent()
+        h.callbacks[0].invoke("\"stale\"")
+        runCurrent()
+        assertEquals(listOf("first"), h.sent)
+        assertEquals(emptyList<String?>(), h.received)
     }
 
     @Test

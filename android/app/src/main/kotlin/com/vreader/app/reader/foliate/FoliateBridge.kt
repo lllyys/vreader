@@ -25,6 +25,7 @@ import com.vreader.app.diagnostics.VLog
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -214,8 +215,10 @@ class FoliateBridge(
 
     fun destroy() {
         // Before the WebView goes: refuse every in-flight probe, so a result racing destroy() cannot
-        // call back into a host that is tearing down.
+        // call back into a host that is tearing down — and stop the goTo ack collector, whose `collect`
+        // would otherwise keep this bridge (and the WebView) reachable for the life of [scope].
         evalDispatcher.teardown()
+        goToDispatcher.teardown()
         webView.destroy()
     }
 
@@ -320,10 +323,15 @@ class FoliateGoToDispatcher(
      *  single-threaded scope (see class docs): goTo() and the ack collector both run there. */
     private var pending: Pending? = null
 
+    /** The ack collector. Held so [teardown] can stop it — an un-cancelled `collect` on a
+     *  never-cancelled scope keeps this dispatcher, and through `sendJs` the bridge and its WebView,
+     *  reachable forever (Gate-4 round 1, H1). */
+    private val collectorJob: Job
+
     init {
         // A SharedFlow tolerates multiple collectors (Azw3Document also collects for state/relocate),
         // so this ack collector is independent and never steals the document's messages.
-        scope.launch {
+        collectorJob = scope.launch {
             messages.collect { message ->
                 if (message is FoliateMessage.GoToAck) resolve(message)
             }
@@ -332,6 +340,22 @@ class FoliateGoToDispatcher(
 
     /** Test/diagnostic: how many goTos are awaiting an ack (0 or 1). */
     fun pendingCount(): Int = if (pending == null) 0 else 1
+
+    /**
+     * Stop collecting acks and release any in-flight goTo. Idempotent; called from
+     * [FoliateBridge.destroy] before the WebView goes.
+     *
+     * An awaiting caller resolves [Azw3GoToResult.Superseded] — its documented meaning ("ignore this
+     * result") is exactly right for "the reader is gone", and it needs no new case. Only cancelling the
+     * collector (and not the caller's scope) is deliberate: the scope may be owned by someone else.
+     */
+    fun teardown() {
+        collectorJob.cancel()
+        pending?.let { entry ->
+            pending = null
+            entry.deferred.complete(Azw3GoToResult.Superseded)
+        }
+    }
 
     suspend fun goTo(target: FoliateGoToTarget, timeoutMs: Long = FoliateBridge.DEFAULT_GOTO_TIMEOUT_MS): Azw3GoToResult {
         // Supersede any in-flight goTo: cancel-resolve it + drop its entry so a late ack can't resolve it.

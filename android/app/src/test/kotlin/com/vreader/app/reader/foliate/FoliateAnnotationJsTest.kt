@@ -28,6 +28,16 @@ class FoliateAnnotationJsTest {
     /** A real NUL, built from its char code for the same reason. */
     private val nul = 0.toChar().toString()
 
+    /** U+2028 / U+2029 — the two characters JSON leaves raw that JS treated as line terminators until
+     *  ES2019. A raw one is a PARSE error, which no `try{…}catch{}` can rescue. */
+    private val lineSeparator = 0x2028.toChar().toString()
+    private val paragraphSeparator = 0x2029.toChar().toString()
+
+    /** Unpaired surrogates — malformed UTF-16 that cannot be written as a source literal at all
+     *  (UTF-8 cannot encode them), so they are built from code units. */
+    private val loneHighSurrogate = 0xD83D.toChar().toString()
+    private val loneLowSurrogate = 0xDE00.toChar().toString()
+
     private val cfi = "epubcfi(/6/4!/4/2,/1:0,/1:12)"
     private val yellow = AnnotationColor.yellow.dotHex // "#e6b800"
 
@@ -85,6 +95,16 @@ class FoliateAnnotationJsTest {
         // for `</script>` to terminate. Pinned so the claim is checked, not assumed.
         "</script>" to "</script>",
         "a" + nul + "b" to "a" + bs + "u0000" + "b",
+        // JSON emits these two RAW; JS treated them as line terminators before ES2019, so a raw one is
+        // a parse error the try/catch cannot rescue (the statement never compiles). Escaped on top of
+        // JSON so the build does not depend on which System WebView the device ships.
+        "a" + lineSeparator + "b" to "a" + bs + "u2028" + "b",
+        "a" + paragraphSeparator + "b" to "a" + bs + "u2029" + "b",
+        // Malformed UTF-16 passes through as-is: not an injection vector (neither half is a quote or a
+        // backslash), and mangling it would silently corrupt a CFI. Pinned so the behaviour is a
+        // decision rather than an accident.
+        "a" + loneHighSurrogate + "b" to "a" + loneHighSurrogate + "b",
+        "a" + loneLowSurrogate + "b" to "a" + loneLowSurrogate + "b",
         "第三章的高亮" to "第三章的高亮",
         "emoji 😀 tail" to "emoji 😀 tail",
         // The classic break-out attempt against a naive template.
@@ -136,6 +156,18 @@ class FoliateAnnotationJsTest {
             assertTrue("could not locate the value literal in:\n$js", start in 1 until end)
             assertEquals(input, Json.decodeFromString(String.serializer(), js.substring(start, end)))
         }
+    }
+
+    @Test
+    fun emittedJs_carriesNoRawJsLineTerminator() {
+        // The one class of character JSON alone does NOT make safe for a JS string literal.
+        for (raw in listOf(lineSeparator, paragraphSeparator)) {
+            for (js in listOf(foliateAddAnnotationJs(raw, yellow), foliateDeleteAnnotationJs(raw))) {
+                assertFalse("a raw JS line terminator survived into:\n$js", js.contains(raw))
+            }
+        }
+        // The shared seam is what carries the guarantee — every builder in this package runs through it.
+        assertFalse(foliateSetStylesJs("body{}" + lineSeparator).contains(lineSeparator))
     }
 
     @Test
