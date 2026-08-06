@@ -9,12 +9,14 @@ package com.vreader.app.reader
 
 import com.vreader.app.reader.foliate.foliateSetStylesJs
 import com.vreader.app.reader.settings.ReaderFontFamily
+import com.vreader.app.reader.settings.ReaderLayout
 import com.vreader.app.reader.settings.ReaderSettings
 import com.vreader.app.reader.settings.ReaderTheme
 import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -251,6 +253,55 @@ class Azw3DisplayCssTest {
         val a = ReaderSettings(theme = ReaderTheme.Sepia, fontFamily = ReaderFontFamily.Sans, fontSizeSp = 19f, lineSpacing = 1.7f, marginDp = 30f).foliateDisplayCss()
         val b = ReaderSettings(theme = ReaderTheme.Sepia, fontFamily = ReaderFontFamily.Sans, fontSizeSp = 19f, lineSpacing = 1.7f, marginDp = 30f).foliateDisplayCss()
         assertEquals(a, b)
+    }
+
+    // ---- bug #368: every control the Display sheet offers is OBSERVABLE in the AZW3 body ----
+
+    /**
+     * The pure half of bug #368's fix. Wiring a Display control into the AZW3 chrome is only worth
+     * anything if the settings it edits actually reach the Kindle body, so this pins the differential
+     * the connected acceptance test then observes in the live DOM: each of the five controls the sheet
+     * exposes that AZW3 honours must produce a DIFFERENT `foliateDisplayCss()` blob from the default.
+     *
+     * Without this, the connected test's "wait until the live CSS becomes the target theme's" could be
+     * satisfied by two blobs that were equal all along — i.e. it could pass on a dead control.
+     */
+    @Test
+    fun everyHonouredSheetControl_changesTheInjectedCss() {
+        val default = ReaderSettings()
+        val defaultCss = default.foliateDisplayCss()
+        val variants = mapOf(
+            "theme" to default.copy(theme = ReaderTheme.Dark),
+            "fontFamily" to default.copy(fontFamily = ReaderFontFamily.Sans),
+            "fontSize" to default.copy(fontSizeSp = ReaderSettings.MAX_FONT_SIZE),
+            "lineSpacing" to default.copy(lineSpacing = ReaderSettings.MAX_LINE_SPACING),
+            "margin" to default.copy(marginDp = ReaderSettings.MAX_MARGIN),
+        )
+        for ((control, settings) in variants) {
+            assertNotEquals(
+                "changing '$control' in the Display sheet leaves the AZW3 CSS blob unchanged — the " +
+                    "control would be inert on this host",
+                defaultCss, settings.foliateDisplayCss(),
+            )
+        }
+        // EVERY theme is distinguishable, not just the one the connected test taps.
+        val perTheme = ReaderTheme.entries.map { default.copy(theme = it).foliateDisplayCss() }
+        assertEquals("two themes emit the same AZW3 CSS", ReaderTheme.entries.size, perTheme.toSet().size)
+    }
+
+    /**
+     * The one Display control AZW3 does NOT honour, pinned so the asymmetry is a recorded decision
+     * rather than an accident: `layout` (Paged/Scroll) is absent from the CSS blob because foliate-js
+     * owns AZW3 pagination outright — it is always paged, whatever the global setting says. The sheet is
+     * a single designed surface reused verbatim across hosts (rule 51: no per-host UI variant is
+     * invented here), so the toggle is still shown and still writes the global preference that the
+     * EPUB/TXT/MD hosts read; it simply changes nothing in THIS body.
+     */
+    @Test
+    fun layoutToggle_doesNotAffectTheAzw3Css_foliateOwnsPagination() {
+        val paged = ReaderSettings(layout = ReaderLayout.Paged).foliateDisplayCss()
+        val scroll = ReaderSettings(layout = ReaderLayout.Scroll).foliateDisplayCss()
+        assertEquals("the AZW3 CSS blob must not depend on the layout toggle", paged, scroll)
     }
 
     @Test

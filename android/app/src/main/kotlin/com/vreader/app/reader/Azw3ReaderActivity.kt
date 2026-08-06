@@ -7,11 +7,18 @@
 // Feature #126 WI-4 + WI-6. Routing from MainActivity; AZW3 import already exists.
 //
 // feature #132 WI-7-hosts: the Ready state renders the shared ReaderChromeScaffold via Azw3ReaderChrome
-// (top bar + the Contents|Bookmarks and Notes sheets) over the WebView body. AZW3 has no Display control
-// (the #129 CSS is applied live from the store with no control surface), so the bottom chrome is the
-// Contents · Notes subset of the designed toolbar. onJumpToAnnotation is NULL (review-only capability
-// gate; FoliateBridge/Azw3Document/foliate-js stay UNTOUCHED, and the MATCH_PARENT WebView sizing
-// (bug #357) is undisturbed).
+// (top bar + the Contents|Bookmarks and Notes sheets) over the WebView body, with the bottom chrome as
+// the Contents · Notes · Display subset of the designed toolbar. onJumpToAnnotation is NULL (review-only
+// capability gate; FoliateBridge/Azw3Document/foliate-js stay UNTOUCHED, and the MATCH_PARENT WebView
+// sizing (bug #357) is undisturbed).
+//
+// bug #368: the Display (Aa) control. #129's CSS was already injected here from the store for every
+// AZW3 — see the setStyles LaunchedEffect in Azw3ReaderHost — but the host offered no way to CHANGE it,
+// so a Kindle reader had to leave the book, adjust from an EPUB or TXT, and come back. The host now
+// owns a `showDisplaySheet` flag, hands the chrome an onOpenDisplay that raises it, and renders the SAME
+// designed ReaderSettingsSheet the EPUB/TXT hosts render, with the same process-scoped, sequence-stamped
+// setters. Nothing about the CSS application path changed: the sheet writes the shared store, and the
+// existing collector re-injects.
 //
 // feature #140 WI-6: AZW3 now HAS a table of contents. The `book-ready` TOC tree — which the bundle has
 // always posted and Kotlin used to discard — is hoisted out of Azw3ReaderHost (onToc, mirroring
@@ -137,8 +144,12 @@ class Azw3ReaderActivity : ComponentActivity() {
                     val chromeState = rememberSaveable(bookKey, stateSaver = ReaderChromeStateSaver) {
                         mutableStateOf(ReaderChromeState())
                     }
-                    val displayTheme by container.readerSettingsStore.settings
+                    val displaySettings by container.readerSettingsStore.settings
                         .collectAsStateWithLifecycle(initialValue = com.vreader.app.reader.settings.ReaderSettings())
+                    // bug #368 — the Display sheet's open state. Kept here (not inside the chrome) for
+                    // the same reason the EPUB/TXT hosts keep theirs: the sheet is a ModalBottomSheet in
+                    // its own window, so the HOST owns it and the chrome only reports the tap.
+                    var showDisplaySheet by rememberSaveable(bookKey) { mutableStateOf(false) }
                     // feature #165 WI-7 — the extra key that makes a merged annotations import show up in the
                     // one-shot snapshot without reopening the reader.
                     var annotationsRefresh by remember(bookKey) { mutableIntStateOf(0) }
@@ -249,18 +260,22 @@ class Azw3ReaderActivity : ComponentActivity() {
                     }
 
                     Azw3ReaderChrome(
-                        theme = displayTheme.theme,
+                        theme = displaySettings.theme,
                         title = o.book.title,
                         chromeState = chromeState,
                         annotations = annotationsSnapshot,
                         onBack = ::finish,
                         onShareAnnotations = { shareAnnotations(annotationsSnapshot) },
+                        // bug #368 — the bottom chrome's Display (Aa) slot, routed to the SAME designed
+                        // sheet EPUB and TXT/MD open. Before this the AZW3 host had no control surface at
+                        // all, so #129's settings applied but could only be changed from another book.
+                        onOpenDisplay = { showDisplaySheet = true },
                         bookDetails = bookDetails,
                         onShareBook = { com.vreader.app.reader.share.shareBook(this@Azw3ReaderActivity, o.book) },
                         onCopyFingerprint = { copyFingerprint(it) },
                         // feature #165 WI-7 — the designed Import row's launcher + the post-pick sheet.
                         onImportAnnotations = importEntry.launch,
-                        importSheet = importEntry.sheetSlot(displayTheme.theme),
+                        importSheet = importEntry.sheetSlot(displaySettings.theme),
                         // feature #135 WI-7 — the top-bar bookmark toggle + Bookmarks-tab rows + AZW3 jump.
                         isCurrentBookmarked = isBookmarked,
                         onToggleBookmark = if (currentCanonical != null) {
@@ -323,6 +338,28 @@ class Azw3ReaderActivity : ComponentActivity() {
                             )
                         },
                     )
+
+                    // bug #368 — the designed Display sheet, hosted as a sibling of the chrome (it is a
+                    // ModalBottomSheet in its own window, so its position in the tree does not affect
+                    // layout). The setters persist on the PROCESS scope so a write survives dismissal
+                    // and Activity teardown, and each submission sequence is stamped SYNCHRONOUSLY here
+                    // in the sheet callback (main thread, in slider order) via nextSeq() and passed into
+                    // the setter — so the store's per-field latest-wins reflects the user's true edit
+                    // order, not the multi-threaded dispatcher's coroutine-start order. Verbatim the
+                    // EPUB/TXT wiring; nothing about it is AZW3-specific.
+                    if (showDisplaySheet) {
+                        val store = container.readerSettingsStore
+                        com.vreader.app.reader.settings.ReaderSettingsSheet(
+                            settings = displaySettings,
+                            onTheme = { v -> val s = store.nextSeq(); container.appScope.launch { store.setTheme(v, s) } },
+                            onLayout = { v -> val s = store.nextSeq(); container.appScope.launch { store.setLayout(v, s) } },
+                            onFontFamily = { v -> val s = store.nextSeq(); container.appScope.launch { store.setFontFamily(v, s) } },
+                            onFontSize = { v -> val s = store.nextSeq(); container.appScope.launch { store.setFontSize(v, s) } },
+                            onLineSpacing = { v -> val s = store.nextSeq(); container.appScope.launch { store.setLineSpacing(v, s) } },
+                            onMargin = { v -> val s = store.nextSeq(); container.appScope.launch { store.setMargin(v, s) } },
+                            onDismiss = { showDisplaySheet = false },
+                        )
+                    }
                 }
             }
         }

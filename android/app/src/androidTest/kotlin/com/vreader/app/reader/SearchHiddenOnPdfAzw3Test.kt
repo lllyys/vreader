@@ -61,6 +61,7 @@ class SearchHiddenOnPdfAzw3Test {
             annotations = emptySnapshot,
             onBack = {},
             onShareAnnotations = {},
+            onOpenDisplay = {},
             body = { Box(Modifier.fillMaxSize().testTag("azw3-reader-body")) },
         )
     }

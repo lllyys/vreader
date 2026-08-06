@@ -122,6 +122,7 @@ class Azw3ReaderChromeUiTest {
         snapshot: AnnotationsSnapshot,
         tocEntries: List<TocEntry> = emptyList(),
         currentTocIndex: Int = 0,
+        onOpenDisplay: () -> Unit = {},
         onJumpToc: (Int) -> Boolean = { false },
     ) {
         Azw3ReaderChrome(
@@ -131,6 +132,7 @@ class Azw3ReaderChromeUiTest {
             annotations = snapshot,
             onBack = {},
             onShareAnnotations = {},
+            onOpenDisplay = onOpenDisplay,
             tocEntries = tocEntries,
             currentTocIndex = currentTocIndex,
             onJumpToc = onJumpToc,
@@ -174,23 +176,28 @@ class Azw3ReaderChromeUiTest {
     /**
      * The pre-#140 posture, kept as the regression: a book with NO usable TOC keeps the Contents
      * control hidden (the scaffold's `tocEntries.isEmpty()` rule), and the rest of the toolbar is
-     * unaffected — Notes is still there. AZW3 also has no Display control surface (#129 applies CSS
-     * live from the store), so "Display" stays absent too.
+     * unaffected — Notes is still there.
+     *
+     * **bug #368** — Display is present here too, and that is the point of the case: unlike Contents,
+     * the Display control has NO capability gate on this host. The #129 CSS is injected from the store
+     * unconditionally at `Azw3ReaderActivity` for every AZW3, so a Kindle book with no usable TOC still
+     * has fully working display settings and must still offer the control that changes them.
      */
-    @Test fun emptyToc_hidesContents_notesStillPresent() {
+    @Test fun emptyToc_hidesContents_notesAndDisplayStillPresent() {
         val state = mutableStateOf(ReaderChromeState(chromeVisible = true, sheet = ReaderSheet.None))
         compose.setContent { host(state, emptySnapshot) }
         compose.onNodeWithTag("reader-top-chrome", useUnmergedTree = true).assertExists()
         compose.onNodeWithTag("chrome-notes", useUnmergedTree = true).assertExists()
         compose.onAllNodesWithText("Contents", useUnmergedTree = true).assertCountEquals(0)
-        compose.onAllNodesWithText("Display", useUnmergedTree = true).assertCountEquals(0)
         assertEquals("no Contents control with an empty TOC", 0, nodeCount("chrome-contents"))
+        compose.onNodeWithTag("chrome-display", useUnmergedTree = true).assertExists()
+        assertTrue("the designed 'Display' label renders even without a TOC", textExists("Display"))
     }
 
     /**
-     * THE user-visible delta of this WI. Every build before it hid the Contents control on AZW3 twice
+     * THE user-visible delta of #140 WI-6. Every build before it hid the Contents control on AZW3 twice
      * over — an empty `tocEntries` AND a discarded open-callback — so this must be asserted through the
-     * real bottom chrome or it proves nothing.
+     * real bottom chrome or it proves nothing. Display rides along (bug #368).
      */
     @Test fun nonEmptyToc_showsContentsControl() {
         val state = mutableStateOf(ReaderChromeState(chromeVisible = true, sheet = ReaderSheet.None))
@@ -198,21 +205,57 @@ class Azw3ReaderChromeUiTest {
         compose.onNodeWithTag("azw3-bottom-chrome", useUnmergedTree = true).assertExists()
         compose.onNodeWithTag("chrome-contents", useUnmergedTree = true).assertExists()
         assertTrue("the designed 'Contents' label renders", textExists("Contents"))
-        // Notes survives the change; Display is still absent (AZW3 has no Display control surface).
         compose.onNodeWithTag("chrome-notes", useUnmergedTree = true).assertExists()
-        compose.onAllNodesWithText("Display", useUnmergedTree = true).assertCountEquals(0)
+        compose.onNodeWithTag("chrome-display", useUnmergedTree = true).assertExists()
     }
 
-    /** The designed toolbar order is Contents · Notes · Display · AI; AZW3 renders the first two, in
-     *  that order. Measured on the laid-out x positions, not on declaration order. */
-    @Test fun contentsAndNotes_bothRenderInTheDesignedOrder() {
+    /** The designed toolbar order is Contents · Notes · Display · AI; AZW3 renders the first three, in
+     *  that order (AI stays omitted — feature D). Measured on the laid-out x positions, not on
+     *  declaration order. */
+    @Test fun contentsNotesAndDisplay_renderInTheDesignedOrder() {
         val state = mutableStateOf(ReaderChromeState(chromeVisible = true, sheet = ReaderSheet.None))
         compose.setContent { host(state, emptySnapshot, tocEntries = chapters) }
-        val contentsX = compose.onNodeWithTag("chrome-contents", useUnmergedTree = true)
-            .fetchSemanticsNode().positionInRoot.x
-        val notesX = compose.onNodeWithTag("chrome-notes", useUnmergedTree = true)
-            .fetchSemanticsNode().positionInRoot.x
+        fun leftOf(tag: String) =
+            compose.onNodeWithTag(tag, useUnmergedTree = true).fetchSemanticsNode().positionInRoot.x
+        val contentsX = leftOf("chrome-contents")
+        val notesX = leftOf("chrome-notes")
+        val displayX = leftOf("chrome-display")
         assertTrue("Contents precedes Notes (was $contentsX vs $notesX)", contentsX < notesX)
+        assertTrue("Notes precedes Display (was $notesX vs $displayX)", notesX < displayX)
+    }
+
+    /**
+     * **bug #368** — the control is not decorative: tapping it invokes the host's open-Display callback,
+     * which is what `Azw3ReaderActivity` routes to the same [com.vreader.app.reader.settings.ReaderSettingsSheet]
+     * EPUB and TXT/MD open. Asserted through the REAL bottom chrome (never a stubbed one), because a
+     * test that supplied its own toolbar would pass with the slot still missing — i.e. it would pass on
+     * exactly the defect this fixes.
+     *
+     * Repeated taps are exercised too: the callback is fire-per-tap and the host's open state is a
+     * boolean, so a double tap must not be able to stack two sheets.
+     */
+    @Test fun tappingDisplay_firesTheHostsOpenDisplayCallback() {
+        val state = mutableStateOf(ReaderChromeState(chromeVisible = true, sheet = ReaderSheet.None))
+        var opened = 0
+        compose.setContent { host(state, emptySnapshot, onOpenDisplay = { opened++ }) }
+        compose.onNodeWithTag("chrome-display", useUnmergedTree = true).performClick()
+        compose.waitForIdle()
+        assertEquals("the Display tap did not reach the host", 1, opened)
+        compose.onNodeWithTag("chrome-display", useUnmergedTree = true).performClick()
+        compose.waitForIdle()
+        assertEquals("a repeated tap must still be one callback per tap", 2, opened)
+        // The tap opens the host's OWN sheet, not one of the scaffold's routes — the hoisted sheet
+        // state must be untouched (a Display tap that hijacked the Contents/Notes route would be a bug).
+        assertEquals(ReaderSheet.None, state.value.sheet)
+    }
+
+    /** Hiding the chrome hides the Display control with the rest of the toolbar — it is part of the
+     *  bottom bar, not a floating affordance (the designed center-tap behaviour). */
+    @Test fun hiddenChrome_hidesTheDisplayControlToo() {
+        val state = mutableStateOf(ReaderChromeState(chromeVisible = false, sheet = ReaderSheet.None))
+        compose.setContent { host(state, emptySnapshot, tocEntries = chapters) }
+        assertEquals("no bottom chrome while the chrome is hidden", 0, nodeCount("azw3-bottom-chrome"))
+        assertEquals("no Display control while the chrome is hidden", 0, nodeCount("chrome-display"))
     }
 
     // ---- the sheet -----------------------------------------------------------------------------

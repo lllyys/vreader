@@ -6,8 +6,10 @@
 // slots as nullable-default params (onOpenContents / onOpenNotes) — each renders ONLY when non-null, so
 // a #129-era Display-only caller stays valid by construction (the no-dead-controls rule). The design
 // toolbar order is Contents · Notes · Display · AI; AI stays omitted until feature D. feature #140 WI-6
-// promotes [ToolbarIconButton] to `internal` so the AZW3 host's Contents/Notes-only bottom chrome
-// (Azw3BottomChrome) renders the SAME designed slot rather than a look-alike copy. Renders in the
+// promotes [ToolbarIconButton] to `internal` so the AZW3 host's bottom chrome (Azw3BottomChrome) renders
+// the SAME designed slot rather than a look-alike copy; bug #368 extends that to the Display slot, which
+// moves out of this composable's body into the `internal` [ToolbarDisplayButton] for the same reason (a
+// behaviour-preserving extraction — the modifier chain and typography are unchanged). Renders in the
 // active [ReaderTheme]'s colors (chrome = the theme background + a top rule — a local mapping of the
 // design's chrome/rule tokens). Pure function of state + callbacks.
 package com.vreader.app.reader.chrome
@@ -142,14 +144,7 @@ fun ReaderBottomChrome(
                     )
                 }
                 // Display — the #129 slot, rendered with the design's "Aa" serif glyph rather than an icon.
-                Column(
-                    Modifier.clickable { onOpenDisplay() }.padding(horizontal = 12.dp, vertical = 4.dp).testTag("chrome-display"),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(3.dp),
-                ) {
-                    Text("Aa", color = ink, fontFamily = VReaderFonts.Serif, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
-                    Text("Display", color = sub, fontSize = 10.sp, fontWeight = FontWeight.Medium)
-                }
+                ToolbarDisplayButton(ink = ink, sub = sub, onClick = onOpenDisplay)
             }
         }
     }
@@ -185,6 +180,31 @@ internal fun ToolbarIconButton(
     ) {
         Icon(icon, contentDescription = null, tint = ink, modifier = Modifier.size(22.dp))
         Text(label, color = sub, fontSize = 10.sp, fontWeight = FontWeight.Medium)
+    }
+}
+
+/**
+ * The toolbar's "Display" slot — the design's serif "Aa" glyph over the 10sp label (`vreader-reader.jsx`
+ * renders this one with type rather than an icon, which is why it is not a [ToolbarIconButton]). The
+ * label is on the tappable node's semantics so accessibility + tests can target it.
+ *
+ * `internal` rather than inlined (bug **#368**): the AZW3 host's own bottom chrome (`Azw3BottomChrome`)
+ * renders a Contents · Notes · Display subset of this toolbar without the scrubber, and reuses THIS
+ * composable — exactly as it already reuses [ToolbarIconButton] — so the slot treatment cannot drift
+ * between hosts. Not part of any public API; module-visible only, for that one sibling.
+ *
+ * The extraction is deliberately BYTE-FOR-BYTE the modifier chain and typography the #129 slot already
+ * had (no added semantics, no re-ordered modifiers): EPUB/TXT/MD must be unable to tell that it moved.
+ */
+@Composable
+internal fun ToolbarDisplayButton(ink: Color, sub: Color, onClick: () -> Unit) {
+    Column(
+        Modifier.clickable { onClick() }.padding(horizontal = 12.dp, vertical = 4.dp).testTag("chrome-display"),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(3.dp),
+    ) {
+        Text("Aa", color = ink, fontFamily = VReaderFonts.Serif, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+        Text("Display", color = sub, fontSize = 10.sp, fontWeight = FontWeight.Medium)
     }
 }
 

@@ -3,9 +3,10 @@
 // ~300-line guideline). Same package `com.vreader.app.reader`, so no call site or test import changed:
 //   • [Azw3ReaderChrome]      — the shared ReaderChromeScaffold wiring for the AZW3 host (feature #132
 //                               WI-7-hosts + #134 WI-5 More/Details + #135 WI-7 bookmarks + #140 WI-6
-//                               Contents).
-//   • Azw3BottomChrome        — the Contents · Notes bottom toolbar (private), each slot rendered only
-//                               when the scaffold supplies its callback.
+//                               Contents + bug #368 Display).
+//   • Azw3BottomChrome        — the Contents · Notes · Display bottom toolbar (private); the two
+//                               capability-gated slots render only when the scaffold supplies their
+//                               callback, Display always renders.
 //   • [azw3JumpResult] / [azw3JumpDecision] — the pure, JVM-testable jump helpers (shared by the
 //                               bookmark rows and, since #140 WI-6, the Contents rows).
 // The activity (Azw3ReaderActivity.kt) keeps the lifecycle, the WebView body host, and the plain
@@ -17,6 +18,13 @@
 // bottom-chrome slot, which used to discard the scaffold's Contents open-callback outright — a
 // non-empty TOC alone would have lit up nothing. The sheet, the rows, and the indentation are #132's,
 // reused unchanged (rule 51: no new visible element).
+//
+// bug #368 — this host now also has the design's DISPLAY (Aa) slot. #129's display settings were
+// already applied to every AZW3 (the CSS is injected from the store unconditionally), but there was no
+// control surface, so a Kindle reader had to leave the book and adjust from an EPUB or TXT. The slot,
+// the glyph and the sheet are all #129's, reused verbatim through the now-`internal`
+// ReaderBottomChrome.ToolbarDisplayButton — rule 51: no new visible element, this restores a designed
+// one that was never wired.
 package com.vreader.app.reader
 
 import androidx.compose.foundation.background
@@ -41,6 +49,7 @@ import com.vreader.app.annotations.AnnotationsSnapshot
 import com.vreader.app.annotations.BookmarkRecord
 import com.vreader.app.reader.chrome.ReaderChromeScaffold
 import com.vreader.app.reader.chrome.ReaderChromeState
+import com.vreader.app.reader.chrome.ToolbarDisplayButton
 import com.vreader.app.reader.chrome.ToolbarIconButton
 import com.vreader.app.reader.foliate.Azw3Document
 import com.vreader.app.reader.foliate.Azw3GoToResult
@@ -112,12 +121,16 @@ fun azw3TocJumpDecision(document: Azw3Document?, entries: List<TocEntry>, index:
 /**
  * The AZW3 reader host chrome — feature #132 WI-7-hosts (mirror of WI-6's [TxtReaderChrome]). Renders the
  * shared [ReaderChromeScaffold] (top bar + the Contents|Bookmarks and Notes sheets) over the AZW3 [body]
- * (the WebView). It has no Display control (the #129 CSS applies live from the store with no control
- * surface); the bottom chrome is the Contents · Notes toolbar (Azw3BottomChrome). The top bar's Search
- * slot is omitted (null — #133; no dead controls). [onJumpToAnnotation] is NULL — AZW3 annotation review
- * is review-only (the card is non-clickable, a capability gate). Wrapped in a `systemBarsPadding()`
- * Column so the chrome clears the status/nav bars. Extracted (internal) so the host wiring is directly
- * testable.
+ * (the WebView); the bottom chrome is the Contents · Notes · Display toolbar (Azw3BottomChrome). The top
+ * bar's Search slot is omitted (null — #133; no dead controls). [onJumpToAnnotation] is NULL — AZW3
+ * annotation review is review-only (the card is non-clickable, a capability gate). Wrapped in a
+ * `systemBarsPadding()` Column so the chrome clears the status/nav bars. Extracted (internal) so the
+ * host wiring is directly testable.
+ *
+ * bug #368 — [onOpenDisplay] opens the host's #129 Display settings sheet. It is REQUIRED rather than
+ * nullable-defaulted: unlike Contents (hidden when the book has no TOC) the capability behind it is
+ * unconditional — the host injects the display CSS for every AZW3 — so there is no legitimate caller
+ * that omits it, and a defaulted no-op is precisely how the control stayed missing.
  *
  * feature #140 WI-6 — the table of contents: [tocEntries] are the book's chapters as
  * [com.vreader.app.reader.nav.FoliateTocProvider] flattened them, [currentTocIndex] the row to
@@ -135,6 +148,10 @@ internal fun Azw3ReaderChrome(
     annotations: AnnotationsSnapshot,
     onBack: () -> Unit,
     onShareAnnotations: () -> Unit,
+    // bug #368 — opens the host's Display settings sheet. REQUIRED (no default) on purpose: the #129
+    // CSS is injected from the store unconditionally for every AZW3, so this host can never legitimately
+    // omit the control, and a defaulted no-op is exactly how the slot went missing for four releases.
+    onOpenDisplay: () -> Unit,
     body: @Composable () -> Unit,
     // feature #134 WI-5 — the More menu's Book-details model + Share/copy actions (null model → no More).
     bookDetails: com.vreader.app.reader.details.BookDetailsUiModel? = null,
@@ -178,7 +195,13 @@ internal fun Azw3ReaderChrome(
             // independent gates and BOTH have to open. The scaffold still hands a NULL callback when
             // [tocEntries] is empty, so a book with no TOC keeps today's Notes-only toolbar exactly.
             bottomChrome = { onOpenContents, onOpenNotes ->
-                Azw3BottomChrome(theme = theme, onOpenContents = onOpenContents, onOpenNotes = onOpenNotes)
+                Azw3BottomChrome(
+                    theme = theme,
+                    onOpenContents = onOpenContents,
+                    onOpenNotes = onOpenNotes,
+                    // bug #368 — the Display slot's tap, carried straight through to the host's sheet.
+                    onOpenDisplay = onOpenDisplay,
+                )
             },
             body = body,
             bookDetails = bookDetails,
@@ -198,24 +221,29 @@ internal fun Azw3ReaderChrome(
 }
 
 /**
- * The AZW3 host's bottom chrome — the designed reader toolbar's Contents · Notes subset (feature #132
- * WI-7-hosts, extended by feature #140 WI-6). Of the design's Contents · Notes · Display · AI toolbar
- * this host renders Contents (once the book HAS a TOC — #140) and Notes; it has no Display control
- * surface (#129 applies the CSS live from the store) and no scrubber (foliate owns pagination), so
- * those two stay omitted. Both slots come from [ToolbarIconButton], the SAME composable
- * `ReaderBottomChrome` uses on EPUB/TXT/MD, so the treatment cannot drift between hosts.
+ * The AZW3 host's bottom chrome — the designed reader toolbar's Contents · Notes · Display subset
+ * (feature #132 WI-7-hosts, extended by feature #140 WI-6 and bug #368). Of the design's
+ * Contents · Notes · Display · AI toolbar this host renders the first three: Contents once the book HAS
+ * a TOC (#140), Notes, and Display (#368). AI stays omitted until feature D, and there is no scrubber —
+ * foliate owns AZW3 pagination, so a seek control here would be dead.
  *
- * Each slot renders ONLY when its callback is non-null (the no-dead-controls rule): the scaffold passes
- * a null [onOpenContents] exactly when `tocEntries` is empty, which is how a Kindle book with no usable
- * TOC keeps the pre-#140 Notes-only toolbar.
+ * **Every slot comes from `ReaderBottomChrome`'s own composables** — [ToolbarIconButton] for the two
+ * icon slots, [ToolbarDisplayButton] for the type-set "Aa" one — so the treatment cannot drift from the
+ * EPUB/TXT/MD toolbar. That reuse is the whole reason those two are `internal` rather than private.
+ *
+ * The two nullable slots render ONLY when their callback is non-null (the no-dead-controls rule): the
+ * scaffold passes a null [onOpenContents] exactly when `tocEntries` is empty, which is how a Kindle book
+ * with no usable TOC keeps a Contents-free toolbar. [onOpenDisplay] is NOT nullable, because the
+ * capability behind it is unconditional: `Azw3ReaderActivity` injects the #129 CSS from the store for
+ * EVERY AZW3, so the control is never dead — a book with no TOC still has working display settings.
  */
 @Composable
 private fun Azw3BottomChrome(
     theme: ReaderTheme,
     onOpenContents: (() -> Unit)?,
     onOpenNotes: (() -> Unit)?,
+    onOpenDisplay: () -> Unit,
 ) {
-    if (onOpenContents == null && onOpenNotes == null) return
     val ink = theme.ink
     val sub = theme.ink.copy(alpha = 0.6f)
     val rule = theme.ink.copy(alpha = 0.10f)
@@ -227,7 +255,7 @@ private fun Azw3BottomChrome(
             Modifier.fillMaxWidth().padding(top = 14.dp, bottom = 28.dp),
             horizontalArrangement = Arrangement.Center,
         ) {
-            // The design order: Contents before Notes.
+            // The design order: Contents, then Notes, then Display.
             if (onOpenContents != null) {
                 ToolbarIconButton(
                     tag = "chrome-contents", label = "Contents",
@@ -241,6 +269,7 @@ private fun Azw3BottomChrome(
                     ink = ink, sub = sub, onClick = onOpenNotes,
                 )
             }
+            ToolbarDisplayButton(ink = ink, sub = sub, onClick = onOpenDisplay)
         }
     }
 }
