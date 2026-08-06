@@ -23,7 +23,7 @@ import java.io.File
 import java.util.Random
 
 /**
- * Feature #152 WI-1 — the key→filename mapping, frozen.
+ * Feature #152 WI-1 — the key to filename mapping, frozen.
  *
  * [StorageNaming.fileNameForKey] already names every book artifact on every user's device, and
  * `BookEntity.localFilePath` points at those names. So this is an EXTRACTION, not a redesign: any
@@ -32,9 +32,9 @@ import java.util.Random
  * import case pins the fact that `BookImporter` and `CoverPaths` call ONE function rather than
  * two copies that can drift apart.
  *
- * The mapping is injective only on the CANONICAL-KEY domain (`Identity.parseCanonicalKey != null`),
- * which is where the precondition test belongs; `a:b` and `a/b` really do both map to `a_b`, but
- * neither is a key any caller can produce. See the plan's §4 M-9 disposition.
+ * The mapping is injective only on the canonical-key domain — exactly `Identity.canonicalKey`'s
+ * image, which is what `CoverPaths` enforces. `a:b` and `a/b` really do both map to `a_b`, but
+ * neither is a key any caller can produce. See the plan's section 4, M-9 disposition.
  */
 @RunWith(RobolectricTestRunner::class)
 class StorageNamingTest {
@@ -80,9 +80,10 @@ class StorageNamingTest {
 
     /**
      * The substitution table itself, pinned. This is NOT the deleted "sanitised-different keys do
-     * not collide" case — it asserts nothing about injectivity or about non-canonical keys being
-     * usable. It pins WHICH characters survive, because that is what decides the names already
-     * written to disk. Without it, dropping `.` or `-` from the safe set is an undetectable edit.
+     * not collide" case — it asserts nothing about injectivity, and nothing about non-canonical
+     * keys being usable. It pins WHICH characters survive, because that is what decides the names
+     * already written to disk. Without it, dropping `.` or `-` from the safe set is an
+     * undetectable edit: no canonical key contains either, so no domain test can see it.
      */
     @Test fun fileNameForKey_preservesExactlyTheSafeCharacterClass() {
         val safe = "AZaz09._-"
@@ -124,7 +125,7 @@ class StorageNamingTest {
 
         val actualName = File(book.localFilePath!!).name
         assertEquals(StorageNaming.fileNameForKey(book.fingerprintKey), actualName)
-        // And independently of the function under test: the key with ':' → '_'.
+        // And independently of the function under test: the key with ':' replaced by '_'.
         assertEquals(book.fingerprintKey.replace(':', '_'), actualName)
     }
 
@@ -138,9 +139,9 @@ class StorageNamingTest {
     // ---- injectivity, on the domain the contract actually declares ----------------------------
 
     /**
-     * Constructive injectivity: a canonical key contains no `_` and exactly two `:`, so `:`→`_`
-     * is INVERTIBLE on this domain. An inverse is a stronger proof than sampled distinctness,
-     * and it holds for every key rather than for the ones we happened to generate.
+     * Constructive injectivity: a canonical key contains no `_` and exactly two `:`, so replacing
+     * ':' with '_' is INVERTIBLE on this domain. An inverse is a stronger proof than sampled
+     * distinctness — it holds for every key, not only the ones we happened to generate.
      */
     @Test fun fileNameForKey_isInvertible_onTheCanonicalDomain() {
         for (key in generatedCanonicalKeys(perFormat = 20)) {
@@ -150,11 +151,15 @@ class StorageNamingTest {
         }
     }
 
-    /** Sampled distinctness across all five formats × varied sha × varied byte count. */
+    /** Sampled distinctness across all five formats, varied sha, varied byte count. */
     @Test fun fileNameForKey_isInjective_overGeneratedCanonicalKeys() {
         val keys = generatedCanonicalKeys(perFormat = 40)
         assertEquals(BookFormat.entries.size * 40, keys.size)
-        assertEquals("every generated key must be canonical", keys.size, keys.count { Identity.parseCanonicalKey(it) != null })
+        assertEquals(
+            "every generated key must be canonical",
+            keys.size,
+            keys.count { Identity.parseCanonicalKey(it) != null },
+        )
         val names = keys.map { StorageNaming.fileNameForKey(it) }
         assertEquals("distinct canonical keys must yield distinct filenames", keys.size, names.toSet().size)
     }
@@ -165,6 +170,11 @@ class StorageNamingTest {
      * The mapping is not a general-purpose escaper, so the store that DERIVES A PATH from it
      * states the precondition rather than pretending to be safe for arbitrary input. Every one of
      * these is rejected, including the two that would otherwise escape the covers directory.
+     *
+     * The whitespace and NUL cases are built by concatenation rather than written as literals so
+     * this source file stays plain printable ASCII plus the CJK case (Gate-4 L-2: an earlier
+     * revision embedded a real NUL byte in the source, which compiled and passed but made the
+     * file binary to git, editors and scanners).
      */
     @Test fun coverPaths_rejectsNonCanonicalKeys() {
         val paths = CoverPaths(tmp.newFolder("covers"))
@@ -181,11 +191,26 @@ class StorageNamingTest {
             "epub:$SHA_A:notanumber",
             "../../../etc/passwd",                // path traversal
             "..:$SHA_A:4096",
-            "书名:$SHA_A:4096",                    // CJK
-            "epub:$SHA_A:4096 ",
+            "书名:$SHA_A:4096",                     // CJK
+            "epub:$SHA_A:4096" + ' ',             // trailing space
+            "epub:$SHA_A:4096" + '\t',            // tab
+            "epub:$SHA_A:4096" + Char(0),         // NUL — never legal in a path component
+            "epub:$SHA_A:4096" + '\n',            // newline
         )
         for (key in rejected) {
-            assertThrowsIllegalArgument("coverFile($key)") { paths.coverFile(key) }
+            assertThrowsIllegalArgument("coverFile(${key.take(12)})") { paths.coverFile(key) }
+        }
+    }
+
+    /**
+     * Byte-count spellings `toLongOrNull` accepts but `Identity.canonicalKey` never emits. No
+     * caller can produce them; the point is that the enforced domain is the EMITTER's image, not
+     * the parser's, so it is exactly the domain the invertibility proof above is stated over.
+     */
+    @Test fun coverPaths_rejectsNonEmittedByteCountSpellings() {
+        val paths = CoverPaths(tmp.newFolder("covers"))
+        for (tail in listOf("+4096", "04096", "-0", "0004096")) {
+            assertThrowsIllegalArgument("coverFile(:$tail)") { paths.coverFile("epub:$SHA_A:$tail") }
         }
     }
 
@@ -197,6 +222,14 @@ class StorageNamingTest {
             "epub_${SHA_A}_9223372036854775807.jpg",
             paths.coverFile("epub:$SHA_A:${Long.MAX_VALUE}").name,
         )
+    }
+
+    /** Every key the emitter can produce must be accepted — the precondition must not over-reject. */
+    @Test fun coverPaths_acceptsEveryEmittedCanonicalKey() {
+        val paths = CoverPaths(tmp.newFolder("covers"))
+        for (key in generatedCanonicalKeys(perFormat = 20)) {
+            assertEquals("${StorageNaming.fileNameForKey(key)}.jpg", paths.coverFile(key).name)
+        }
     }
 
     /** A typo'd fixture would silently weaken every case above. */

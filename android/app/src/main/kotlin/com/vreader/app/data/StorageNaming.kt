@@ -24,9 +24,10 @@ package com.vreader.app.data
 /**
  * Maps a fingerprint key to a filesystem-safe file name.
  *
- * PRECONDITION: [key] is a canonical fingerprint key (`Identity.parseCanonicalKey(key) != null`).
- * The mapping is injective on that domain only — callers that accept a key from outside the
- * library (a path, user input, a manifest field) must validate it before calling.
+ * PRECONDITION: [key] is a canonical fingerprint key — exactly an `Identity.canonicalKey` output.
+ * The mapping is injective on that domain only; callers that accept a key from outside the
+ * library (a path, user input, a manifest field) must validate it before calling. `CoverPaths`
+ * does; `BookImporter` does not need to, because it names the key it just computed.
  */
 internal object StorageNaming {
     private val UNSAFE = Regex("[^A-Za-z0-9._-]")
