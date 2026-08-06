@@ -1,5 +1,5 @@
 // Purpose: Room database + schema-versioned migration scaffold — feature #106 WI-3.
-// Version 8 is the current schema; v1 was the initial books+positions baseline and
+// Version 10 is the current schema; v1 was the initial books+positions baseline and
 // MIGRATION_1_2 is the worked example of the additive-migration pattern (adds
 // books.lastOpenedAt). Subsequent additive migrations: 2→3 daily_reading (#122),
 // 3→4 annotations (#123), 4→5 collections (#127), 5→6 books.author (#128 search),
@@ -8,7 +8,9 @@
 // index on `bookmarks` — preceded by an in-migration dedupe of pre-existing duplicate rows so
 // the unique index can't fail on a legacy duplicate (feature #135 WI-3), 8→9 the additive
 // `chapter_translations` bilingual translation cache (+ bookKey index, FK→books CASCADE;
-// feature #131 WI-2). The migration round-trip test (VReaderDatabaseMigrationTest) guards them.
+// feature #131 WI-2), 9→10 the additive nullable `books.coverPath` + `books.coverExtractorVersion`
+// cover-state pair (feature #152 WI-2). The migration round-trip test
+// (VReaderDatabaseMigrationTest) guards them.
 // Future schema changes append a Migration(n, n+1) to ALL_MIGRATIONS and bump `version`.
 package com.vreader.app.data
 
@@ -28,7 +30,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         SearchIndexStateEntity::class, SearchStagingEntity::class,
         ChapterTranslationEntity::class,
     ],
-    version = 9,
+    version = 10,
     exportSchema = true,
 )
 abstract class VReaderDatabase : RoomDatabase() {
@@ -252,11 +254,31 @@ abstract class VReaderDatabase : RoomDatabase() {
             }
         }
 
+        /** v9 → v10: feature #152 WI-2 — add the additive nullable cover-state pair to `books`:
+         *  `coverPath` (TEXT, the extracted cover file's path — present for reactivity, since the
+         *  library grid repaints off `observeAll()`) and `coverExtractorVersion` (INTEGER, the
+         *  negative memo that keeps a backfill from re-parsing every art-less book on every app
+         *  start — the `search_index_state.indexerVersion` precedent).
+         *
+         *  Purely additive, two `ALTER TABLE ADD COLUMN`s, NO data transform: every pre-existing row
+         *  reads `NULL`/`NULL`, which is exactly the "never attempted → eligible" tri-state corner, so
+         *  a migrated library backfills normally. Nothing else in the row is read or rewritten, so a
+         *  migrated book's `author`, `lastOpenedAt` and reading position are untouched. Affinities
+         *  match Room's generated v10 schema (`String?` → TEXT, `Int?` → INTEGER); the migration test
+         *  opens the real Room DB, whose structural PRAGMA validation catches any drift. */
+        val MIGRATION_9_10: Migration = object : Migration(9, 10) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE books ADD COLUMN coverPath TEXT")
+                db.execSQL("ALTER TABLE books ADD COLUMN coverExtractorVersion INTEGER")
+            }
+        }
+
         /** All registered migrations, oldest first. Append future Migration(n,n+1) here. */
         val ALL_MIGRATIONS: Array<Migration> =
             arrayOf(
                 MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5,
                 MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9,
+                MIGRATION_9_10,
             )
 
         /** The production on-disk database (app-private storage). */

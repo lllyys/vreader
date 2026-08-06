@@ -20,13 +20,60 @@ interface BookDao {
     // wipe a book's saved position on every re-import (Gate-4 Critical). @Upsert
     // updates in place, preserving the child row.
     //
-    // NOTE: the SAF import path does NOT use this whole-row @Upsert — it uses
-    // [upsertPreservingAuthor] below, so a duplicate import can't null-clobber a
-    // backfilled `author` (feature #128 WI-1 Gate-2 Critical). This whole-row upsert is
-    // kept for callers (e.g. the restore path pre-#128) that intentionally write every
-    // column, and is exercised by the reUpsert-preserves-position regression.
-    @Upsert
-    suspend fun upsert(book: BookEntity)
+    // NOTE: the SAF import path does NOT use this — it uses [upsertPreservingAuthor] below, so a
+    // duplicate import can't null-clobber a backfilled `author` (feature #128 WI-1 Gate-2 Critical).
+    // This "write every column" upsert is kept for callers (e.g. the restore path pre-#128) that
+    // intentionally do so, and is exercised by the reUpsert-preserves-position regression.
+    //
+    // It is NOT a Room `@Upsert` any more (feature #152 WI-2, Gate-4 round-2 Medium). A whole-row
+    // upsert writes EVERY column, so any caller that CONSTRUCTS a BookEntity rather than
+    // round-tripping one it read would silently erase `coverPath`/`coverExtractorVersion` — and a
+    // cover may be a #153 user pick, which is not re-derivable from the book file. Since this seam has
+    // no production caller but ~45 test/instrumentation call sites, the fix keeps the signature and
+    // narrows the WRITE: insert-if-absent, else a column-scoped update of every pre-v10 column
+    // (the [upsertPreservingAuthor] pattern). `author`/`lastOpenedAt` are still overwritten here —
+    // that is this seam's documented purpose and unchanged — but cover state is not.
+    //
+    // @Transaction so a concurrent write can't race insert-vs-update. Deliberately NOT
+    // `@Insert(REPLACE)`: REPLACE is delete-then-insert in SQLite, which would fire
+    // reading_positions' ON DELETE CASCADE and wipe a book's saved position (Gate-4 Critical, #106).
+    @Transaction
+    suspend fun upsert(book: BookEntity) {
+        if (insertIfAbsent(book) == -1L) {
+            updateAllColumnsExceptCoverState(
+                key = book.fingerprintKey,
+                title = book.title,
+                fmt = book.originalFormat,
+                sha = book.contentSHA256,
+                bytes = book.fileByteCount,
+                path = book.localFilePath,
+                uri = book.sourceUri,
+                addedAt = book.addedAt,
+                lastOpenedAt = book.lastOpenedAt,
+                author = book.author,
+            )
+        }
+    }
+
+    /** The update branch of [upsert]: every column the whole-row seam owns. Cover state is excluded
+     *  — see [upsert]. Not called directly; use [upsert]. */
+    @Query(
+        "UPDATE books SET title = :title, originalFormat = :fmt, contentSHA256 = :sha, " +
+            "fileByteCount = :bytes, localFilePath = :path, sourceUri = :uri, addedAt = :addedAt, " +
+            "lastOpenedAt = :lastOpenedAt, author = :author WHERE fingerprintKey = :key",
+    )
+    suspend fun updateAllColumnsExceptCoverState(
+        key: String,
+        title: String,
+        fmt: String,
+        sha: String,
+        bytes: Long,
+        path: String?,
+        uri: String?,
+        addedAt: Long,
+        lastOpenedAt: Long?,
+        author: String?,
+    )
 
     @Query("SELECT * FROM books ORDER BY addedAt DESC")
     fun observeAll(): Flow<List<BookEntity>>
@@ -59,7 +106,15 @@ interface BookDao {
 
     /** UPDATE only the IMPORT-owned columns. Deliberately excludes `author` AND `lastOpenedAt` so a
      *  duplicate SAF import refreshes the file/identity metadata without clobbering a backfilled author
-     *  or the last-opened recency (feature #128 WI-1 Gate-2 Critical). */
+     *  or the last-opened recency (feature #128 WI-1 Gate-2 Critical).
+     *
+     *  It ALSO excludes `coverPath` and `coverExtractorVersion` (feature #152 WI-2), for the same
+     *  reason and one more: a cover may have been chosen by the USER (#153), which is not re-derivable
+     *  from the file, and clobbering the version memo would put a known art-less book back into the
+     *  backfill on every app start. **Anything added to this statement is, by construction, a column a
+     *  re-import is allowed to overwrite** — that is the whole contract, so adding a column here is a
+     *  deliberate act, never a completeness tidy-up. `BookDaoCoverStateTest` asserts the exclusion as
+     *  behaviour (re-import, then read the columns back), not by reading this SQL. */
     @Query(
         "UPDATE books SET title = :title, originalFormat = :fmt, contentSHA256 = :sha, " +
             "fileByteCount = :bytes, localFilePath = :path, sourceUri = :uri, addedAt = :addedAt " +
@@ -111,6 +166,58 @@ interface BookDao {
         lastOpenedAt: Long?,
         manifestAuthor: String?,
     )
+
+    // ---- feature #152 WI-2: cover state ----
+
+    // The cover columns are ONE tri-state and are never written apart, so there is no
+    // `setCoverState(path: String?, version: Int?)` primitive: a nullable pair can express
+    // `(path != null, version == null)`, which is not a state the tri-state defines, and it makes the
+    // reset indistinguishable from a definite outcome at the call site (Gate-4 round-1 Medium). The
+    // three legal transitions get three names instead, so the illegal fourth is unrepresentable.
+    //
+    // A `Failed` extraction calls NONE of them — leaving the row's existing state is what makes the
+    // book retryable. All three are column-scoped: an unknown or already-deleted `key` updates zero
+    // rows rather than inserting, and no other column is touched.
+
+    // Both RECORDING calls carry a staleness guard in the WHERE clause, and return the number of rows
+    // written so a caller can tell "applied" from "rejected as stale" (0) — a silently-dropped write
+    // would otherwise be invisible. The guards are deliberately asymmetric:
+    //
+    //   setCoverArt   accepts >= the stored version, because a SAME-version write is required twice
+    //                 over — the coordinator reconciling a book whose cover FILE exists but whose
+    //                 pointer is NULL, and #153 replacing an extracted cover with a user-chosen one.
+    //   setCoverAbsent accepts a NEWER version, or the same version only when no art is recorded yet.
+    //                 A same-version "no art" must NOT be able to wipe an established pointer, or a
+    //                 late art-less verdict could erase a user's pick.
+    //
+    // Both reject a strictly OLDER version, so an extraction that started earlier and finished later
+    // can never downgrade newer state. This is a backstop, not the primary mechanism: WI-6's
+    // coordinator admission set is what prevents two concurrent extractions of one book in the first
+    // place. `clearCoverState` is deliberately UNguarded — it is the explicit re-run lever.
+
+    /** Art was found: point at the file and stamp the version. Returns rows written (0 = stale, ignored). */
+    @Query(
+        "UPDATE books SET coverPath = :path, coverExtractorVersion = :version " +
+            "WHERE fingerprintKey = :key " +
+            "AND (coverExtractorVersion IS NULL OR :version >= coverExtractorVersion)",
+    )
+    suspend fun setCoverArt(key: String, path: String, version: Int): Int
+
+    /** Reachable, parsed, genuinely no art: clear the pointer but STAMP the version anyway. The stamp
+     *  is the whole point — it is what stops the backfill re-opening this book on every app start.
+     *  Returns rows written (0 = stale or would have wiped an established pointer, ignored). */
+    @Query(
+        "UPDATE books SET coverPath = NULL, coverExtractorVersion = :version " +
+            "WHERE fingerprintKey = :key " +
+            "AND (coverExtractorVersion IS NULL OR :version > coverExtractorVersion " +
+            "OR (:version = coverExtractorVersion AND coverPath IS NULL))",
+    )
+    suspend fun setCoverAbsent(key: String, version: Int): Int
+
+    /** Reset to eligible (both NULL) — a deliberate re-run lever, deliberately NOT reachable by
+     *  passing nulls to one of the recording calls above. */
+    @Query("UPDATE books SET coverPath = NULL, coverExtractorVersion = NULL WHERE fingerprintKey = :key")
+    suspend fun clearCoverState(key: String)
 }
 
 @Dao

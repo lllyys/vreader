@@ -27,6 +27,11 @@ data class Book(
     val addedAt: Long,
     val lastOpenedAt: Long? = null,
     val author: String? = null,   // v6 (feature #128) — nullable; set by backfill/restore, never SAF import
+    // v10 (feature #152) — the cover-state pair; written ONLY via [LibraryRepository.setCoverState],
+    // never by an import DTO (the importer knows nothing about covers). See [BookEntity] for the
+    // tri-state these two encode.
+    val coverPath: String? = null,
+    val coverExtractorVersion: Int? = null,
 )
 
 /**
@@ -82,6 +87,29 @@ class LibraryRepository(
         manifestAuthor: String?,
     ) = bookDao.applyRestoredMetadata(key, title, addedAt, lastOpenedAt, manifestAuthor)
 
+    /**
+     * Records a DEFINITE cover-extraction outcome (feature #152 WI-2): art was found at [coverPath].
+     *
+     * These three calls are deliberately separate rather than one nullable pair — see [BookDao] for
+     * why — and are deliberately NOT folded into [upsertBookPreservingAuthor]: cover state is owned by
+     * the extraction pipeline, not by an import, which is exactly why the import's UPDATE excludes
+     * these columns. An extraction that FAILED to access the file calls none of them.
+     *
+     * Returns true when the write was applied, false when the DAO's staleness guard rejected it
+     * (an older extraction finishing after a newer one) — see [BookDao.setCoverArt].
+     */
+    suspend fun setCoverArt(fingerprintKey: String, coverPath: String, extractorVersion: Int): Boolean =
+        bookDao.setCoverArt(fingerprintKey, coverPath, extractorVersion) > 0
+
+    /** Records the other definite outcome: this book carries no art. Stamps the version so the
+     *  backfill stops re-parsing it. Returns false when rejected as stale, or when it would have
+     *  wiped an already-established cover pointer at the same version. */
+    suspend fun setCoverAbsent(fingerprintKey: String, extractorVersion: Int): Boolean =
+        bookDao.setCoverAbsent(fingerprintKey, extractorVersion) > 0
+
+    /** Makes the book eligible for extraction again (both columns NULL). */
+    suspend fun clearCoverState(fingerprintKey: String) = bookDao.clearCoverState(fingerprintKey)
+
     suspend fun findBook(fingerprintKey: String): Book? = bookDao.find(fingerprintKey)?.let(::toBook)
 
     suspend fun deleteBook(fingerprintKey: String) = bookDao.delete(fingerprintKey)
@@ -122,6 +150,8 @@ class LibraryRepository(
         addedAt = e.addedAt,
         lastOpenedAt = e.lastOpenedAt,
         author = e.author,
+        coverPath = e.coverPath,
+        coverExtractorVersion = e.coverExtractorVersion,
     )
 
     private fun Book.toEntity(): BookEntity = BookEntity(
@@ -135,6 +165,11 @@ class LibraryRepository(
         addedAt = addedAt,
         lastOpenedAt = lastOpenedAt,
         author = author,
+        // Mapped so the DTO⇄entity round-trip is lossless. This does NOT make an import able to write
+        // cover state: the import path's UPDATE (updateImportedColumns) ignores these columns, and the
+        // only caller that writes a whole row is the deliberate whole-row [upsertBook].
+        coverPath = coverPath,
+        coverExtractorVersion = coverExtractorVersion,
     )
 
     /** Nulls a non-finite progression in the legacy locator before storage. */

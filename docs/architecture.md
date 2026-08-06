@@ -556,9 +556,10 @@ language reconcile).
 
 ### Data layer (`com.vreader.app.data`) — the iOS `PersistenceActor` analog
 
-- **Room** is the SwiftData analog. `VReaderDatabase` (`@Database` v4,
-  `exportSchema`, schema-versioned `MIGRATION_1_2` + `MIGRATION_2_3` +
-  `MIGRATION_3_4` in `ALL_MIGRATIONS`) with `BookEntity` + `ReadingPositionEntity`
+- **Room** is the SwiftData analog. `VReaderDatabase` (`@Database` **v10**,
+  `exportSchema` with every `N.json` committed under `android/app/schemas/`,
+  schema-versioned `MIGRATION_1_2` … `MIGRATION_9_10` in `ALL_MIGRATIONS`)
+  with `BookEntity` + `ReadingPositionEntity`
   + `DailyReadingEntity` (feature #122 — per-day/per-book minutes, composite
   PK `(date, bookKey)` + `bookKey` index) + the feature #123 annotation tables
   `HighlightEntity` / `AnnotationNoteEntity` / `BookmarkEntity` (each FK→`books`
@@ -572,6 +573,22 @@ language reconcile).
   **whole serialized `VReaderLocator` envelope** in one `vreaderLocatorJSON`
   column (not flattened columns), so the envelope evolves independently of
   the Room schema.
+- **Cover state (feature #152 WI-2, DB v10)** — `books` carries the nullable pair
+  `coverPath` (TEXT) + `coverExtractorVersion` (INTEGER), a deliberate tri-state:
+  `null/null` = never looked, `version + null` = **looked, this book has no art**,
+  `version + path` = have art. The second column is what stops the backfill
+  re-parsing every art-less book on **every app start** — a 6.3 MB AZW3 re-read
+  forever, for nothing. It mirrors `search_index_state.indexerVersion`.
+  `coverPath` exists for reactivity: the library grid repaints off
+  `BookDao.observeAll()`, so a freshly extracted cover has to land in a column.
+  **Both columns are excluded from `BookDao.updateImportedColumns`**, joining
+  `author` and `lastOpenedAt`, so a duplicate SAF import cannot null-clobber a
+  cover — and `BookDao.upsert` is deliberately **no longer** a Room `@Upsert`:
+  it is `@Transaction` insert-if-absent plus a column-scoped
+  `updateAllColumnsExceptCoverState`, because the whole-row seam could erase
+  cover state even with the exclusion in place. Writes go through three named
+  transitions (`setCoverArt`, `setCoverAbsent`, `clearCoverState`) that return
+  rows-written, so a staleness-guard rejection is observable rather than silent.
 - DAOs use `@Upsert` (insert-or-UPDATE — never `REPLACE`, which would
   delete-then-insert and fire the `reading_positions` `ON DELETE CASCADE`,
   wiping a saved position on re-import).
