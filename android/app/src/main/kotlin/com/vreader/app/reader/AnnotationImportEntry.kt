@@ -41,7 +41,9 @@
 //    transaction rolls back, and NOTHING lands with no surface to say so. The hosts therefore pass
 //    the process-lifetime `container.appScope` for the apply (Gate-4 round 1, High). The PREVIEW
 //    stays on the composition scope deliberately: it writes nothing, and a user who leaves before
-//    the sheet appears wants it abandoned.
+//    the sheet appears wants it abandoned. The apply's UI SETTLEMENT is composition-scoped for the
+//    same reason it is separate from the merge: it must not keep a finished Activity alive through
+//    a host callback bound to one (Gate-4 round 3, Medium).
 //  - APPLY FAILURE RE-RENDERS THE SAME DESIGNED ERROR BRANCH (section 3.2 / D-10b), keeping the
 //    typed reason. The transaction is atomic, so the honest choice really is "all, or the blob".
 //
@@ -67,10 +69,9 @@ import com.vreader.app.annotations.AnnotationImportSheetState
 import com.vreader.app.annotations.AnnotationsIoController
 import com.vreader.app.annotations.ImportPreview
 import com.vreader.app.reader.settings.ReaderTheme
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 /**
  * What a reader host needs to offer annotation import: the designed sheet's current state (null =
@@ -142,19 +143,26 @@ internal fun rememberAnnotationImportEntry(
         confirm = confirm@{ preview ->
             // A second tap while the first merge is still running is a NO-OP, not a second apply.
             val token = session.tryBeginApply() ?: return@confirm
-            launchAnnotationImportApply(applyScope, preview, controller::apply) { next ->
-                // Back onto the main thread for the state write + the host's refresh. If this
-                // composition is already gone the write lands on an orphaned state (harmless) and
-                // the host's refresh is a no-op on its cancelled lifecycle scope — but the MERGE
-                // itself has already committed, which is the point.
-                withContext(Dispatchers.Main) {
-                    session.endApply(token)
-                    if (!session.isCurrent(token)) return@withContext
-                    sheet = next
-                    // On success the observable result is the designed annotations list itself
-                    // (section 3.2) — no "42 imported!" banner is invented here.
-                    if (next == null) latestOnApplied()
-                }
+
+            // TWO jobs, and the split is what keeps a finished Activity out of the durable one
+            // (Gate-4 round 3, Medium). The DURABLE job captures only the controller, the preview
+            // and this deferred — never the composition, and so never a host callback bound to an
+            // Activity. The SETTLEMENT job is composition-scoped: it dies with the reader, which is
+            // exactly right, because the only thing it does is update a sheet nobody is looking at
+            // any more and refresh a list that is already gone. The MERGE is what had to survive,
+            // and it does.
+            val settled = CompletableDeferred<AnnotationImportSheetState?>()
+            launchAnnotationImportApply(applyScope, preview, controller::apply) { settled.complete(it) }
+            previewScope.launch {
+                val next = settled.await()
+                // `rememberCoroutineScope()` dispatches on the composition's main dispatcher, so
+                // every session/sheet touch below is already on the main thread.
+                session.endApply(token)
+                if (!session.isCurrent(token)) return@launch
+                sheet = next
+                // On success the observable result is the designed annotations list itself
+                // (section 3.2) — no "42 imported!" banner is invented here.
+                if (next == null) latestOnApplied()
             }
         },
     )
