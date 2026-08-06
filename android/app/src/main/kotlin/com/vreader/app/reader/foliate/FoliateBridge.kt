@@ -5,7 +5,9 @@
 // allow-listed to the shell origin (NEVER addJavascriptInterface) feeding FoliateMessageParser
 // THROUGH FoliateBridgePolicy.admitsMessage (feature #142 WI-1 — origin gate + per-message-name raw
 // ceiling, applied BEFORE the parse it exists to bound). The security decisions live in
-// FoliateBridgePolicy (pure, JVM-tested). MAIN-THREAD ONLY. Feature #126 WI-3.
+// FoliateBridgePolicy (pure, JVM-tested); the outbound annotation JS + the one-shot evalForResult
+// machinery live in FoliateAnnotationJs.kt (also pure, JVM-tested) and this class only forwards to the
+// WebView. MAIN-THREAD ONLY. Feature #126 WI-3.
 package com.vreader.app.reader.foliate
 
 import android.annotation.SuppressLint
@@ -28,8 +30,6 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.withTimeoutOrNull
-import kotlinx.serialization.builtins.serializer
-import kotlinx.serialization.json.Json
 import java.io.ByteArrayInputStream
 import java.util.UUID
 
@@ -54,6 +54,13 @@ class FoliateBridge(
     val goToDispatcher = FoliateGoToDispatcher(
         sendJs = ::eval,
         messages = _messages,
+        scope = scope,
+    )
+
+    /** feature #142 WI-3 — the one-shot result machinery behind [evalForResult]. Shares [scope] with
+     *  the goTo dispatcher (both are main-thread confined); torn down by [destroy]. */
+    private val evalDispatcher = FoliateEvalDispatcher(
+        sendJs = { js, onResult -> webView.evaluateJavascript(js) { onResult(it) } },
         scope = scope,
     )
 
@@ -176,12 +183,47 @@ class FoliateBridge(
      *  `evaluateJavascript` runs (no test-vs-production drift). Mirrors iOS Foliate `setStyles`. */
     fun setStyles(css: String) = eval(foliateSetStylesJs(css))
 
-    fun destroy() = webView.destroy()
+    // --- feature #142 WI-3: annotations. Every call goes through a SHARED pure builder, so the JS a
+    // JVM test pins is byte-for-byte the JS `evaluateJavascript` runs. [cfi] is book-derived (or came
+    // off a backup wire) and [cssColor] is a `String` parameter — both are JSON-escaped.
+
+    /** Paint (or re-paint) the highlight anchored at [cfi] in [cssColor] (an `AnnotationColor.dotHex`).
+     *  A no-op inside the bundle while that CFI's section is unmounted — WI-4 re-applies the recorded
+     *  set on every `create-overlay`, which is what makes a later section paint. */
+    fun addAnnotation(cfi: String, cssColor: String) = eval(foliateAddAnnotationJs(cfi, cssColor))
+
+    /** Erase the highlight anchored at [cfi]. */
+    fun deleteAnnotation(cfi: String) = eval(foliateDeleteAnnotationJs(cfi))
+
+    /** Clear the live selection in the mounted section document (after a highlight is created). */
+    fun deselect() = eval(foliateDeselectJs())
+
+    /**
+     * feature #142 WI-3 (used by WI-5's selection-anchor probe) — run [js] and deliver its RESULT,
+     * which plain [eval] discards. [onResult] fires EXACTLY ONCE with the verbatim
+     * `evaluateJavascript` value, or `null` when the page answered `null`/`undefined` or did not answer
+     * within [timeoutMs]; after [destroy] it is DROPPED rather than invoked (a callback firing into a
+     * finished host is the #165 WI-7 defect class). The result is not parsed here — the caller knows
+     * what it asked for. Main-thread only, like every method on this class.
+     */
+    fun evalForResult(
+        js: String,
+        timeoutMs: Long = FoliateEvalDispatcher.DEFAULT_EVAL_TIMEOUT_MS,
+        onResult: (String?) -> Unit,
+    ) = evalDispatcher.eval(js, timeoutMs, onResult)
+
+    fun destroy() {
+        // Before the WebView goes: refuse every in-flight probe, so a result racing destroy() cannot
+        // call back into a host that is tearing down.
+        evalDispatcher.teardown()
+        webView.destroy()
+    }
 
     private fun eval(js: String) = webView.evaluateJavascript(js, null)
 
-    /** Encode [s] as a JSON string literal — also a safe JS string literal (quotes/escapes handled). */
-    private fun jsString(s: String): String = Json.encodeToString(String.serializer(), s)
+    /** Encode [s] as a JSON string literal — also a safe JS string literal (quotes/escapes handled).
+     *  Delegates to the package's single escaping seam so there is exactly one implementation. */
+    private fun jsString(s: String): String = foliateJsString(s)
 
     private fun blocked(status: Int, reason: String): WebResourceResponse =
         WebResourceResponse("text/plain", "utf-8", status, reason, emptyMap(), ByteArrayInputStream(ByteArray(0)))
@@ -338,7 +380,7 @@ class FoliateGoToDispatcher(
             "try{window.__vreaderGoTo&&window.__vreaderGoTo(${jsString(id)},{fraction:${target.fraction}})}catch(e){}"
     }
 
-    private fun jsString(s: String): String = Json.encodeToString(String.serializer(), s)
+    private fun jsString(s: String): String = foliateJsString(s)
 }
 
 /**
@@ -370,4 +412,4 @@ internal fun foliateInboundMessage(
  * (`Azw3DisplayCssTest`) is exactly the escaping production applies. Deterministic for a given [css].
  */
 fun foliateSetStylesJs(css: String): String =
-    "try{readerAPI.setStyles&&readerAPI.setStyles(${Json.encodeToString(String.serializer(), css)})}catch(e){}"
+    "try{readerAPI.setStyles&&readerAPI.setStyles(${foliateJsString(css)})}catch(e){}"
