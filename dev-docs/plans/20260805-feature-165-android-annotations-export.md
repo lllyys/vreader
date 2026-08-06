@@ -736,7 +736,7 @@ flagged):**
 
 | Bound | Value | Rationale |
 |---|---|---|
-| `MAX_IMPORT_JSON_BYTES` | **2 MiB** | ≈ 10 000 richly-annotated rows with headroom; two orders of magnitude below #155's 512 MiB book cap, because this is text metadata, not a book |
+| `MAX_IMPORT_JSON_BYTES` | **2 MiB** | ~~≈ 10 000 richly-annotated rows with headroom~~ — **ERRATUM, measured on target by WI-7: wrong by ≈2.5×.** The byte cap **binds first**, so `MAX_IMPORT_ROWS = 10 000` is **unreachable**: the largest importable file is **4 000 rows / 1 973 880 bytes**. Two orders of magnitude below #155's 512 MiB book cap, because this is text metadata, not a book. A-9's timings at that real ceiling: preview **717–807 ms**, apply **695–729 ms** across three runs, both inside the stated 2 s / 1 s budgets. |
 | `MAX_IMPORT_ROWS` | **10 000** summed across kinds | over it → `TooManyRows`, whole-file refusal (a caps-hit file is structurally suspect, C-7 tier 1) |
 | `MAX_FIELD_CHARS` | **10 000** per `selectedText` / `content` / `title` / `color` | over it → **row-level failure, never truncation**. Truncating silently mutates user content. |
 | `MAX_LOCATOR_JSON_CHARS` | **4 096** | bounds the *nesting depth* of the inner `locatorJSON` string before it is handed to a second decode pass — a deeply-nested payload cannot reach the recursive decoder |

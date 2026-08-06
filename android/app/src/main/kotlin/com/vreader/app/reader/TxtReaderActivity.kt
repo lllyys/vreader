@@ -121,6 +121,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -150,6 +151,7 @@ import com.vreader.app.reader.chrome.ReaderBottomChrome
 import com.vreader.app.reader.chrome.ReaderChromeScaffold
 import com.vreader.app.reader.chrome.ReaderChromeState
 import com.vreader.app.reader.chrome.ReaderChromeStateSaver
+import com.vreader.app.reader.chrome.ReaderSheet
 import com.vreader.app.reader.nav.BookmarkPreviewProvider
 import com.vreader.app.reader.nav.BookmarkRowItem
 import com.vreader.app.reader.nav.JumpResult
@@ -191,6 +193,13 @@ private sealed interface TxtUiState {
 class TxtReaderActivity : ComponentActivity() {
 
     private val container get() = (application as VReaderApp).container
+
+    // feature #165 WI-7 — the annotation import/export SAF boundary, behind the app-wide
+    // BoundedCallGate (never a fresh gate — one abandoned-call ledger, plan section 8.5). The
+    // APPLICATION resolver, not this Activity's: the approved merge runs on `container.appScope` and
+    // a bounded provider call can outlive the reader, so an Activity-bound resolver would keep a
+    // finished Activity alive for the length of an untrusted provider's park (Gate-4 round 2, Medium).
+    private val annotationsIo by lazy { container.annotationsIoController(applicationContext.contentResolver) }
 
     // Hoisted out of composition so onStop can flush the latest position synchronously
     // (mirrors ReaderActivity's onStop flush). Set once the document is loaded.
@@ -421,13 +430,32 @@ class TxtReaderActivity : ComponentActivity() {
                         // The Notes review sheet's one-shot snapshot. Reloads whenever this book's stored
                         // highlights change (a fresh highlight/edit/remove OR a #124/#125 wash) so a newly
                         // added annotation appears in the sheet without reopening the reader.
+                        // feature #165 WI-7 — an annotation IMPORT can merge notes/bookmarks without
+                        // touching a highlight, and `highlightsList` would not move; this counter is the
+                        // extra key that makes a merged file appear without reopening the reader.
+                        var annotationsRefresh by remember(bookKey) { mutableIntStateOf(0) }
                         val annotationsSnapshot by produceState(
-                            AnnotationsSnapshot(emptyList(), emptyList()), bookKey, annotatable, highlightsList,
+                            AnnotationsSnapshot(emptyList(), emptyList()),
+                            bookKey, annotatable, highlightsList, annotationsRefresh,
                         ) {
                             value = if (!annotatable) AnnotationsSnapshot(emptyList(), emptyList())
                             else runCatching { container.annotationsRepository.annotationsForBook(bookKey) }
                                 .getOrDefault(AnnotationsSnapshot(emptyList(), emptyList()))
                         }
+
+                        // feature #165 WI-7 — the production annotation-import entry (SAF launcher +
+                        // designed preview sheet). The Details sheet is closed before the picker opens.
+                        val importEntry = rememberAnnotationImportEntry(
+                            controller = annotationsIo,
+                            bookKey = bookKey,
+                            bookTitle = s.book.title,
+                            // The MERGE must survive this reader being finished/rotated (Gate-4
+                            // round 1, High) — the applier rethrows CancellationException, so a
+                            // composition-scoped apply would roll the transaction back silently.
+                            applyScope = container.appScope,
+                            onLaunching = { chromeState.value = chromeState.value.copy(sheet = ReaderSheet.None) },
+                            onApplied = { annotationsRefresh++ },
+                        )
 
                         // feature #134 WI-5 — the More menu's Book-details model (mapped from the loaded
                         // book + its live collection names via BookDetailsMapper). TXT/MD supplies no page
@@ -692,6 +720,9 @@ class TxtReaderActivity : ComponentActivity() {
                             bookDetails = bookDetails,
                             onShareBook = { com.vreader.app.reader.share.shareBook(this@TxtReaderActivity, s.book) },
                             onCopyFingerprint = { copyFingerprint(it) },
+                            // feature #165 WI-7 — the designed Import row's launcher + the post-pick sheet.
+                            onImportAnnotations = importEntry.launch,
+                            importSheet = importEntry.sheetSlot(displaySettings.theme),
                             // feature #135 WI-7 — the top-bar bookmark toggle + Bookmarks-tab rows + TXT jump.
                             isCurrentBookmarked = isBookmarked,
                             onToggleBookmark = {
@@ -1541,6 +1572,11 @@ internal fun TxtReaderChrome(
     bookDetails: com.vreader.app.reader.details.BookDetailsUiModel? = null,
     onShareBook: () -> Unit = {},
     onCopyFingerprint: (String) -> Unit = {},
+    // feature #165 WI-7 — the Details sheet's annotation-import entry: the row's launcher (null → no row,
+    // the capability gate) + the host-owned post-pick preview sheet overlay. Nullable/default so the two
+    // androidTest callers and every pre-#165 caller stay valid.
+    onImportAnnotations: (() -> Unit)? = null,
+    importSheet: (@Composable () -> Unit)? = null,
     // feature #135 WI-7 — the top-bar bookmark toggle + Bookmarks-tab rows + TXT/MD jump (all nullable/default
     // so #132/#134 callers stay valid). TXT supplies a preview provider (the Bookmarks-tab snippet).
     isCurrentBookmarked: Boolean = false,
@@ -1576,6 +1612,9 @@ internal fun TxtReaderChrome(
             bookDetails = bookDetails,
             onShareBook = onShareBook,
             onCopyFingerprint = onCopyFingerprint,
+            // feature #165 WI-7 — the annotation-import row + its post-pick preview sheet.
+            onImportAnnotations = onImportAnnotations,
+            importSheet = importSheet,
             // feature #135 WI-7 — the bookmark toggle + Bookmarks tab, now lit up for TXT/MD.
             isCurrentBookmarked = isCurrentBookmarked,
             onToggleBookmark = onToggleBookmark,

@@ -75,6 +75,7 @@ import com.vreader.app.annotations.AnnotationsSnapshot
 import com.vreader.app.data.Book
 import com.vreader.app.reader.chrome.ReaderChromeState
 import com.vreader.app.reader.chrome.ReaderChromeStateSaver
+import com.vreader.app.reader.chrome.ReaderSheet
 import com.vreader.app.reader.foliate.Azw3DocState
 import com.vreader.app.reader.foliate.Azw3Document
 import com.vreader.app.reader.foliate.Azw3GoToResult
@@ -99,6 +100,13 @@ import java.io.File
 class Azw3ReaderActivity : ComponentActivity() {
 
     private val container get() = (application as VReaderApp).container
+
+    // feature #165 WI-7 — the annotation import/export SAF boundary, behind the app-wide
+    // BoundedCallGate (never a fresh gate — one abandoned-call ledger, plan section 8.5). The
+    // APPLICATION resolver, not this Activity's: the approved merge runs on `container.appScope` and
+    // a bounded provider call can outlive the reader, so an Activity-bound resolver would keep a
+    // finished Activity alive for the length of an untrusted provider's park (Gate-4 round 2, Medium).
+    private val annotationsIo by lazy { container.annotationsIoController(applicationContext.contentResolver) }
 
     // Hoisted so onStop can flush the latest position synchronously (mirrors PdfReaderActivity).
     private var currentBook: Book? = null
@@ -131,13 +139,29 @@ class Azw3ReaderActivity : ComponentActivity() {
                     }
                     val displayTheme by container.readerSettingsStore.settings
                         .collectAsStateWithLifecycle(initialValue = com.vreader.app.reader.settings.ReaderSettings())
+                    // feature #165 WI-7 — the extra key that makes a merged annotations import show up in the
+                    // one-shot snapshot without reopening the reader.
+                    var annotationsRefresh by remember(bookKey) { mutableIntStateOf(0) }
                     // The Notes review sheet's one-shot snapshot of this book's highlights + notes.
                     val annotationsSnapshot by produceState(
-                        AnnotationsSnapshot(emptyList(), emptyList()), bookKey,
+                        AnnotationsSnapshot(emptyList(), emptyList()), bookKey, annotationsRefresh,
                     ) {
                         value = runCatching { container.annotationsRepository.annotationsForBook(bookKey) }
                             .getOrDefault(AnnotationsSnapshot(emptyList(), emptyList()))
                     }
+                    // feature #165 WI-7 — the production annotation-import entry (SAF launcher + designed
+                    // preview sheet); the Details sheet closes before the picker opens.
+                    val importEntry = rememberAnnotationImportEntry(
+                        controller = annotationsIo,
+                        bookKey = bookKey,
+                        bookTitle = o.book.title,
+                        // The MERGE must survive this reader being finished/rotated (Gate-4 round 1,
+                        // High) — the applier rethrows CancellationException, so a
+                        // composition-scoped apply would roll the transaction back silently.
+                        applyScope = container.appScope,
+                        onLaunching = { chromeState.value = chromeState.value.copy(sheet = ReaderSheet.None) },
+                        onApplied = { annotationsRefresh++ },
+                    )
                     // feature #134 WI-5 — the More menu's Book-details model (mapped from the book + its
                     // live collection names). AZW3 supplies no page count (pageCount=null).
                     val collectionNames by container.collectionRepository
@@ -234,6 +258,9 @@ class Azw3ReaderActivity : ComponentActivity() {
                         bookDetails = bookDetails,
                         onShareBook = { com.vreader.app.reader.share.shareBook(this@Azw3ReaderActivity, o.book) },
                         onCopyFingerprint = { copyFingerprint(it) },
+                        // feature #165 WI-7 — the designed Import row's launcher + the post-pick sheet.
+                        onImportAnnotations = importEntry.launch,
+                        importSheet = importEntry.sheetSlot(displayTheme.theme),
                         // feature #135 WI-7 — the top-bar bookmark toggle + Bookmarks-tab rows + AZW3 jump.
                         isCurrentBookmarked = isBookmarked,
                         onToggleBookmark = if (currentCanonical != null) {

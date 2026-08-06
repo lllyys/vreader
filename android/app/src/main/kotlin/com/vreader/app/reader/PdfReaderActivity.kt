@@ -38,6 +38,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.toArgb
@@ -47,6 +48,7 @@ import com.vreader.app.annotations.AnnotationsSnapshot
 import com.vreader.app.data.Book
 import com.vreader.app.reader.chrome.ReaderChromeState
 import com.vreader.app.reader.chrome.ReaderChromeStateSaver
+import com.vreader.app.reader.chrome.ReaderSheet
 import com.vreader.app.reader.nav.JumpResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
@@ -68,6 +70,13 @@ private sealed interface PdfUiState {
 class PdfReaderActivity : ComponentActivity() {
 
     private val container get() = (application as VReaderApp).container
+
+    // feature #165 WI-7 — the annotation import/export SAF boundary, behind the app-wide
+    // BoundedCallGate (never a fresh gate — one abandoned-call ledger, plan section 8.5). The
+    // APPLICATION resolver, not this Activity's: the approved merge runs on `container.appScope` and
+    // a bounded provider call can outlive the reader, so an Activity-bound resolver would keep a
+    // finished Activity alive for the length of an untrusted provider's park (Gate-4 round 2, Medium).
+    private val annotationsIo by lazy { container.annotationsIoController(applicationContext.contentResolver) }
 
     // Hoisted so onStop can flush the latest page synchronously (mirrors TxtReaderActivity).
     private var flushPosition: (() -> Unit)? = null
@@ -150,9 +159,14 @@ class PdfReaderActivity : ComponentActivity() {
                         val chromeState = rememberSaveable(bookKey, stateSaver = ReaderChromeStateSaver) {
                             mutableStateOf(ReaderChromeState())
                         }
+                        // feature #165 WI-7 — the extra key that makes a merged annotations import show up
+                        // in the one-shot snapshot without reopening the reader.
+                        var annotationsRefresh by androidx.compose.runtime.remember(bookKey) {
+                            mutableStateOf(0)
+                        }
                         // The Notes review sheet's one-shot snapshot of this book's highlights + notes.
                         val annotationsSnapshot by produceState(
-                            AnnotationsSnapshot(emptyList(), emptyList()), bookKey,
+                            AnnotationsSnapshot(emptyList(), emptyList()), bookKey, annotationsRefresh,
                         ) {
                             value = runCatching { container.annotationsRepository.annotationsForBook(bookKey) }
                                 .getOrDefault(AnnotationsSnapshot(emptyList(), emptyList()))
@@ -183,6 +197,20 @@ class PdfReaderActivity : ComponentActivity() {
                             value = runCatching { container.annotationsRepository.isBookmarked(bookKey, liveCanonical) }.getOrDefault(false)
                         }
 
+                        // feature #165 WI-7 — the production annotation-import entry (SAF launcher +
+                        // designed preview sheet); the Details sheet closes before the picker opens.
+                        val importEntry = rememberAnnotationImportEntry(
+                            controller = annotationsIo,
+                            bookKey = bookKey,
+                            bookTitle = s.book.title,
+                            // The MERGE must survive this reader being finished/rotated (Gate-4
+                            // round 1, High) — the applier rethrows CancellationException, so a
+                            // composition-scoped apply would roll the transaction back silently.
+                            applyScope = container.appScope,
+                            onLaunching = { chromeState.value = chromeState.value.copy(sheet = ReaderSheet.None) },
+                            onApplied = { annotationsRefresh++ },
+                        )
+
                         PdfReaderChrome(
                             theme = settings.theme,
                             title = s.title,
@@ -199,6 +227,9 @@ class PdfReaderActivity : ComponentActivity() {
                             bookDetails = bookDetails,
                             onShareBook = { com.vreader.app.reader.share.shareBook(this@PdfReaderActivity, s.book) },
                             onCopyFingerprint = { copyFingerprint(it) },
+                            // feature #165 WI-7 — the designed Import row's launcher + the post-pick sheet.
+                            onImportAnnotations = importEntry.launch,
+                            importSheet = importEntry.sheetSlot(settings.theme),
                             // feature #135 WI-7 — the top-bar bookmark toggle + Bookmarks-tab rows + PDF jump.
                             isCurrentBookmarked = isBookmarked,
                             onToggleBookmark = {

@@ -159,6 +159,11 @@ internal fun PdfReaderChrome(
     currentLocator: vreader.contracts.Locator? = null,
     bookmarks: List<BookmarkRowItem> = emptyList(),
     onJumpBookmark: ((BookmarkRecord) -> JumpResult)? = null,
+    // feature #165 WI-7 — the Details sheet's annotation-import entry: the row's launcher (null → no row,
+    // the capability gate) + the host-owned post-pick preview sheet overlay. Nullable/default so every
+    // pre-#165 caller stays valid.
+    onImportAnnotations: (() -> Unit)? = null,
+    importSheet: (@Composable () -> Unit)? = null,
 ) {
     Column(Modifier.fillMaxSize().background(theme.background).systemBarsPadding()) {
         ReaderChromeScaffold(
@@ -188,6 +193,9 @@ internal fun PdfReaderChrome(
             currentLocator = currentLocator,
             bookmarks = bookmarks,
             onJumpBookmark = onJumpBookmark,
+            // feature #165 WI-7 — the annotation-import row + its post-pick preview sheet.
+            onImportAnnotations = onImportAnnotations,
+            importSheet = importSheet,
         )
     }
 }
