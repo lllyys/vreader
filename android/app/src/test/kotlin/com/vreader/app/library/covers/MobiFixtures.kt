@@ -160,3 +160,55 @@ internal fun writeFixture(dir: File, name: String, bytes: ByteArray, extendTo: L
     }
     return file
 }
+
+internal fun assertNoneResult(result: MobiCoverParseResult, what: String) {
+    if (result !is MobiCoverParseResult.None) {
+        org.junit.Assert.fail("$what: expected None but got $result")
+    }
+}
+
+internal fun assertArtBytes(result: MobiCoverParseResult, what: String): ByteArray {
+    if (result !is MobiCoverParseResult.Art) {
+        org.junit.Assert.fail("$what: expected Art but got $result")
+    }
+    return (result as MobiCoverParseResult.Art).bytes
+}
+
+/** A 3-record cover book whose record 0 is [record0], so one field at a time can be varied. */
+internal fun coverBookWithRecord0(record0: ByteArray): ByteArray =
+    buildPdb(listOf(record0, ByteArray(32) { 0x41 }, jpegLike(64)))
+
+/**
+ * Writes a book whose cover record sits at [coverOffset] — intended for offsets with bit 31 set,
+ * which no in-memory `ByteArray` could hold. The file is SPARSE, so a 2 GiB offset costs nothing.
+ *
+ * The record table is written by hand rather than through [buildPdb] for exactly that reason.
+ */
+internal fun writeSparseHighOffsetBook(
+    dir: File,
+    name: String,
+    coverOffset: Long,
+    cover: ByteArray,
+): File {
+    val record0 = buildRecord0(firstImageIndex = 2)
+    val text = ByteArray(32) { 0x41 }
+    val headerSize = 78 + 3 * 8
+    val head = ByteArray(headerSize + record0.size + text.size)
+
+    putAscii(head, 0, "vreader-fixture")
+    putUInt16BE(head, 76, 3)
+    putUInt32BE(head, 78, headerSize.toLong())                                  // record 0
+    putUInt32BE(head, 78 + 8, (headerSize + record0.size).toLong())             // record 1
+    putUInt32BE(head, 78 + 16, coverOffset)                                     // record 2 — the cover
+    record0.copyInto(head, headerSize)
+    text.copyInto(head, headerSize + record0.size)
+
+    val file = File(dir, name)
+    file.writeBytes(head)
+    java.io.RandomAccessFile(file, "rw").use { raf ->
+        raf.setLength(coverOffset + cover.size)      // the last record runs to EOF, so its span is exact
+        raf.seek(coverOffset)
+        raf.write(cover)
+    }
+    return file
+}

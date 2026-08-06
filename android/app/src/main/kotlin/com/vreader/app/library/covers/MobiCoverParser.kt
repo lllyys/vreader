@@ -183,21 +183,30 @@ object MobiCoverParser {
 
         val exthLength = readUInt32BE(record0, start + 4)
         val recordCount = readUInt32BE(record0, start + 8)
-        if (exthStart + exthLength > record0.size) return null
+        // The declared block must contain at least its own 12-byte header and must fit inside
+        // record 0.
+        if (exthLength < 12) return null
+        val exthEnd = exthStart + exthLength
+        if (exthEnd > record0.size) return null
 
         var cover: Long? = null
         var thumbnail: Long? = null
         var cursor = start + 12
         var seen = 0L
 
+        // The walk is bounded by the DECLARED block end, not by record 0's end — a deliberate
+        // hardening over the Swift reference, which bounds both by the record. Bounding by the
+        // record would let a block that understates its own length have "records" read out of the
+        // bytes that follow it, so a malformed file could point the cover anywhere. For a
+        // well-formed book the two bounds coincide, so no real book changes behaviour.
         while (seen < recordCount) {
-            if (cursor + 8 > record0.size) break
+            if (cursor + 8 > exthEnd) break
             val type = readUInt32BE(record0, cursor)
             val length = readUInt32BE(record0, cursor + 4)
             // `length` counts its own 8-byte header, so anything below 8 is malformed — and
             // advancing by it would never terminate.
             if (length < 8) break
-            if (cursor + length > record0.size) break
+            if (cursor + length > exthEnd) break
 
             if (length == EXTH_OFFSET_RECORD_LENGTH) {
                 when (type) {
