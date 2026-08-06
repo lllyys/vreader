@@ -1,8 +1,8 @@
 ---
 branch: feat/141-wi-1-toc-title-filter
 threadId: 019fd4df-d798-70f1-81fc-e173f751612e
-rounds: 3
-final_verdict: block-recommended
+rounds: 4
+final_verdict: ship-as-is
 gate: 4
 kind: implementation-audit
 feature: 141
@@ -11,6 +11,39 @@ plan: dev-docs/plans/20260806-feature-141-android-filterable-toc.md
 ---
 
 # Gate 4 — feature #141 WI-1 (`TocTitleFilter`)
+
+## Round 4 — orchestrator-run confirming round (2026-08-06): **VERDICT: `ship-as-is`**
+
+Round 3 hit the rule-47 cap at `block-recommended` with 1 High, 2 Medium, 1 Low open. The lane fixed
+all four **after** that verdict and returned `blocked` rather than certify its own fixes — the right
+call, and the same discipline #165 WI-7's lane showed. This round exists only to verify those four
+fixes and the two plan deviations.
+
+| # | Sev | Finding | Round-4 verdict |
+|---|---|---|---|
+| 1 | **High** | `TocRowText.matchRanges` handed back the fold's **own `ArrayList`**, so `(row.matchRanges as MutableList).clear(); addAll(other)` could re-point one row's tint at another row's ranges — defeating the pairing invariant with **no constructor call and no subclass**. | **RESOLVED** — `TocTitleFilter.kt:66-68` returns `emptyList()` or `Collections.unmodifiableList(ArrayList(matchRanges))`: non-aliased **and** JVM-unmodifiable. No other accessor in the file retains an internal mutable collection. |
+| 2 | Med | The API-shape test would still pass if a raw `(title, ranges)` producer were re-added. | **RESOLVED** — `TocTitleFilterTest.kt:537-550` reflects over `TocRowText.Companion.declaredMethods`, asserts exactly two producers, and rejects one taking raw `String` + `List`. It constrains the API **shape**, not today's behaviour. |
+| 3 | Med | `TocFilterResult.Matched` was a sealed **interface**, so a same-package file could supply an inconsistent `size`/`get` pair and crash a consumer iterating `0 until size`. | **RESOLVED** — `TocTitleFilter.kt:111-139` is now a sealed **class** with a private constructor and a private nested impl; a subclass would have to call the private constructor. Pinned by a reflection test at `:553-574`. |
+| 4 | Low | KDoc referenced the removed `Matched.indices`. | **RESOLVED** — `:332-337`. |
+
+### Both plan deviations AGREED
+
+**(a) `Matched` exposes `size` / `get(position)` / `contains(originalIndex)` instead of plan §5.1's
+`val indices: IntArray`.** Handing out a mutable array made the strictly-ascending precondition of
+`contains`'s binary search a *convention a caller could break*. The auditor confirmed WI-4's
+`LazyColumn` retains everything it needs. **(b) `TocFoldedToc` drops the `entries` field** — nothing
+read it; the original entries stay with the sheet caller. Dead-state removal.
+
+### No new findings, and the hot path was checked
+
+The defensive copy is **per returned row range list only**, not whole-corpus: `FoldedTitle.matchRanges`
+builds only that row's occurrences (`:204-214`) and `TocRowText` snapshots only that small list
+(`:66-68`). `filter` still preserves ascending original indices (`:160-168`, `:327-329`), `rowText`
+still resolves title and ranges from **one** corpus index (`:175-187`), and `contains` is still a
+binary search (`:126-127`) — so the immutability hardening did not disturb the measured budgets.
+
+Auditor note: verified by branch diff and static inspection; it did not run Gradle (read-only
+sandbox). The orchestrator re-runs the suite independently before opening the PR.
 
 Auditor: Codex `gpt-5.6-sol`, read-only sandbox, driven through `scripts/run-codex.sh` (rule 53).
 Three rounds — the rule-47 cap. Round transcripts: `.reports/audit-r{1,2,3}.txt` (worktree-local).
