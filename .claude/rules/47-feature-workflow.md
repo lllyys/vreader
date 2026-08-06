@@ -43,6 +43,12 @@ Audit prompt must explicitly request:
 
 Track audit rounds in the plan's revision history. The author rewrites the plan to address findings; the auditor re-reviews. Same loop until clean.
 
+**Commit the audit artifact (binding).** Gate 2 writes `.claude/codex-audits/plan-feature-<N>-gate2-audit.md`, committed on the branch that carries the plan, in the same shape Gate 4 already requires: frontmatter (`gate: 2`, `kind: plan-audit`, `feature`, `plan`, `rounds`, `final_verdict`) plus, for **every** round, an enumerated finding list — severity, the finding itself, and its disposition. "6 High + 8 Medium + 2 Low remain open" is not an enumeration.
+
+Record three things the round tables alone will not carry: (a) findings **rejected with reasoning** — a remedy declined on evidence is a decision, not an omission; (b) findings **disproven by measurement**, so a later round does not re-raise what was already tested; (c) what the audit **confirmed**, so a subsequent author knows which claims are load-bearing and already checked.
+
+**Why this is binding.** Feature #152's v2 plan stalled at Gate-2 round 2 recording exactly that unenumerated count, and the list existed **nowhere in the repo**. A v3 was written from the code instead, and no one could tell whether those 16 findings were addressed or silently dropped — the round-1 auditor of v3 raised it as a High for precisely that reason, and the author searched and confirmed the artifact was simply absent. A gate whose findings cannot be re-read is a gate that cannot be re-entered: the next draft starts blind, and the cost of every earlier round is lost. Gate 4's artifact requirement exists for the same reason; Gate 2 was the hole.
+
 **Why this gate exists**: Codex audits routinely catch 5-10 real bugs per round on non-trivial plans (compile-breaking model assumptions, missing preconditions, protocol shape mistakes). Skipping the audit shifts that cost into wasted implementation work.
 
 ## Gate 3 — TDD Implementation
