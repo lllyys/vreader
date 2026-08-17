@@ -53,9 +53,10 @@ dispatch  →  sim leases  →  id-reserve  →  tracker-write
   integration tail (merge/tag/teardown), BEFORE Gate-5 — that is what lets
   the next batch's Gate-3 lanes overlap a Gate-5 pass (rule 48 matrix).
 - **Sim leases** (via `scripts/sim-lease.sh`): purpose-tagged (`test` ≤2,
-  `verify` 1); a UDID never serves both purposes (rule 52 mutual exclusion
-  mechanized). Every lane exit path releases its lease; a batch ends with
-  zero held.
+  `verify` 1, `android` ≤ online-emulator count — an Android lane leases an
+  `emulator-NNNN` serial); a device never serves two purposes (rule 52
+  mutual exclusion mechanized). Every lane exit path releases its lease; a
+  batch ends with zero held.
 - **`id-reserve`**: all new row IDs are minted via `scripts/reserve-id.sh`
   BEFORE `tracker-write` is acquired; calling reserve-id while holding
   tracker-write is forbidden.
@@ -237,13 +238,18 @@ the interest of brevity.
 ```
 2. The rule-48 six-field contract instantiated: objective (the one work
    unit), inputs (Spec block or bug micro-spec: repro + expected-vs-actual +
-   regression-test name; exact file list; leased `TEST_UDID`), allowed
-   writes (the `writes:` prefixes), forbidden (the orchestrator surfaces
-   above + "no Bash file edits" + no paths outside the write-set), output
-   format (the HANDOFF), stop condition (ready-for-integration or blocked).
-3. The test-gate command shape: `TEST_UDID=<udid> scripts/run-tests.sh
-   <targeted-suite>` (Android: `scripts/run-android-tests.sh`) — wrappers
-   only (rule 52), targeted suites only (never the >20-min full suite).
+   regression-test name; exact file list; the leased device — `TEST_UDID`
+   for an iOS/`shared` lane, `ANDROID_SERIAL=<emulator-NNNN>` for an
+   Android lane), allowed writes (the `writes:` prefixes), forbidden (the
+   orchestrator surfaces above + "no Bash file edits" + no paths outside
+   the write-set), output format (the HANDOFF), stop condition
+   (ready-for-integration or blocked).
+3. The test-gate command shape: iOS/`shared` → `TEST_UDID=<udid>
+   scripts/run-tests.sh <targeted-suite>`; Android →
+   `ANDROID_SERIAL=<emulator-NNNN> ANDROID_CMD="…"
+   scripts/run-android-tests.sh` (the runner validates + re-exports the
+   serial) — wrappers only (rule 52), targeted suites only (never the
+   >20-min full suite).
 4. The in-lane Gate-4 instruction: `scripts/run-codex.sh` (rule 53) is the
    PRIMARY rung — **probed 2026-07-09 (twice, incl. with `Skill` in the
    agent frontmatter): custom agents get NO Skill tool in this harness, so
@@ -257,9 +263,15 @@ the interest of brevity.
   isn't worth it (rule 48 decision test).
 - **Memory pressure**: width 2 → 1 (`vm_stat` free-pages check before
   opening the second lane).
-- **Android**: `android-app`/`android-spike` items dispatch at width 1 only
-  until `run-android-tests.sh` gains `ANDROID_SERIAL` routing (named
-  follow-up; the emulator is a single shared device today — rule 52 Cause D).
+- **Android**: `run-android-tests.sh` now honors `ANDROID_SERIAL` (validate +
+  export + ambiguity guard) and `sim-lease.sh acquire android` leases an online
+  emulator serial, so an `android-app`/`android-spike` lane CAN be routed to a
+  specific emulator. Width is still **1 in practice** because only one AVD is
+  booted by default — the `android` lease capacity = the number of online
+  emulators. To run width 2, boot a **second AVD** (`avdmanager create avd …`;
+  `emulator -avd vreader-test-2` → `emulator-5556`), then each lane leases a
+  distinct serial and passes it as `ANDROID_SERIAL` (rule 52 Cause D — never two
+  runs on one emulator).
 - **Width gate weighs LANE TYPES, not lane count** (M-SHAKEDOWN finding): the
   4GB `vm_stat` headroom check applies per SWIFT lane (xcodebuild + booted
   sim ≈ real load); a bash-only lane (hooks/scripts work) adds near-zero

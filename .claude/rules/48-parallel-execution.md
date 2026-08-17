@@ -24,6 +24,29 @@ expected wall-clock saved  >  setup + review + conflict + resource-contention + 
 
 If the answer isn't clearly positive, don't parallelize.
 
+### The cost terms are WALL-CLOCK, and analytical fan-out prices differently
+
+Every term above is denominated in **wall-clock time** — and this decision test was written for the
+`/dispatch` **worktree-lane** mechanism (multi-item, isolation-first). Applied to a read-only
+*analytical* fan-out (a `Workflow`/`Explore` spawn that writes nothing), the terms price much
+smaller: no worktree `setup`, no `conflict` (nothing written), no `resource` contention when it
+overlaps the serial emulator/simulator run or precedes the exclusive resource being touched. The
+residual real costs are the orchestrator's **review/reconcile time** on the findings and the
+**failure** risk of the fan-out infrastructure itself — small but not zero, so the honest verdict
+for overlapping/pre-write analytical fan-out is **net-positive in expectation** even at N=1, not
+free. Under ultracode, the token-cost *objection* (a consideration external to this test) is
+removed by the standing directive, which is what makes that expectation clearly positive; the
+supporting evidence for the pre-write "how could this false-green?" pass is the #138 WI-6 incident,
+where the post-write Codex block caught 3 false-green defects — a pass that *plausibly*
+(hindsight-assessed; instrumented going forward, see rule 57) front-loads that class. **None of
+this relaxes the hard rules below** (author/auditor separation, one-writer-per-file, sim isolation)
+or licenses fan-out that contends the exclusive resource.
+
+The within-WI analytical fan-out this unlocks — even for a single work item — is specified in
+**`.claude/rules/57-ultracode-within-wi-fanout.md`**. This rule (48) remains the *when parallelism
+is legal*; rule 55 is the *`/dispatch` multi-item mechanism*; rule 57 is the *within-WI analytical
+fan-out under ultracode*.
+
 ## Hard rules (non-negotiable)
 
 1. **Author/auditor separation**: the agent that writes a plan, code, or PR is never the agent that audits it. (cc-suite running Codex as a separate `codex exec` process satisfies this by accident; preserve the boundary explicitly.)

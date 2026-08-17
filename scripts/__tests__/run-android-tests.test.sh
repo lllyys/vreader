@@ -47,5 +47,45 @@ else
     echo "skip — NO_EMULATOR case (an emulator is online)"
 fi
 
+echo "== ANDROID_SERIAL routing (mocked device source; feature #138 follow-up) =="
+ONE='printf "List of devices attached\nemulator-5554\tdevice\n"'
+TWO='printf "List of devices attached\nemulator-5554\tdevice\nemulator-5556\tdevice\n"'
+NONE='printf "List of devices attached\n"'
+
+# A requested serial that is NOT online → NO_EMULATOR (validation), even for a JVM ANDROID_CMD.
+assert_result "RUN-ANDROID-TESTS RESULT: NO_EMULATOR" 2 "ANDROID_SERIAL not online → NO_EMULATOR" \
+    -- ANDROID_CMD="true" ANDROID_SERIAL="emulator-9999" ANDROID_DEVICES_CMD="$NONE"
+
+# A requested serial that IS online → routes + runs (the ANDROID_CMD asserts the serial is exported).
+assert_result "RUN-ANDROID-TESTS RESULT: SUCCEEDED" 0 "ANDROID_SERIAL online → exported + run" \
+    -- ANDROID_CMD='[ "$ANDROID_SERIAL" = emulator-5554 ]' ANDROID_SERIAL="emulator-5554" ANDROID_DEVICES_CMD="$ONE"
+
+# >1 emulator online + no serial + emulator-driving DEFAULT cmd → AMBIGUOUS_SERIAL (hard fail).
+assert_result "RUN-ANDROID-TESTS RESULT: AMBIGUOUS_SERIAL" 2 "2 emulators + no serial + default → AMBIGUOUS" \
+    -- ANDROID_DEVICES_CMD="$TWO"
+
+# >1 emulator online + no serial + caller-owned ANDROID_CMD (may be JVM) → WARN only, still runs.
+assert_result "RUN-ANDROID-TESTS RESULT: SUCCEEDED" 0 "2 emulators + no serial + ANDROID_CMD → warn+run" \
+    -- ANDROID_CMD="true" ANDROID_DEVICES_CMD="$TWO"
+
+# 1 emulator + 1 PHYSICAL device + no serial + default cmd → AMBIGUOUS (bare adb is ambiguous with
+# ANY 2 devices, not just 2 emulators — Gate-4 High-2).
+EMU_PHYS='printf "List of devices attached\nemulator-5554\tdevice\nR58M12345678\tdevice\n"'
+assert_result "RUN-ANDROID-TESTS RESULT: AMBIGUOUS_SERIAL" 2 "emulator+physical + no serial + default → AMBIGUOUS" \
+    -- ANDROID_DEVICES_CMD="$EMU_PHYS"
+
+# A PHYSICAL device serial is a valid ANDROID_SERIAL target (general adb routing, not emulator-only).
+assert_result "RUN-ANDROID-TESTS RESULT: SUCCEEDED" 0 "physical ANDROID_SERIAL online → routes + runs" \
+    -- ANDROID_CMD='[ "$ANDROID_SERIAL" = R58M12345678 ]' ANDROID_SERIAL="R58M12345678" ANDROID_DEVICES_CMD="$EMU_PHYS"
+
+# Single emulator online + no serial + caller ANDROID_CMD → NOT ambiguous, no warning, runs (backward
+# compat: the common one-AVD case is unchanged). Uses ANDROID_CMD=true so nothing drives the emulator.
+out="$(env ANDROID_DEVICES_CMD="$ONE" ANDROID_CMD="true" bash "$RUN" 2>&1)"; rc=$?
+if grep -q "RUN-ANDROID-TESTS RESULT: SUCCEEDED" <<<"$out" && ! grep -q "WARNING:" <<<"$out" && [ "$rc" -eq 0 ]; then
+    echo "ok   — 1 emulator + no serial → not ambiguous, no warning (backward compat)"
+else
+    echo "FAIL — 1 emulator + no serial should run cleanly (rc=$rc): $(grep -E 'RESULT|WARNING' <<<"$out")"; fails=$((fails+1))
+fi
+
 echo
 if [ "$fails" -eq 0 ]; then echo "ALL PASS"; exit 0; else echo "$fails FAILURE(S)"; exit 1; fi

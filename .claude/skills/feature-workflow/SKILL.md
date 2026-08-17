@@ -53,7 +53,8 @@ feature's changed files with `code_paths_platform`
 and **substitute the lane in every gate** (the gates are written iOS-first):
 
 - **Gate 3 test gate**: iOS → `scripts/run-tests.sh`; Android →
-  `scripts/run-android-tests.sh` (never bare `./gradlew` — rule 52 Cause D).
+  `scripts/run-android-tests.sh` (never bare `./gradlew` — rule 52 Cause D;
+  in a lane, with the leased `ANDROID_SERIAL=<serial>` — see Gate 3c).
 - **Gate 5 verify**: iOS → iPhone 17 Pro Sim + `vreader-debug://`; Android →
   `scripts/run-android-verify.sh` (emulator; rule 47 Android tier). Evidence
   `device_or_simulator` = the AVD.
@@ -303,6 +304,16 @@ For each Work Item, run the per-WI inner loop:
 
 ## 3b. RED → GREEN → REFACTOR
 
+**Ultracode within-WI fan-out (rule 57 — when ultracode is ON, do this first).** Before writing the
+RED test, run the two pre-write fan-outs that cost ~zero wall-clock and front-load defect discovery:
+(1) a **parallel context sweep** (`Explore` agents) to gather the files/APIs/prior-art the WI
+touches; (2) a **pre-write adversarial brainstorm** (a `Workflow` fan-out) over the *intended* test —
+"how could this pass while proving nothing?" + the edge-case matrix (empty/nil/max/Unicode-CJK/RTL/
+concurrent/failure-injection). Fold the findings into the RED test you then write **once, solo**.
+This is the same defect class a Gate-4 audit block would otherwise catch *after* the write (rule 57
+origin: feature #138 WI-6). Not applicable inside a `/dispatch` lane (restricted tools — the
+orchestrator front-loads it before dispatch).
+
 Per `.claude/rules/10-tdd.md`:
 1. **RED** — write a failing test that captures the WI's behavior.
    - SwiftData boundary → persistence test with in-memory container
@@ -322,9 +333,11 @@ dependency counts only when the dependency WI's branch has MERGED**) may run
 as dispatch lanes via the `dispatch` skill. Inside a lane, this skill's
 standing steps are OVERRIDDEN: the lane runs ONE WI's 3a–3d (RED → GREEN →
 REFACTOR → in-lane Gate-4 via `scripts/run-codex.sh`) in its worktree on its
-leased `TEST_UDID`, then STOPS with the rule-55 HANDOFF. No PR, no merge, no
-tracker edits, no docs sync, no version bump, no tags — the orchestrator
-owns the integration tail and Gate 5 (verify-sim lease).
+leased device — `TEST_UDID=<udid>` for an iOS/`shared` WI, or
+`ANDROID_SERIAL=<emulator-NNNN>` for an Android WI (the orchestrator leases it
+via `sim-lease.sh acquire android` and passes it in the brief) — then STOPS
+with the rule-55 HANDOFF. No PR, no merge, no tracker edits, no docs sync, no
+version bump, no tags — the orchestrator owns the integration tail and Gate 5.
 
 ## 3c. Test gate
 
@@ -336,15 +349,18 @@ ALWAYS through the watchdog wrapper — never a raw Xcode test invocation
 # one wrapper call per suite:
 scripts/run-tests.sh vreaderTests/<SuiteFromTheWIPlan>
 
-# Android WIs route through the Android wrapper instead (rule 52 Cause D):
-#   scripts/run-android-tests.sh
+# Android WIs route through the Android wrapper instead (rule 52 Cause D),
+# passing the leased emulator serial so the connected task targets it:
+#   ANDROID_SERIAL=<emulator-NNNN> ANDROID_CMD="cd android && ./gradlew :app:connectedDebugAndroidTest -P…=<FQCN>" \
+#     scripts/run-android-tests.sh
 ```
 
 Pass → continue. Fail → fix and retry. 3 failures → stop, report. A
 `RUN-TESTS RESULT: TIMEOUT` is sim contention, not flakiness (rule 52 hard
 rule 3). Full-suite sweeps (`TIMEOUT_SECS=2400 scripts/run-tests.sh
 vreaderTests`) are periodic/CI, never a per-WI gate. In a parallel lane, pass
-the leased sim via `TEST_UDID=<udid>`.
+the leased device via `TEST_UDID=<udid>` (iOS) or `ANDROID_SERIAL=<serial>`
+(Android — `run-android-tests.sh` validates + re-exports it).
 
 > **Note**: `xcodebuild` CLI builds to a different DerivedData than
 > Xcode's Run button. **Never use `simctl uninstall`** — wipes user
